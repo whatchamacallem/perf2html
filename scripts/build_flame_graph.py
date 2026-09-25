@@ -1,46 +1,47 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
-import base64
-import json
-import os
-import sys
+import argparse, base64, json, os, sys
 from typing import NamedTuple
 
-# The script that hands the embedded profile to speedscope once it has
-# loaded -- it polls, because script order is not guaranteed.
-_BOOTSTRAP = """\
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import settings, theme
 
-(function () {
-  var NAME = __NAME__;
-  var DATA = __DATA__;
-  function load() {
-    if (window.speedscope && window.speedscope.loadFileFromBase64) {
-      window.speedscope.loadFileFromBase64(NAME, DATA);
-      return true;
-    }
-    return false;
-  }
-  if (!load()) {
-    var tries = 0, timer = setInterval(function () {
-      if (load() || ++tries >= 200) clearInterval(timer);
-    }, 50);
-  }
-})();
-"""
+# All constants needed from settings.py have to be loaded here before anything
+# else.
+_ASSET_SETTINGS_SCRIPT_NAME: str = ""
+_ASSET_TEMPLATE_FLAME_GRAPH_BOOTSTRAP_NAME: str = ""
+_ASSET_TEMPLATE_FLAME_GRAPH_PAGE_NAME: str = ""
+_ASSET_UI_STRINGS_SCRIPT_NAME: str = ""
+_FLAME_GRAPH_PROFILE_SCRIPT_NAME: str = ""
+_REPORT_ASSETS_DIR_NAME: str = ""
+settings.load_into(__name__)
 
-# What the bootstrap plus its embedded profile gets written as.
-_PROFILE_JS = "profile.js"
+# Hands the embedded profile to speedscope. It polls, because speedscope
+# starts up well after its own script tag has run.
+_BOOTSTRAP = theme.asset_text_read(_ASSET_TEMPLATE_FLAME_GRAPH_BOOTSTRAP_NAME)
+
+# How far a flame graph page sits below the report root, fixing its href to
+# the shared assets. Always <test>/flame-graph/: a diff has no flame graph.
+_FLAME_GRAPH_PAGE_DEPTH = 2
+
+# The page itself: a link and two script tags, the markers substituted.
+_PAGE = theme.asset_text_read(_ASSET_TEMPLATE_FLAME_GRAPH_PAGE_NAME)
 
 
-# BuildFlameGraph - Bakes one recorded profile into a copy of speedscope, so
-# the page opens from file:// with nothing fetched.
+# BuildFlameGraph - Writes one flame graph page: this test's recorded
+# profile, plus links to the report's one shared copy of speedscope.
 class BuildFlameGraph:
-    # FlameGraphArgs - The two paths this tool works on.
+    # FlameGraphArgs - Where the page goes and what it points at.
     class FlameGraphArgs(NamedTuple):
-        # a fresh copy of speedscope's release build, patched in place
-        speedscope_dir: str
+        # the shared bundle's stylesheet, a bare file name
+        app_css: str
+        # relative href from the page to the shared speedscope bundle
+        app_href: str
+        # the shared bundle's engine, a bare file name
+        app_js: str
+        # the per-test directory the page and its profile are written to
+        flame_graph_dir: str
         # the recorded profile to bake into it
         profile_json: str
 
@@ -55,57 +56,77 @@ class BuildFlameGraph:
             "__DATA__", json.dumps(base64.b64encode(raw).decode("ascii"))
         )
         with open(
-            os.path.join(args.speedscope_dir, _PROFILE_JS),
+            os.path.join(
+                args.flame_graph_dir, _FLAME_GRAPH_PROFILE_SCRIPT_NAME
+            ),
             "w",
             encoding="utf-8",
         ) as handle:
             handle.write(script)
 
-    # Write the profile script, then point speedscope's own page at it.
+    # Write the profile script, then the page that loads it beside the
+    # shared bundle.
     def build(self, args: BuildFlameGraph.FlameGraphArgs) -> None:
-        index_html = os.path.join(args.speedscope_dir, "index.html")
-        html = self.page_read(index_html)
         with open(args.profile_json, "rb") as handle:
             raw = handle.read()
         self.bootstrap_write(args, raw)
-        self.page_patch(index_html, html)
+        self.page_write(args)
+        written = os.path.join(
+            args.flame_graph_dir, _FLAME_GRAPH_PROFILE_SCRIPT_NAME
+        )
         print(
-            f"wrote {os.path.join(args.speedscope_dir, _PROFILE_JS)} "
-            f"({len(raw):,} bytes of profile) and patched {index_html}",
+            f"wrote {written} ({len(raw):,} bytes of profile) and its page",
             file=sys.stderr,
         )
 
-    # Put the hash and the profile script ahead of speedscope's first script.
-    def page_patch(self, index_html: str, html: str) -> None:
-        injection = (
-            "<script>if (!location.hash) "
-            "location.hash = '#localProfilePath=profile';</script>\n"
-            f'    <script src="{_PROFILE_JS}"></script>\n    '
+    # Write the page, pointing it at the shared bundle's engine and style.
+    def page_write(self, args: BuildFlameGraph.FlameGraphArgs) -> None:
+        assets_href = theme.shared_href(
+            _FLAME_GRAPH_PAGE_DEPTH, _REPORT_ASSETS_DIR_NAME
         )
+        # overlay first, so a speedscope that never starts shows the failure;
+        # then settings and vocabulary, the bootstrap's bounds and failure id
+        scripts = theme.script_tags(
+            assets_href, theme.page_preamble_scripts()
+        ) + theme.script_tags(
+            assets_href,
+            (_ASSET_SETTINGS_SCRIPT_NAME, _ASSET_UI_STRINGS_SCRIPT_NAME),
+        )
+        # __SCRIPTS__ goes in last, so nothing substituted before it can be
+        # read back out of the text the scripts bring with them
+        html = (
+            _PAGE.replace("__APP_CSS__", f"{args.app_href}/{args.app_css}")
+            .replace("__APP_JS__", f"{args.app_href}/{args.app_js}")
+            .replace("__PROFILE_JS__", _FLAME_GRAPH_PROFILE_SCRIPT_NAME)
+            .replace("__SCRIPTS__", scripts)
+        )
+        index_html = os.path.join(args.flame_graph_dir, "index.html")
         with open(index_html, "w", encoding="utf-8") as handle:
-            handle.write(
-                html.replace('<script src="', injection + '<script src="', 1)
-            )
-
-    # Read speedscope's page, and refuse it if there is nothing to patch.
-    def page_read(self, index_html: str) -> str:
-        with open(index_html, encoding="utf-8") as handle:
-            html = handle.read()
-        if '<script src="' not in html:
-            sys.exit(
-                f"error: {index_html}: no <script src=> to patch the profile "
-                "in before"
-            )
-        return html
+            handle.write(html)
 
 
-# main - Bake the given profile into the given speedscope copy.
+# main - Write the given profile's flame graph page.
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--speedscope-dir",
+        "--app-css",
         required=True,
-        help="a fresh copy of speedscope's dist/release, patched in place",
+        help="the shared bundle's stylesheet, a bare file name",
+    )
+    parser.add_argument(
+        "--app-href",
+        required=True,
+        help="relative href from the page to the shared speedscope bundle",
+    )
+    parser.add_argument(
+        "--app-js",
+        required=True,
+        help="the shared bundle's engine, a bare file name",
+    )
+    parser.add_argument(
+        "--flame-graph-dir",
+        required=True,
+        help="the per-test directory the page is written to",
     )
     parser.add_argument(
         "--profile-json", required=True, help="the .speedscope.json to embed"
@@ -113,7 +134,10 @@ def main() -> None:
     namespace = parser.parse_args()
     BuildFlameGraph().build(
         BuildFlameGraph.FlameGraphArgs(
-            speedscope_dir=namespace.speedscope_dir,
+            app_css=namespace.app_css,
+            app_href=namespace.app_href,
+            app_js=namespace.app_js,
+            flame_graph_dir=namespace.flame_graph_dir,
             profile_json=namespace.profile_json,
         )
     )

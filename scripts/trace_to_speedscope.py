@@ -1,37 +1,43 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
-import json
-import os
-import subprocess
-import sys
-from array import array
-from typing import NamedTuple, NotRequired, TypedDict
+import argparse, array, json, os, subprocess, sys
+from typing import NamedTuple, NotRequired, TextIO, TypedDict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import callgrind
+import callgrind, settings
+
+# All constants needed from settings.py have to be loaded here before anything
+# else.
+_FLAME_GRAPH_EXPORTER_NAME: str = ""
+_FLAME_GRAPH_MAX_RECORDED_CALLS: int = 0
+settings.load_into(__name__)
+
+# The word cyg_callback.c starts a build-id line of the .maps copy with, the
+# recorded half. Its header comment is that format's reference.
+_BUILDID_KEYWORD = "buildid"
+
+# What readelf -n calls the note holding a build-id, the on-disk half of the
+# comparison. Part of readelf's output format, like "LOAD" is.
+_BUILDID_LABEL = "Build ID"
 
 # The high bit cyg.c sets on a timestamp to mark a function exit.
-_EXIT_BIT = 1 << 63
+_FUNCTION_EXIT_BIT = 1 << 63
+
+# The schema the written document declares. A format fact, not a setting:
+# another value names a schema speedscope does not know and is rejected.
+_FLAME_GRAPH_FILE_FORMAT_SCHEMA_URL = (
+    "https://www.speedscope.app/file-format-schema.json"
+)
 
 # How many 64-bit words the trace file's header takes.
 _HEADER_WORDS = 8
 
-# "CYG2" -- the first word of a trace cyg.c wrote.
-_MAGIC = 0x32475943
-
-# Size budget for the written document, so the page stays quick to open.
-_MAX_BYTES = 204800
-
-# The most complete calls to keep, before the byte budget trims further.
-_MAX_CALLS = 200
+# The first word of a trace cyg_callback.c wrote, its CYG_CALLBACKS_MAGIC.
+_HEADER_MAGIC = 0xABCDEF0123456789
 
 # How many 64-bit words one recorded event takes: the function, then the stamp.
 _RECORD_WORDS = 2
-
-# The format the written document declares itself to be.
-_SCHEMA = "https://www.speedscope.app/file-format-schema.json"
 
 
 # Event - One enter or exit, as speedscope's evented format spells it.
@@ -90,7 +96,7 @@ SpeedscopeDoc = TypedDict(
 
 
 # TraceToSpeedscope - Turns one rdtsc trace into a speedscope document,
-# keeping the busiest run's first few complete calls.
+# keeping the busiest run's first _FLAME_GRAPH_MAX_RECORDED_CALLS calls.
 class TraceToSpeedscope:
     # CallSpan - One top-level call, as a span of record numbers.
     class CallSpan(NamedTuple):
@@ -123,7 +129,7 @@ class TraceToSpeedscope:
 
     # TraceArgs - What this tool reads and what it writes.
     class TraceArgs(NamedTuple):
-        # the .bin cyg.c wrote; its .maps sits beside it
+        # the .bin cyg.c wrote, with its .maps beside it
         trace_file: str
         # where the speedscope document goes
         output: str
@@ -145,6 +151,51 @@ class TraceToSpeedscope:
         # the timestamp of each kept event, exit bit included
         stamps: list[int]
 
+    # The build-id of each object as it is on disk now, read straight out of
+    # its NT_GNU_BUILD_ID note -- the other half of what the trace recorded.
+    def buildid_read(self, path: str) -> str:
+        listing = subprocess.run(
+            ["readelf", "-n", path],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        for line in listing.splitlines():
+            label, separator, value = line.partition(":")
+            if separator and label.strip() == _BUILDID_LABEL:
+                return value.strip().lower()
+        return ""
+
+    # Refuse an object the trace was not recorded against: a stale trace
+    # resolves to whatever now sits there, a plausible graph that is fiction.
+    def buildid_verify(
+        self, maps_file: str, recorded: dict[str, str], path: str
+    ) -> None:
+        want = recorded.get(path)
+        if want is None:
+            sys.exit(
+                f"error: {maps_file} records no build-id for {path}, so the"
+                " trace cannot be shown to have come from the build on disk"
+            )
+        found = self.buildid_read(path)
+        if found != want:
+            sys.exit(
+                f"error: {path} was rebuilt since the trace was recorded:"
+                f" it now has build-id {found or '(none)'}, the trace was"
+                f" recorded against {want}. Re-record the trace"
+            )
+
+    # Every build-id the traced process wrote beside its mappings, by the
+    # object path it named.
+    def buildids_read(self, maps_file: str) -> dict[str, str]:
+        out: dict[str, str] = {}
+        with self.text_open(maps_file) as handle:
+            for line in handle:
+                fields = line.split(None, 2)
+                if len(fields) == 3 and fields[0] == _BUILDID_KEYWORD:
+                    out[fields[2].strip()] = fields[1].lower()
+        return out
+
     # Pair enters with exits and hand back the busiest run's top-level calls.
     def calls(
         self, trace: TraceToSpeedscope.TraceRecording
@@ -152,7 +203,7 @@ class TraceToSpeedscope:
         runs: list[list[TraceToSpeedscope.CallSpan]] = [[]]
         open_records: list[int] = []
         for record, function in enumerate(trace.functions):
-            if not trace.stamps[record] & _EXIT_BIT:
+            if not trace.stamps[record] & _FUNCTION_EXIT_BIT:
                 open_records.append(record)
             elif not open_records:
                 runs.append([])
@@ -185,11 +236,12 @@ class TraceToSpeedscope:
             stamp = trace.stamps[record]
             frame = order.setdefault(trace.functions[record], len(order))
             at = round(
-                ((stamp & ~_EXIT_BIT) - trace.origin_tsc) / trace.tsc_per_ns
+                ((stamp & ~_FUNCTION_EXIT_BIT) - trace.origin_tsc)
+                / trace.tsc_per_ns
             )
             events.append(
                 {
-                    "type": "C" if stamp & _EXIT_BIT else "O",
+                    "type": "C" if stamp & _FUNCTION_EXIT_BIT else "O",
                     "frame": frame,
                     "at": at,
                 }
@@ -200,7 +252,7 @@ class TraceToSpeedscope:
             f"..{trace.skip + last + 1:,} of {trace.seen:,}"
         )
         return {
-            "$schema": _SCHEMA,
+            "$schema": _FLAME_GRAPH_FILE_FORMAT_SCHEMA_URL,
             "shared": {"frames": [frames[function] for function in order]},
             "profiles": [
                 {
@@ -213,14 +265,16 @@ class TraceToSpeedscope:
                 }
             ],
             "name": name,
-            "exporter": "dev/scripts/trace_to_speedscope.py",
+            "exporter": _FLAME_GRAPH_EXPORTER_NAME,
         }
 
     # Name every traced address, by asking addr2line once per object file.
     def frames(
         self, trace_file: str, functions: list[int]
     ) -> dict[int, Frame]:
-        mappings = self.mappings_read(trace_file + ".maps")
+        maps_file = trace_file + ".maps"
+        mappings = self.mappings_read(maps_file)
+        recorded = self.buildids_read(maps_file)
         segments: dict[str, list[TraceToSpeedscope.LoadSegment]] = {}
         by_object: dict[str, dict[int, int]] = {}
         for function in functions:
@@ -230,9 +284,10 @@ class TraceToSpeedscope:
             if mapping is None:
                 sys.exit(
                     f"error: {function:#x} is in no executable mapping of "
-                    f"{trace_file}.maps"
+                    f"{maps_file}"
                 )
             if mapping.path not in segments:
+                self.buildid_verify(maps_file, recorded, mapping.path)
                 segments[mapping.path] = self.segments_read(mapping.path)
             by_object.setdefault(mapping.path, {})[function] = (
                 self.virtual_address(mapping, segments[mapping.path], function)
@@ -261,13 +316,28 @@ class TraceToSpeedscope:
                 frames[address] = frame
         return frames
 
-    # Read one trace file, and refuse anything that is not one.
+    # Read one trace file, and refuse anything that is not one. A trace the
+    # traced run never finished writing is a stopped run, not a traceback.
     def load(self, trace_file: str) -> TraceToSpeedscope.TraceRecording:
-        words = array("Q")
-        with open(trace_file, "rb") as handle:
-            words.frombytes(handle.read())
-        if len(words) < _HEADER_WORDS or words[0] != _MAGIC:
-            sys.exit(f"error: {trace_file}: not a dev/cyg_callback.c trace")
+        words = array.array("Q")
+        try:
+            with open(trace_file, "rb") as handle:
+                raw = handle.read()
+        except OSError as error:
+            sys.exit(
+                f"error: {trace_file}: {error.strerror or error}: the trace"
+                " cyg_callback.c writes at exit. Check the traced run's own"
+                " output for the error it printed"
+            )
+        if len(raw) % words.itemsize:
+            sys.exit(
+                f"error: {trace_file}: {len(raw):,} bytes is not a whole"
+                f" number of {words.itemsize}-byte words, so the traced run"
+                " was cut off while writing it"
+            )
+        words.frombytes(raw)
+        if len(words) < _HEADER_WORDS or words[0] != _HEADER_MAGIC:
+            sys.exit(f"error: {trace_file}: not a cyg_callback.c trace")
         _, kept, seen, skip, t0_ns, t0_tsc, t1_ns, t1_tsc = words[
             :_HEADER_WORDS
         ]
@@ -291,7 +361,7 @@ class TraceToSpeedscope:
         self, maps_file: str
     ) -> list[TraceToSpeedscope.ExecutableMapping]:
         mappings: list[TraceToSpeedscope.ExecutableMapping] = []
-        with open(maps_file, encoding="utf-8") as handle:
+        with self.text_open(maps_file) as handle:
             for line in handle:
                 fields = line.split(None, 5)
                 if (
@@ -310,7 +380,8 @@ class TraceToSpeedscope:
                     )
         return mappings
 
-    # Read a trace and write the biggest document that fits the byte budget.
+    # Read a trace and write the document for its first
+    # _FLAME_GRAPH_MAX_RECORDED_CALLS calls.
     def run(self, args: TraceToSpeedscope.TraceArgs) -> None:
         trace = self.load(args.trace_file)
         print(
@@ -319,7 +390,7 @@ class TraceToSpeedscope:
             f" {trace.tsc_per_ns:.6f} tsc/ns",
             file=sys.stderr,
         )
-        calls = self.calls(trace)[:_MAX_CALLS]
+        calls = self.calls(trace)[:_FLAME_GRAPH_MAX_RECORDED_CALLS]
         if not calls:
             sys.exit(
                 f"error: {args.trace_file}: no call both starts and ends"
@@ -334,24 +405,16 @@ class TraceToSpeedscope:
                 }
             ),
         )
-        text = ""
-        for count in range(1, len(calls) + 1):
-            longer = json.dumps(
-                self.document(trace, calls[:count], frames, args.name),
-                separators=(",", ":"),
-            )
-            if text and len(longer) > _MAX_BYTES:
-                break
-            text = longer
-        if len(text) > _MAX_BYTES:
-            print(
-                f"warning: one call alone is {len(text):,} bytes, over the "
-                f"{_MAX_BYTES:,} budget",
-                file=sys.stderr,
-            )
+        document = self.document(trace, calls, frames, args.name)
+        text = json.dumps(document, separators=(",", ":"))
         with open(args.output, "w", encoding="utf-8") as handle:
             handle.write(text)
-        print(f"wrote {args.output} ({len(text):,} bytes)", file=sys.stderr)
+        profile = document["profiles"][0]
+        print(
+            f"wrote {args.output} ({len(text):,} bytes, {len(calls):,} calls,"
+            f" {profile['endValue'] - profile['startValue']:,} ns)",
+            file=sys.stderr,
+        )
 
     # How many events the run counted, without writing anything.
     def seen(self, trace_file: str) -> int:
@@ -378,6 +441,17 @@ class TraceToSpeedscope:
                 )
         return segments
 
+    # Open one of the trace's own text sidecars, naming the file and what
+    # went wrong rather than raising through to a bare traceback.
+    def text_open(self, path: str) -> TextIO:
+        try:
+            return open(path, encoding="utf-8")
+        except OSError as error:
+            sys.exit(
+                f"error: {path}: {error.strerror or error}: cyg_callback.c"
+                " writes it beside the trace at exit"
+            )
+
     # Undo the load address, so addr2line sees the address it has debug info
     # for.
     def virtual_address(
@@ -401,7 +475,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "trace_file",
-        help="a dev/cyg_callback.c trace; its .maps file sits beside it",
+        help="a cyg_callback.c trace. its .maps file sits beside it",
     )
     parser.add_argument(
         "-o", "--output", default="", help="output .speedscope.json path"

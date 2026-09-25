@@ -1,36 +1,24 @@
 from __future__ import annotations
 
-import os
-import posixpath
-import re
-import sys
-from collections import defaultdict
+import collections, dataclasses, os, posixpath, re, sys
 from collections.abc import Sequence
-from dataclasses import dataclass, field
 from typing import Literal, NamedTuple, TypeAlias, TypeVar
 
-# One cost number per event, in the order the file's "events:" line names them.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import settings
+
+# All constants needed from settings.py have to be loaded here before anything
+# else.
+_DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {}
+settings.load_into(__name__)
+
+# One cost number per counter, in the order the file's "events:" line names
+# them. That line is callgrind's own wire format and keeps its spelling.
 Costs: TypeAlias = list[int]
 # Where a source file came from, deciding whether the heat map shows it.
 Group = Literal["repo", "system", "external"]
+# The key type of whichever table a shared accumulate helper is given.
 _Key = TypeVar("_Key")
-
-# What callgrind's terse event abbreviations mean, spelled out for tooltips.
-_EVENT_LONG: dict[str, str] = {
-    "Bc": "conditional branches executed",
-    "Bcm": "conditional branches mispredicted",
-    "Bi": "indirect branches executed",
-    "Bim": "indirect branches mispredicted",
-    "D1mr": "L1 data cache read misses",
-    "D1mw": "L1 data cache write misses",
-    "DLmr": "LL (last-level) data read misses",
-    "DLmw": "LL (last-level) data write misses",
-    "Dr": "data reads",
-    "Dw": "data writes",
-    "I1mr": "L1 instruction cache misses",
-    "ILmr": "LL (last-level) instruction cache misses",
-    "Ir": "instructions executed",
-}
 
 # The curl checkout, three levels up from here -- every path is
 # reported relative to it.
@@ -59,16 +47,6 @@ class CallSite(NamedTuple):
     callee: str
 
 
-# DerivedEvent - An event callgrind never records, added up from ones it does.
-class DerivedEvent(NamedTuple):
-    # what to call it, e.g. CEst
-    name: str
-    # the recorded events to add up, with weights
-    terms: tuple[Term, ...]
-    # the spelled-out version, for tooltips
-    long: str
-
-
 # PathInfo - One source path, resolved three ways at once.
 class PathInfo(NamedTuple):
     # repo-relative, safe to print into a page
@@ -81,75 +59,77 @@ class PathInfo(NamedTuple):
 
 # Profile - Everything one callgrind run measured, indexed every way
 # the pages ask for.
-@dataclass
+@dataclasses.dataclass
 class Profile:
-    # the recorded events, in cost-vector order
-    events: list[str] = field(default_factory=list)
-    # each event spelled out, for tooltips
-    event_long: dict[str, str] = field(default_factory=dict)
-    # what a cost line's leading columns mean
-    positions: list[str] = field(default_factory=lambda: ["line"])
+    # the recorded counters, in cost-vector order
+    counters: list[str] = dataclasses.field(default_factory=list)
     # the profiled command line
     command: str = ""
     # callgrind's own total -- the self-check divides by it
-    summary: list[int] = field(default_factory=list)
+    summary: list[int] = dataclasses.field(default_factory=list)
     # cost spent on the line itself
-    line_self: dict[SourceLine, Costs] = field(default_factory=dict)
+    line_self: dict[SourceLine, Costs] = dataclasses.field(
+        default_factory=dict
+    )
     # cost spent below the calls made from it
-    line_calls: dict[SourceLine, Costs] = field(default_factory=dict)
+    line_calls: dict[SourceLine, Costs] = dataclasses.field(
+        default_factory=dict
+    )
     # how many calls the line made
-    line_call_count: defaultdict[SourceLine, int] = field(
-        default_factory=lambda: defaultdict(int)
+    line_call_count: collections.defaultdict[SourceLine, int] = (
+        dataclasses.field(default_factory=lambda: collections.defaultdict(int))
     )
     # which function owns the line
-    line_function: dict[SourceLine, str] = field(default_factory=dict)
+    line_function: dict[SourceLine, str] = dataclasses.field(
+        default_factory=dict
+    )
     # the file a function is declared in
-    function_home: dict[str, str] = field(default_factory=dict)
+    function_home: dict[str, str] = dataclasses.field(default_factory=dict)
     # cost in the function itself, not in what it calls
-    function_self: dict[str, Costs] = field(default_factory=dict)
+    function_self: dict[str, Costs] = dataclasses.field(default_factory=dict)
     # per (function, line) cost -- the only per-context table, and
     # what a diff subtracts
-    function_lines: defaultdict[str, dict[SourceLine, Costs]] = field(
-        default_factory=lambda: defaultdict(dict)
+    function_lines: collections.defaultdict[str, dict[SourceLine, Costs]] = (
+        dataclasses.field(
+            default_factory=lambda: collections.defaultdict(dict)
+        )
     )
     # cost below everything the function calls
-    function_calls: dict[str, Costs] = field(default_factory=dict)
+    function_calls: dict[str, Costs] = dataclasses.field(default_factory=dict)
     # the line to jump to when opening a function
-    function_entry: dict[str, SourceLine] = field(default_factory=dict)
+    function_entry: dict[str, SourceLine] = dataclasses.field(
+        default_factory=dict
+    )
     # per call site, how many calls and what they cost
-    callees: dict[CallSite, Tally] = field(default_factory=dict)
+    callees: dict[CallSite, Tally] = dataclasses.field(default_factory=dict)
     # the same the other way round: per callee, who called it
-    callers: defaultdict[str, dict[Caller, Tally]] = field(
-        default_factory=lambda: defaultdict(dict)
+    callers: collections.defaultdict[str, dict[Caller, Tally]] = (
+        dataclasses.field(
+            default_factory=lambda: collections.defaultdict(dict)
+        )
     )
     # the binary each file was compiled into
-    file_ob: dict[str, str] = field(default_factory=dict)
+    file_ob: dict[str, str] = dataclasses.field(default_factory=dict)
 
-    # Every event a page may show: recorded first, then the ones we add up.
-    def event_names(self) -> list[str]:
-        return list(self.events) + [
-            derived_event.name
-            for derived_event in self.resolved_derived_events()
+    # Every counter a page may show: recorded first, then the ones we add up.
+    def counter_names(self) -> list[str]:
+        return list(self.counters) + [
+            derived.name for derived in self.resolved_derived_counters()
         ]
 
-    # The derived events this run can supply, with names swapped for
-    # cost-vector indexes.
-    def resolved_derived_events(self) -> list[ResolvedDerivedEvent]:
+    # The derived counters this run can supply, each input counter's name
+    # swapped for its slot. Walked straight off DERIVED_COUNTER_TERMS.
+    def resolved_derived_counters(self) -> list[ResolvedDerivedCounter]:
         return [
-            ResolvedDerivedEvent(
-                derived_event.name,
+            ResolvedDerivedCounter(
+                name,
                 tuple(
-                    ResolvedTerm(
-                        term.coefficient, self.events.index(term.event_name)
-                    )
-                    for term in derived_event.terms
+                    ResolvedTerm(coefficient, self.counters.index(input_name))
+                    for input_name, coefficient in terms.items()
                 ),
-                derived_event.long,
             )
-            for derived_event in _DERIVED_DEFAULTS
-            if all(
-                term.event_name in self.events for term in derived_event.terms
-            )
+            for name, terms in _DERIVED_COUNTER_TERMS.items()
+            if all(input_name in self.counters for input_name in terms)
         ]
 
     # The whole run's cost: callgrind's own summary, or every line
@@ -162,38 +142,36 @@ class Profile:
             costs_add(total, costs)
         return total
 
-    # Pull one named event out of a cost vector, recorded or derived.
+    # Pull one named counter out of a cost vector, recorded or derived.
     def value(self, costs: Costs, name: str) -> int:
-        if name in self.events:
-            event_index = self.events.index(name)
-            return costs[event_index] if event_index < len(costs) else 0
-        for derived_event in self.resolved_derived_events():
-            if derived_event.name == name:
+        if name in self.counters:
+            slot = self.counters.index(name)
+            return costs[slot] if slot < len(costs) else 0
+        for derived in self.resolved_derived_counters():
+            if derived.name == name:
                 return sum(
                     term.coefficient
                     * (
-                        costs[term.event_index]
-                        if term.event_index < len(costs)
+                        costs[term.counter_index]
+                        if term.counter_index < len(costs)
                         else 0
                     )
-                    for term in derived_event.terms
+                    for term in derived.terms
                 )
         raise KeyError(name)
 
     # An all-zero cost vector of the right width for this profile.
     def zeros(self) -> Costs:
-        return [0] * len(self.events)
+        return [0] * len(self.counters)
 
 
-# ResolvedDerivedEvent - A DerivedEvent whose terms now point at
-# cost-vector slots, ready to sum.
-class ResolvedDerivedEvent(NamedTuple):
+# ResolvedDerivedCounter - One derived counter whose input names have been
+# swapped for the cost-vector slots holding them, ready to sum.
+class ResolvedDerivedCounter(NamedTuple):
     # what to call it
     name: str
     # the slots to add up, with weights
     terms: tuple[ResolvedTerm, ...]
-    # the spelled-out version
-    long: str
 
 
 # ResolvedTerm - One weighted slot of a cost vector.
@@ -201,7 +179,7 @@ class ResolvedTerm(NamedTuple):
     # what to multiply it by
     coefficient: int
     # which slot of the cost vector
-    event_index: int
+    counter_index: int
 
 
 # SourceLine - One line of one file -- the key most tables here are keyed by.
@@ -213,7 +191,7 @@ class SourceLine(NamedTuple):
 
 
 # Tally - A cost plus how many calls produced it.
-@dataclass
+@dataclasses.dataclass
 class Tally:
     # how many calls
     count: int
@@ -221,65 +199,16 @@ class Tally:
     costs: Costs
 
 
-# Term - One weighted event, named before we know its slot.
-class Term(NamedTuple):
-    # what to multiply it by
-    coefficient: int
-    # which recorded event
-    event_name: str
-
-
-# The derived events we offer whenever the run recorded everything they need.
-_DERIVED_DEFAULTS: tuple[DerivedEvent, ...] = (
-    DerivedEvent(
-        "D1m",
-        (Term(1, "D1mr"), Term(1, "D1mw")),
-        "L1 data cache misses (D1mr + D1mw)",
-    ),
-    DerivedEvent(
-        "DLm",
-        (Term(1, "DLmr"), Term(1, "DLmw")),
-        "LL data cache misses (DLmr + DLmw)",
-    ),
-    DerivedEvent(
-        "L1m",
-        (Term(1, "I1mr"), Term(1, "D1mr"), Term(1, "D1mw")),
-        "L1 misses, all (I1mr + D1mr + D1mw)",
-    ),
-    DerivedEvent(
-        "LLm",
-        (Term(1, "ILmr"), Term(1, "DLmr"), Term(1, "DLmw")),
-        "LL misses, all (ILmr + DLmr + DLmw)",
-    ),
-    DerivedEvent(
-        "Bm",
-        (Term(1, "Bcm"), Term(1, "Bim")),
-        "branch mispredicts, all (Bcm + Bim)",
-    ),
-    DerivedEvent(
-        "CEst",
-        (
-            Term(1, "Ir"),
-            Term(10, "I1mr"),
-            Term(10, "D1mr"),
-            Term(10, "D1mw"),
-            Term(100, "ILmr"),
-            Term(100, "DLmr"),
-            Term(100, "DLmw"),
-        ),
-        "cycle estimate (Ir + 10 L1m + 100 LLm)",
-    ),
-)
-
-
 # Callgrind - Reads callgrind's output format into a Profile, and
 # resolves the paths in it.
 class Callgrind:
+    # matches a "(7)" name reference, with the name when it is spelled out
     NAME_COMPRESSION_RE = re.compile(r"^\((\d+)\)(?: (.*))?$")
 
     # CompressedNames - Callgrind writes "(7) name" once, then just
     # "(7)" -- this remembers which is which.
     class CompressedNames:
+        # Start with no names learned, one table per name kind.
         def __init__(self) -> None:
             self.names: dict[str, dict[str, str]] = {
                 "fl": {},
@@ -287,8 +216,8 @@ class Callgrind:
                 "ob": {},
             }
 
-        # Expand one "(7)" back to its name, learning the name when
-        # this is where it is spelled out.
+        # Expand one "(7)" back to its name, learning it where spelled out.
+        # A miss is a dropped line: "(7)" would reach a page as the name.
         def uncompress(self, kind: str, value: str) -> str:
             match = Callgrind.NAME_COMPRESSION_RE.match(value)
             if not match:
@@ -297,7 +226,13 @@ class Callgrind:
             if name is not None:
                 self.names[kind][ident] = name
                 return name
-            return self.names[kind].get(ident, f"({ident})")
+            known = self.names[kind].get(ident)
+            if known is None:
+                sys.exit(
+                    f"error: {kind}=({ident}) refers to a name this file"
+                    " never spelled out"
+                )
+            return known
 
     # PendingCall - A "calls=" line, waiting for the cost line that follows it.
     class PendingCall(NamedTuple):
@@ -309,6 +244,7 @@ class Callgrind:
     # PositionDecoder - Cost lines give positions relative to the last
     # one -- this tracks the running value.
     class PositionDecoder:
+        # Start on the one-column "line" positions callgrind defaults to.
         def __init__(self) -> None:
             self.count = 1
             self.line_index = 0
@@ -345,6 +281,22 @@ class Callgrind:
                 )
             return self.previous[self.line_index]
 
+    # How one line's baseline slot is spelled, everywhere it is written
+    # and everywhere it is read back.
+    def baseline_line_key(
+        self, function: str, display: str, line: int | str
+    ) -> str:
+        return f"{function}\n{display}\n{line}"
+
+    # How a path prints on a page: an external file carries its owning object,
+    # so same-named headers stay apart. Both sides of a baseline key use it.
+    def display_path_of(self, path: str, object_path: str) -> str:
+        info = self.path_norm(path)
+        if info.group != "external":
+            return info.display
+        owner = os.path.basename(object_path) or "(unknown object)"
+        return f"{owner}/{info.display}"
+
     # Give every still-unplaced function an entry line, so the pages
     # can link to it.
     def entries_fill(self, profile: Profile) -> None:
@@ -358,13 +310,6 @@ class Callgrind:
             if line:
                 profile.function_entry[function] = SourceLine(home, line)
 
-    # Spell out every event name, recorded and derived, for the tooltips.
-    def labels_fill(self, profile: Profile) -> None:
-        for name in profile.events:
-            profile.event_long[name] = _EVENT_LONG.get(name, "")
-        for derived_event in profile.resolved_derived_events():
-            profile.event_long[derived_event.name] = derived_event.long
-
     # Read every given file and merge them into one profile.
     def load(self, paths: Sequence[str]) -> Profile:
         return self.merge([self.load_one(path) for path in paths])
@@ -374,7 +319,7 @@ class Callgrind:
     def load_one(self, path: str) -> Profile:
         with open(path, encoding="utf-8", errors="replace") as handle:
             profile = self.parse(handle.read())
-        if not profile.events:
+        if not profile.counters:
             sys.exit(
                 f"error: no 'events:' line -- not a callgrind file? ({path})"
             )
@@ -394,22 +339,18 @@ class Callgrind:
             )
         return profile
 
-    # Add several profiles of the same events together.
+    # Add several profiles of the same counters together.
     def merge(self, profiles: Sequence[Profile]) -> Profile:
         if len(profiles) == 1:
             return profiles[0]
         first = profiles[0]
         for other in profiles[1:]:
-            if other.events != first.events:
+            if other.counters != first.counters:
                 sys.exit(
-                    "error: cannot merge profiles with different events:"
-                    f" {first.events} vs {other.events}"
+                    "error: cannot merge profiles with different counters:"
+                    f" {first.counters} vs {other.counters}"
                 )
-        merged = Profile(
-            events=list(first.events),
-            event_long=dict(first.event_long),
-            positions=list(first.positions),
-        )
+        merged = Profile(counters=list(first.counters))
         merged.command = self.merge_command(profiles)
         if all(other.summary for other in profiles):
             merged.summary = [
@@ -423,7 +364,6 @@ class Callgrind:
             ]
         for other in profiles:
             self.merge_one(merged, other)
-        self.labels_fill(merged)
         return merged
 
     # One command line standing for all of them, sharing the program
@@ -478,7 +418,7 @@ class Callgrind:
         names = Callgrind.CompressedNames()
         positions = Callgrind.PositionDecoder()
 
-        event_count = 0
+        counter_count = 0
         cur_file = "???"
         cur_function = "???"
         cur_ob = "???"
@@ -495,8 +435,8 @@ class Callgrind:
                 tokens = raw_line.split()
                 line = positions.step(tokens)
                 costs = [int(token) for token in tokens[positions.count :]]
-                if len(costs) < event_count:
-                    costs.extend([0] * (event_count - len(costs)))
+                if len(costs) < counter_count:
+                    costs.extend([0] * (counter_count - len(costs)))
                 key = SourceLine(cur_file, line)
                 if pending_call is not None:
                     callee = cur_callee_function or "???"
@@ -569,6 +509,10 @@ class Callgrind:
                     cur_callee_file = names.uncompress("fl", val)
                 elif key == "cfn":
                     cur_callee_function = names.uncompress("fn", val)
+                elif key in ("jfi", "jfn"):
+                    # --collect-jumps names a jump target in the fl/fn name
+                    # spaces: learned, but neither current name moves.
+                    names.uncompress("fl" if key == "jfi" else "fn", val)
                 elif key == "calls":
                     parts = val.split()
                     target_line = (
@@ -590,11 +534,10 @@ class Callgrind:
                 raw_line[colon_index + 1 :].strip(),
             )
             if key == "events":
-                profile.events = val.split()
-                event_count = len(profile.events)
+                profile.counters = val.split()
+                counter_count = len(profile.counters)
             elif key == "positions":
-                profile.positions = val.split()
-                positions.reset(profile.positions)
+                positions.reset(val.split())
             elif key == "cmd":
                 profile.command = val
             elif key in ("summary", "totals"):
@@ -602,7 +545,6 @@ class Callgrind:
                 if len(values) >= len(profile.summary):
                     profile.summary = values
 
-        self.labels_fill(profile)
         self.entries_fill(profile)
         return profile
 
@@ -630,6 +572,11 @@ class Callgrind:
         return PathInfo(posixpath.normpath(path), None, "external")
 
 
+# How one line's baseline slot is spelled, on both sides of the diff.
+def baseline_line_key(function: str, display: str, line: int | str) -> str:
+    return Callgrind().baseline_line_key(function, display, line)
+
+
 # Add a cost vector into a table, starting a fresh entry when the key is new.
 def costs_accumulate(
     table: dict[_Key, Costs], key: _Key, costs: Costs
@@ -647,6 +594,24 @@ def costs_add(dst: Costs, src: Costs) -> None:
         dst[index] += value
 
 
+# Every counter a vector written against these recorded ones can supply:
+# the recorded ones, then the derived ones they add up to.
+def counter_names(counters: Sequence[str]) -> list[str]:
+    return Profile(counters=list(counters)).counter_names()
+
+
+# Pull one named counter out of a stored cost vector -- the one door a
+# derived counter is computed through outside a live Profile.
+def counter_value(counters: Sequence[str], costs: Costs, name: str) -> int:
+    return Profile(counters=list(counters)).value(costs, name)
+
+
+# How a path is printed on a page, an external file qualified by the
+# object owning it.
+def display_path_of(path: str, object_path: str) -> str:
+    return Callgrind().display_path_of(path, object_path)
+
+
 # Work out how to print a path, whether we can still read it, and
 # where it came from.
 def path_norm(path: str) -> PathInfo:
@@ -656,16 +621,6 @@ def path_norm(path: str) -> PathInfo:
 # Read callgrind files into one profile, refusing any that do not add up.
 def profile_load(paths: Sequence[str]) -> Profile:
     return Callgrind().load(paths)
-
-
-# Add several profiles of the same events together.
-def profile_merge(profiles: Sequence[Profile]) -> Profile:
-    return Callgrind().merge(profiles)
-
-
-# Parse callgrind-format text that is already in hand.
-def profile_parse(text: str) -> Profile:
-    return Callgrind().parse(text)
 
 
 # Add a call count and its cost into a table, starting a fresh entry
