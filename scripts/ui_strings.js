@@ -25,8 +25,11 @@ window.ui_strings = (function () {
     str_column_share_of_total: "% of total",
     str_column_source: "source",
     str_control_counter: "counter:",
+    str_control_files: "files:",
+    str_control_functions: "functions:",
     str_control_scale: "scale:",
     str_control_search: "search:",
+    str_control_tests: "tests:",
     str_control_view_scale: "scale:",
     str_control_tree: "tree:",
     str_counter_bc: "conditional branches executed",
@@ -51,43 +54,26 @@ window.ui_strings = (function () {
     str_detail_close: "close",
     str_detail_close_symbol: "[X]",
     str_detail_copy: "copy",
-    str_error_callstack_unavailable: "(no callstack recorded)",
-    str_error_column_frame: "frame",
-    str_error_column_label: "label",
-    str_error_column_location: "location",
-    str_error_column_value: "value",
-    str_error_control_copy: "copy",
-    str_error_control_reload: "reload",
-    str_error_control_restart: "restart",
-    str_error_counter_unknown: "this report has no column for counter {0}",
     str_error_flame_graph_never_started:
       "flame graph viewer did not start within {0}s",
-    str_error_font_refused:
-      "the browser refused the page font",
+    str_error_font_refused: "the browser refused the page font",
     str_error_hash_counter_unknown:
       "url encodes counter this report has no column for: {0}",
     str_error_hash_file_unknown:
-      "url encodes a file this report has no source for: {0}",
+      "url encodes a file this report never profiled: {0}",
     str_error_hash_function_unknown:
       "url encodes a function address this report never recorded: {0}",
     str_error_hash_part_unknown: "url part unrecognized: {0}",
     str_error_hash_view_unknown:
       "url encodes a view this report does not have: {0}",
-    str_error_heading_address: "address",
-    str_error_heading_callstack: "callstack",
-    str_error_heading_manifest: "manifest",
-    str_error_manifest_unavailable: "MANIFEST.txt not found",
-    str_error_page_heading: "perf2html error",
-    str_error_page_title: "perf2html error page",
-    str_error_scale_ends_disordered:
-      "DESIGN_SCALE_* out of order: smallest {0}, default {1}, largest {2}",
-    str_error_scale_multiple_outside: "scale multiple {0} is outside {1}..{2}",
+    str_error_message_tag_unknown: "cross-frame message tag unrecognized: {0}",
+    str_error_pulldown_focus_refused:
+      "the browser kept focus on {0}, so keys cannot reach the pulldown",
+    str_error_pulldown_names_missing:
+      "no file and function names were shipped for test {0}",
+    str_error_report_incomplete:
+      "report incomplete, MANIFEST.txt not written.",
     str_error_scale_unusable: "the page scale came out as {0}",
-    str_error_source_address: "bad address",
-    str_error_source_exception: "uncaught exception",
-    str_error_source_rejection: "internal error",
-    str_error_test_menu_focus_refused:
-      "the browser kept focus on {0}, so keys cannot reach the test menu",
     str_function_name_unknown: "?",
     str_heading_functions_by_self: "{prefix} functions by self {counter}",
     str_heading_lines_by_counter: "{prefix} lines by {counter}",
@@ -115,9 +101,7 @@ window.ui_strings = (function () {
     str_share_zero: "0%",
     str_sort_by_heat: "by heat",
     str_sort_by_name: "by name",
-    str_source_beyond_end:
-      "(line beyond end of file: source changed since the profile was" +
-      " taken)",
+    str_source_beyond_end: "error: Line beyond end of file, source changed.",
     str_source_unavailable: "Source not available.",
     str_view_summary: "summary",
   };
@@ -135,18 +119,5 @@ window.ui_strings = (function () {
     }
     return STRINGS[string_id];
   }
-  function text_over_args(string_id, args) {
-    const template = text_of(string_id);
-    let every_marker_filled = true;
-    const filled = template.replace(/\{(\d+)\}/g, (marker, index_text) => {
-      const index = Number(index_text);
-      if (index >= args.length) {
-        every_marker_filled = false;
-        return marker;
-      }
-      return String(args[index]);
-    });
-    return every_marker_filled ? filled : null;
-  }
-  return { text_fill, text_of, text_over_args };
+  return { text_fill, text_of };
 })();

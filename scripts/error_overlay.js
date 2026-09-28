@@ -1,385 +1,183 @@
 window.report_error_overlay = (function () {
   "use strict";
 
-  const OVERLAY_ROOT_ID = "reportErrorOverlay";
   const OVERLAY_MESSAGE_NAME = "report_error";
-  const REPORT_MANIFEST_GLOBAL_NAME = "report_manifest";
+  const REPORT_MANIFEST_TABLE_GLOBAL_NAME = "report_manifest_table";
   const OVERLAY_BACKGROUND_COLOR = "#14171c";
   const OVERLAY_TEXT_COLOR = "#f2f4f6";
   const OVERLAY_LINK_COLOR = "#ff4427";
-  const OVERLAY_FONT = "12px/1.5 Monaco, monospace";
-  const OVERLAY_PADDING = "24px 36px 48px";
-  const ROOT_INDEX_NAME = "index.html";
-  const CONTROL_GAP = "18px";
-  const OVERLAY_TABLE_TOTAL_CHARS = 120;
+  const OVERLAY_COPY_LINK_TEXT = "copy";
+  const OVERLAY_BACK_LINK_TEXT = "back";
+  const OVERLAY_NO_MANIFEST_TEXT = "Report has no manifest";
+  const DESIGN_COORDINATES_WIDTH_PX = 1920;
+  const DESIGN_FONT_SIZE_PX = 16;
+  const CALLSTACK_TABLE_LINE_CHARS = 79;
+  const CALLSTACK_TABLE_FRAME_CHARS = 7;
+  const CALLSTACK_LOCATION_COLUMN_SHARE = 1 / 3;
 
-  let overlay_is_shown = false;
+  let shown = false;
 
-  function address_shorten(text, root_prefix) {
-    if (!root_prefix) {
-      return String(text);
+  function html_escape(text) {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function line_wrap(text, width) {
+    const lines = [];
+    for (let start = 0; start < text.length || !lines.length;) {
+      lines.push(text.slice(start, start + width));
+      start += width;
     }
-    return String(text).replace(/file:\/\/\S*/g, function (found) {
-      return prefix_drop(found, root_prefix);
-    });
-  }
-
-  function control_add(parent, label, action) {
-    const link = document.createElement("a");
-    link.textContent = label;
-    link.style.color = OVERLAY_LINK_COLOR;
-    link.style.textDecoration = "underline";
-    link.style.cursor = "pointer";
-    link.style.marginRight = CONTROL_GAP;
-    link.addEventListener("click", function (click_event) {
-      click_event.preventDefault();
-      action();
-    });
-    parent.appendChild(link);
-    return link;
-  }
-
-  function controls_build(document_text) {
-    const bar = document.createElement("div");
-    bar.style.marginTop = CONTROL_GAP;
-    control_add(bar, text_of_or_id("str_error_control_copy"), function () {
-      text_copy(document_text);
-    });
-    control_add(bar, text_of_or_id("str_error_control_reload"), function () {
-      location.reload();
-    });
-    control_add(bar, text_of_or_id("str_error_control_restart"), function () {
-      location.href = root_prefix_of() + ROOT_INDEX_NAME;
-    });
-    return bar;
-  }
-
-  function document_build(report) {
-    const root_prefix = root_prefix_of();
-    const lines = [
-      "# " + text_of_or_id("str_error_page_heading"),
-      "",
-      String(report.source_label || ""),
-      "",
-      format_or_raw(report.message),
-      "",
-      "## " + text_of_or_id("str_error_heading_address"),
-      "",
-      address_shorten(report.address, root_prefix),
-      "",
-      "## " + text_of_or_id("str_error_heading_callstack"),
-      "",
-      stack_table(report.stack, root_prefix),
-      "",
-      "## " + text_of_or_id("str_error_heading_manifest"),
-      "",
-      manifest_table(report.manifest),
-      "",
-    ];
     return lines.join("\n");
   }
 
-  function error_describe(reason) {
-    if (reason instanceof Error) {
-      return {
-        message: String(reason.message || reason),
-        stack: String(reason.stack || ""),
-      };
-    }
-    if (reason && typeof reason === "object") {
-      let printed = "";
-      try {
-        printed = JSON.stringify(reason);
-      } catch (ignored) {
-        printed = String(reason);
-      }
-      return { message: printed, stack: String(reason.stack || "") };
-    }
-    return { message: String(reason), stack: "" };
+  function callstack_row(line) {
+    const bare = line.trim().replace(/^at\s+/, "");
+    const braced = /^(.*?)\s*\((.*)\)$/.exec(bare);
+    return braced ? [braced[2], braced[1]] : [bare, ""];
   }
 
-  function format_or_raw(message) {
-    const text = String(message);
-    const tokens = text.split(/\s+/).filter(function (token) {
-      return token !== "";
-    });
-    const strings = window.ui_strings;
-    if (!tokens.length || !strings) {
-      return text;
-    }
-    if (typeof strings.text_over_args !== "function") {
-      return text;
-    }
-    let formatted = null;
-    try {
-      formatted = strings.text_over_args(tokens[0], tokens.slice(1));
-    } catch (ignored) {
-      return text;
-    }
-    if (formatted === null) {
-      return text;
-    }
-    return tokens[0] + ":  " + formatted;
-  }
-
-  function handler_install() {
-    window.addEventListener("error", function (browser_event) {
-      if (browser_event.error || browser_event.message) {
-        overlay_show(
-          browser_event.error || browser_event.message,
-          text_of_or_id("str_error_source_exception"),
-        );
+  function callstack_table_row(location, function_name, widths) {
+    const cells = [location, function_name].map(function (text, column) {
+      const width = widths[column];
+      const lines = [];
+      for (let start = 0; start < text.length || !lines.length;) {
+        lines.push(text.slice(start, start + width).padEnd(width));
+        start += width;
       }
+      return lines;
     });
-    window.addEventListener("unhandledrejection", function (browser_event) {
-      overlay_show(
-        browser_event.reason,
-        text_of_or_id("str_error_source_rejection"),
+    const row_lines = [];
+    const line_count = Math.max(cells[0].length, cells[1].length);
+    for (let index = 0; index < line_count; index += 1) {
+      row_lines.push(
+        `| ${cells[0][index] || " ".repeat(widths[0])} | ` +
+          `${cells[1][index] || " ".repeat(widths[1])} |`,
       );
-    });
-    window.addEventListener("message", function (browser_event) {
-      const payload = browser_event.data;
-      if (!payload || payload.report_ui !== OVERLAY_MESSAGE_NAME) {
-        return;
-      }
-      report_render(payload.report);
-    });
+    }
+    return row_lines.join("\n");
   }
 
-  function manifest_table(manifest_text) {
-    const text = String(manifest_text || "");
-    const rows = [];
-    for (const line of text.split("\n")) {
-      if (!line.trim()) {
-        continue;
-      }
-      const cut = line.indexOf("=");
-      if (cut < 0) {
-        rows.push([line.trim()]);
-      } else {
-        rows.push([line.slice(0, cut).trim(), line.slice(cut + 1).trim()]);
-      }
-    }
-    if (!rows.length) {
-      return text_of_or_id("str_error_manifest_unavailable");
-    }
-    return table_render(
-      [
-        text_of_or_id("str_error_column_label"),
-        text_of_or_id("str_error_column_value"),
-      ],
-      rows,
+  function callstack_table(stack_text) {
+    const rows = String(stack_text || "")
+      .split("\n")
+      .filter((line) => line.trim())
+      .map(callstack_row);
+    if (!rows.length) return "";
+    const budget = CALLSTACK_TABLE_LINE_CHARS - CALLSTACK_TABLE_FRAME_CHARS;
+    const headings = ["Location", "Function"];
+    const natural = [0, 1].map((column) =>
+      Math.max(
+        headings[column].length,
+        ...rows.map((row) => row[column].length),
+      ),
     );
-  }
-
-  function manifest_text() {
-    const shipped = window[REPORT_MANIFEST_GLOBAL_NAME];
-    if (typeof shipped === "string" && shipped) {
-      return shipped;
+    let widths = natural;
+    if (natural[0] + natural[1] > budget) {
+      const location_width = Math.min(
+        natural[0],
+        Math.floor(budget * CALLSTACK_LOCATION_COLUMN_SHARE),
+      );
+      widths = [location_width, budget - location_width];
     }
-    return "";
+    const header = [
+      callstack_table_row("Location", "Function", widths),
+      callstack_table_row("-".repeat(widths[0]), "-".repeat(widths[1]), [
+        widths[0],
+        widths[1],
+      ]),
+    ];
+    const body = rows.map((row) =>
+      callstack_table_row(row[0], row[1], widths),
+    );
+    return header.concat(body).join("\n");
   }
 
-  function overlay_build(report) {
-    const document_text = document_build(report);
-    const root = document.createElement("div");
-    root.id = OVERLAY_ROOT_ID;
-    root.style.background = OVERLAY_BACKGROUND_COLOR;
-    root.style.color = OVERLAY_TEXT_COLOR;
-    root.style.font = OVERLAY_FONT;
-    root.style.padding = OVERLAY_PADDING;
-    const block = document.createElement("pre");
-    block.style.font = "inherit";
-    block.style.margin = "0";
-    block.style.whiteSpace = "pre-wrap";
-    block.style.overflowX = "auto";
-    block.textContent = document_text;
-    root.appendChild(block);
-    root.appendChild(controls_build(document_text));
-    return root;
-  }
-
-  function overlay_show(reason, source_label) {
-    if (overlay_is_shown) {
-      return;
-    }
-    const described = error_describe(reason);
+  function overlay_show(reason) {
     report_render({
       address: location.href,
-      manifest: manifest_text(),
-      message: described.message,
-      source_label: source_label,
-      stack: described.stack,
+      message: String((reason && reason.message) || reason),
+      stack: String((reason && reason.stack) || ""),
     });
   }
 
   function report_render(report) {
-    if (overlay_is_shown) {
+    if (shown) return;
+    shown = true;
+    if (window.parent !== window) {
+      window.parent.postMessage(
+        { report_ui: OVERLAY_MESSAGE_NAME, report: report },
+        "*",
+      );
       return;
     }
-    overlay_is_shown = true;
-    try {
-      if (window.parent !== window) {
-        window.parent.postMessage(
-          { report_ui: OVERLAY_MESSAGE_NAME, report: report },
-          "*",
-        );
-        return;
-      }
-      const root = overlay_build(report);
-      document.body.textContent = "";
-      document.body.style.margin = "0";
-      document.body.style.background = OVERLAY_BACKGROUND_COLOR;
-      document.body.style.color = OVERLAY_TEXT_COLOR;
-      document.body.appendChild(root);
-      document.title = text_of_or_id("str_error_page_title");
-    } catch (ignored) {
-      overlay_is_shown = true;
-    }
+    setTimeout(page_write, 0, report);
   }
 
-  function prefix_drop(path_text, root_prefix) {
-    if (path_text.indexOf(root_prefix) === 0) {
-      return path_text.slice(root_prefix.length);
-    }
-    const wanted = root_prefix.split("/");
-    const found = path_text.split("/");
-    let shared = 0;
-    while (shared < wanted.length && shared < found.length) {
-      if (wanted[shared] !== found[shared]) {
-        break;
-      }
-      shared += 1;
-    }
-    return found.slice(shared).join("/");
+  function page_write(report) {
+    const callstack_text = callstack_table(report.stack);
+    const manifest_text =
+      typeof window[REPORT_MANIFEST_TABLE_GLOBAL_NAME] === "undefined"
+        ? OVERLAY_NO_MANIFEST_TEXT
+        : window[REPORT_MANIFEST_TABLE_GLOBAL_NAME];
+    const copy_text = `# perf2html error
+
+${report.message}
+
+${line_wrap(report.address, CALLSTACK_TABLE_LINE_CHARS)}
+
+## Callstack
+
+${callstack_text}
+
+## Manifest
+
+${manifest_text}`;
+    const font_size =
+      Math.round(
+        (DESIGN_FONT_SIZE_PX * window.innerWidth) /
+          DESIGN_COORDINATES_WIDTH_PX,
+      ) + "px";
+    const page_style =
+      `margin:0;background:${OVERLAY_BACKGROUND_COLOR};` +
+      `color:${OVERLAY_TEXT_COLOR};font:${font_size}/1.5 Monaco, monospace;` +
+      `min-height:100vh;display:flex;align-items:center;` +
+      `justify-content:center`;
+    const block_style =
+      "font:inherit;white-space:pre-wrap;overflow-wrap:anywhere";
+    const link_style = "color:" + OVERLAY_LINK_COLOR;
+    const copy_call =
+      `navigator.clipboard.writeText(` + `${JSON.stringify(copy_text)})`;
+    const link = (href, text) =>
+      `<a style="${link_style}" href="javascript:${href}">${text}</a>`;
+    const links_line =
+      `${link(html_escape(copy_call), OVERLAY_COPY_LINK_TEXT)} | ` +
+      `${link("history.back()", OVERLAY_BACK_LINK_TEXT)}`;
+    const body = `${copy_text}
+
+${links_line}`;
+    document.open();
+    // APPROVED USAGE. Error handlers are what this is for.
+    document.write(`<!doctype html>
+<title>perf2html error</title>
+<body style="${page_style}"><pre style="${block_style}">${body}</pre>`);
+    document.close();
   }
 
-  function root_prefix_of() {
-    const here = String(location.href).split("#")[0].split("?")[0];
-    const cut = here.lastIndexOf("/");
-    return cut < 0 ? "" : here.slice(0, cut + 1);
-  }
+  window.addEventListener("error", function (browser_event) {
+    overlay_show(browser_event.error || browser_event.message);
+  });
+  window.addEventListener("unhandledrejection", function (browser_event) {
+    overlay_show(browser_event.reason);
+  });
+  window.addEventListener("message", function (browser_event) {
+    const payload = browser_event.data;
+    if (payload && payload.report_ui === OVERLAY_MESSAGE_NAME) {
+      report_render(payload.report);
+    }
+  });
 
-  function stack_row_of(line, root_prefix) {
-    const bare = line.trim().replace(/^at\s+/, "");
-    const text = address_shorten(bare, root_prefix);
-    const braced = /^(.*?)\s*\((.*)\)$/.exec(text);
-    if (braced) {
-      return [braced[1], braced[2]];
-    }
-    const at_sign = text.indexOf("@");
-    if (at_sign > 0) {
-      return [text.slice(0, at_sign), text.slice(at_sign + 1)];
-    }
-    return [text];
-  }
-
-  function stack_table(stack_text, root_prefix) {
-    const rows = [];
-    for (const line of String(stack_text || "").split("\n")) {
-      if (line.trim()) {
-        rows.push(stack_row_of(line, root_prefix));
-      }
-    }
-    if (!rows.length) {
-      return text_of_or_id("str_error_callstack_unavailable");
-    }
-    return table_render(
-      [
-        text_of_or_id("str_error_column_frame"),
-        text_of_or_id("str_error_column_location"),
-      ],
-      rows,
-    );
-  }
-
-  function table_render(titles, rows) {
-    const all_rows = [titles].concat(rows);
-    const widths = column_widths(
-      column_longest(all_rows, 0),
-      column_longest(all_rows, 1),
-    );
-    const written = [row_text(titles, widths), rule_text(widths)];
-    for (const row of rows) {
-      written.push(row_text(row, widths));
-    }
-    return written.join("\n");
-  }
-
-  function column_longest(rows, index) {
-    let longest = 0;
-    for (const row of rows) {
-      longest = Math.max(longest, String(row[index] || "").length);
-    }
-    return longest;
-  }
-
-  function column_widths(longest_a, longest_b) {
-    const sum = longest_a + longest_b;
-    let width_a = longest_a;
-    if (sum > OVERLAY_TABLE_TOTAL_CHARS) {
-      width_a = Math.floor((OVERLAY_TABLE_TOTAL_CHARS * longest_a) / sum);
-    }
-    const width_b = Math.min(longest_b, OVERLAY_TABLE_TOTAL_CHARS - width_a);
-    return [width_a, width_b];
-  }
-
-  function row_text(cells, widths) {
-    const rest = cells.length > 1 ? cells[1] : "";
-    return (
-      "| " +
-      cell_fit(cells[0], widths[0]) +
-      " | " +
-      cell_fit(rest, widths[1]) +
-      " |"
-    );
-  }
-
-  function rule_text(widths) {
-    return row_text(["-".repeat(widths[0]), "-".repeat(widths[1])], widths);
-  }
-
-  function cell_fit(text, width) {
-    const cell = String(text || "");
-    if (cell.length > width) {
-      return cell.slice(cell.length - width);
-    }
-    return cell + " ".repeat(width - cell.length);
-  }
-
-  function text_copy(text) {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text);
-        return;
-      }
-    } catch (ignored) {
-      void ignored;
-    }
-    const holder = document.createElement("textarea");
-    holder.value = text;
-    document.body.appendChild(holder);
-    holder.select();
-    try {
-      document.execCommand("copy");
-    } catch (ignored) {
-      void ignored;
-    }
-    document.body.removeChild(holder);
-  }
-
-  function text_of_or_id(string_id) {
-    const strings = window.ui_strings;
-    if (!strings || typeof strings.text_of !== "function") {
-      return string_id;
-    }
-    try {
-      return strings.text_of(string_id);
-    } catch (ignored) {
-      return string_id;
-    }
-  }
-
-  handler_install();
   return { overlay_show };
 })();

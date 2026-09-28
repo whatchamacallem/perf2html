@@ -1,13 +1,15 @@
 window.report_ui = (function () {
   "use strict";
 
-  const CSS_LAYOUT = settings("CSS_LAYOUT");
   const DESIGN_COORDINATES_WIDTH_PX = settings("DESIGN_COORDINATES_WIDTH_PX");
   const DESIGN_FONT_CHARACTER_WIDTH_PX = settings(
     "DESIGN_FONT_CHARACTER_WIDTH_PX",
   );
   const DESIGN_FONT_FIT_PROPERTY = settings("DESIGN_FONT_FIT_PROPERTY");
   const DESIGN_FONT_SIZE_PX = settings("DESIGN_FONT_SIZE_PX");
+  const DESIGN_MINIMUM_WINDOW_WIDTH_PX = settings(
+    "DESIGN_MINIMUM_WINDOW_WIDTH_PX",
+  );
   const DESIGN_SCALE_DEFAULT_MULTIPLE = settings(
     "DESIGN_SCALE_DEFAULT_MULTIPLE",
   );
@@ -41,11 +43,12 @@ window.report_ui = (function () {
   const STORAGE_OWNED_PREFIXES = settings("STORAGE_OWNED_PREFIXES");
   const STORAGE_VERSION = settings("STORAGE_VERSION");
   const STORAGE_VERSION_KEY = settings("STORAGE_VERSION_KEY");
+  const STRIP_PULLDOWN_KEY_NAMES = settings("STRIP_PULLDOWN_KEY_NAMES");
+  const STRIP_PULLDOWN_SKIPPED_KEY_NAMES = settings(
+    "STRIP_PULLDOWN_SKIPPED_KEY_NAMES",
+  );
   const TABLE_COLUMN_EXTRA_WIDTH_CHARS = settings(
     "TABLE_COLUMN_EXTRA_WIDTH_CHARS",
-  );
-  const TABLE_COLUMN_NARROWEST_DRAG_PX = settings(
-    "TABLE_COLUMN_NARROWEST_DRAG_PX",
   );
   const TABLE_GROW_COLUMN_NARROWEST_CHARS = settings(
     "TABLE_GROW_COLUMN_NARROWEST_CHARS",
@@ -53,6 +56,8 @@ window.report_ui = (function () {
 
   // what CSS measures a ch as: the advance width of this glyph
   const CH_UNIT_GLYPH = "0";
+  const PULLDOWN_COMMAND_KEY_NAMES = Object.values(STRIP_PULLDOWN_KEY_NAMES);
+  const PULLDOWN_HIGHLIGHTED_ENTRY_CLASS = "highlighted-entry";
   const RAMP_CHANNEL_STOPS = HEAT_COLOR_LOGO_STOPS.map((hex) =>
     [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16)),
   );
@@ -62,17 +67,6 @@ window.report_ui = (function () {
   let resize_debounce_timer = null;
   let storage_is_checked = false;
   let design_scale = 1;
-  // ends out of order would run a slider half backwards: a broken setting
-  if (
-    !(DESIGN_SCALE_SMALLEST_MULTIPLE < DESIGN_SCALE_DEFAULT_MULTIPLE) ||
-    !(DESIGN_SCALE_DEFAULT_MULTIPLE < DESIGN_SCALE_LARGEST_MULTIPLE)
-  ) {
-    throw new Error(
-      "str_error_scale_ends_disordered " +
-        `${DESIGN_SCALE_SMALLEST_MULTIPLE} ${DESIGN_SCALE_DEFAULT_MULTIPLE} ` +
-        `${DESIGN_SCALE_LARGEST_MULTIPLE}`,
-    );
-  }
   let design_scale_travel = design_scale_travel_of(
     DESIGN_SCALE_DEFAULT_MULTIPLE,
   );
@@ -141,18 +135,9 @@ window.report_ui = (function () {
       Math.pow(half.to_multiple / half.from_multiple, half_fraction)
     );
   }
-  // The travel a multiple sits at, the inverse of the above. Only the two
-  // ends' own span is a travel: anything past them is a broken setting.
+  // The travel a multiple sits at, the inverse of the above. Only the
+  // default is ever asked, and theme.py refused ends it is not between.
   function design_scale_travel_of(multiple) {
-    if (
-      !(multiple >= DESIGN_SCALE_SMALLEST_MULTIPLE) ||
-      !(multiple <= DESIGN_SCALE_LARGEST_MULTIPLE)
-    ) {
-      throw new Error(
-        `str_error_scale_multiple_outside ${multiple} ` +
-          `${DESIGN_SCALE_SMALLEST_MULTIPLE} ${DESIGN_SCALE_LARGEST_MULTIPLE}`,
-      );
-    }
     const half = design_scale_half_of(
       multiple < DESIGN_SCALE_DEFAULT_MULTIPLE,
     );
@@ -172,7 +157,11 @@ window.report_ui = (function () {
   // A framed page never calls this: it inherits its parent's zoom.
   function design_scale_travel_set(travel_fraction) {
     if (!isFinite(travel_fraction)) {
-      throw new Error("str_error_scale_unusable " + travel_fraction);
+      throw new Error(
+        window.ui_strings.text_fill("str_error_scale_unusable", [
+          travel_fraction,
+        ]),
+      );
     }
     design_scale_travel = Math.min(Math.max(travel_fraction, 0), 1);
     design_scale_settle();
@@ -186,7 +175,7 @@ window.report_ui = (function () {
     context.font = wanted_font;
     // a font string the canvas cannot read leaves its default in place
     if (context.font === default_font) {
-      throw new Error("str_error_font_refused");
+      throw new Error(window.ui_strings.text_of("str_error_font_refused"));
     }
     const measured_px = context.measureText(CH_UNIT_GLYPH).width;
     document.documentElement.style.setProperty(
@@ -197,10 +186,16 @@ window.report_ui = (function () {
   function design_scale_apply() {
     const root_element = document.documentElement;
     // a framed document is laid out inside an already-zoomed parent, so its
-    // own box is design space already and it scales itself by 1
-    const wanted = is_framed ? 1 : design_scale_of(root_element.clientWidth);
+    // own box is design space already and it scales itself by 1.
+    const wanted = is_framed
+      ? 1
+      : design_scale_of(
+          Math.max(root_element.clientWidth, DESIGN_MINIMUM_WINDOW_WIDTH_PX),
+        );
     if (!isFinite(wanted) || !(wanted > 0)) {
-      throw new Error("str_error_scale_unusable " + wanted);
+      throw new Error(
+        window.ui_strings.text_fill("str_error_scale_unusable", [wanted]),
+      );
     }
     design_scale = wanted;
     root_element.style.zoom = String(wanted);
@@ -297,6 +292,241 @@ window.report_ui = (function () {
       }
     });
   }
+  // One hash part's value as the heat map writes it: escaped, a "/" kept
+  // readable. state_of_hash decodes it back.
+  function hash_value_encode(value) {
+    return encodeURIComponent(value).replace(/%2F/g, "/");
+  }
+  // The heat map's address, its whole state: fn=<name>, or f=<file> and any
+  // l=<line>, then e=<counter> when the state names one. The one writer.
+  function hash_of_state(state) {
+    const hash_parts = [];
+    if (state.fn) hash_parts.push("fn=" + hash_value_encode(state.fn));
+    else if (state.file) {
+      hash_parts.push("f=" + hash_value_encode(state.file));
+      if (state.line) hash_parts.push("l=" + state.line);
+    }
+    if (state.ev) hash_parts.push("e=" + hash_value_encode(state.ev));
+    return hash_parts.length ? "#" + hash_parts.join("&") : "";
+  }
+  // The heat map address's parts. An empty hash is home; a part this cannot
+  // read (no "=", a key it has no field for, a bad escape or line) is bad.
+  function state_of_hash(hash) {
+    const parsed_state = { file: null, line: 0, fn: null, ev: null };
+    for (const part of hash.replace(/^#/, "").split("&")) {
+      if (part === "") continue;
+      const equals_index = part.indexOf("=");
+      const key = part.slice(0, equals_index);
+      const value = decodeURIComponent(part.slice(equals_index + 1));
+      if (equals_index < 0 || (key === "l" && !Number.isInteger(+value))) {
+        throw new Error(
+          window.ui_strings.text_fill("str_error_hash_part_unknown", [part]),
+        );
+      }
+      if (key === "f") parsed_state.file = value;
+      else if (key === "l") parsed_state.line = +value;
+      else if (key === "fn") parsed_state.fn = value;
+      else if (key === "e") parsed_state.ev = value;
+      else
+        throw new Error(
+          window.ui_strings.text_fill("str_error_hash_part_unknown", [part]),
+        );
+    }
+    return parsed_state;
+  }
+
+  function pulldown_key_is_command(key_name) {
+    return PULLDOWN_COMMAND_KEY_NAMES.includes(key_name);
+  }
+  // What this keydown gives a pulldown: a typed character or one of
+  // STRIP_PULLDOWN_KEY_NAMES, or "" for a key that stays the page's.
+  function pulldown_key_of(key_event) {
+    const key_name = key_event.key;
+    const is_plain =
+      !key_event.defaultPrevented &&
+      !key_event.isComposing &&
+      !key_event.altKey &&
+      !key_event.ctrlKey &&
+      !key_event.metaKey;
+    const is_typed =
+      key_name.length === 1 &&
+      !STRIP_PULLDOWN_SKIPPED_KEY_NAMES.includes(key_name);
+    return is_plain && (is_typed || pulldown_key_is_command(key_name))
+      ? key_name
+      : "";
+  }
+  // The search box's text as a pattern. One that does not compile yet (a
+  // lone "(" mid-typing) is null and matches nothing; any other error throws.
+  function pulldown_pattern_of(search_text) {
+    try {
+      return new RegExp(search_text, "i");
+    } catch (pattern_error) {
+      if (!(pattern_error instanceof SyntaxError)) throw pattern_error;
+      return null;
+    }
+  }
+  // A strip pulldown over root_element's parts. entries_of() gives the links
+  // it offers each time it opens; on_close() runs each time it closes.
+  function pulldown_attach(root_element, label_text, entries_of, on_close) {
+    const caret_button = root_element.querySelector(".pulldown-caret");
+    const entry_list = root_element.querySelector(".pulldown-list");
+    const label_element = root_element.querySelector(".pulldown-label");
+    const no_match_note = root_element.querySelector(".pulldown-no-match");
+    const search_box = root_element.querySelector(".pulldown-search");
+    const collapsed_caret_text = window.ui_strings.text_of(
+      "str_caret_collapsed",
+    );
+    const expanded_caret_text = window.ui_strings.text_of(
+      "str_caret_expanded",
+    );
+    let closed_text = search_box.value,
+      entries = [],
+      highlight_index = 0,
+      is_open = false,
+      matches = [];
+
+    function highlight_set(entry_index) {
+      highlight_index = entry_index;
+      for (const entry_link of entries) {
+        entry_link.classList.toggle(
+          PULLDOWN_HIGHLIGHTED_ENTRY_CLASS,
+          entry_link === matches[highlight_index],
+        );
+      }
+    }
+    function highlight_step(step_count) {
+      if (!matches.length) return;
+      highlight_set(
+        Math.min(
+          Math.max(highlight_index + step_count, 0),
+          matches.length - 1,
+        ),
+      );
+      matches[highlight_index].scrollIntoView({ block: "nearest" });
+    }
+    function entries_filter() {
+      const search_pattern = pulldown_pattern_of(search_box.value);
+      matches = entries.filter(
+        (entry_link) =>
+          !!search_pattern && search_pattern.test(entry_link.textContent),
+      );
+      const matched_entries = new Set(matches);
+      for (const entry_link of entries) {
+        entry_link.hidden = !matched_entries.has(entry_link);
+      }
+      no_match_note.hidden = matches.length > 0;
+      entry_list.scrollTop = 0;
+      highlight_set(0);
+    }
+    // Focus the search box, out of a framed page if focus is there: a key's
+    // user activation reaches the top page. A refusal would strand the keys.
+    function search_box_focus() {
+      search_box.focus();
+      if (document.activeElement !== search_box)
+        throw new Error(
+          window.ui_strings.text_fill("str_error_pulldown_focus_refused", [
+            document.activeElement.tagName.toLowerCase(),
+          ]),
+        );
+    }
+    function pulldown_open(search_text) {
+      is_open = true;
+      entries = entries_of();
+      entry_list.replaceChildren(...entries, no_match_note);
+      search_box.readOnly = false;
+      search_box.value = search_text;
+      caret_button.textContent = expanded_caret_text;
+      entry_list.hidden = false;
+      entries_filter();
+      search_box_focus();
+    }
+    function closed_show() {
+      is_open = false;
+      search_box.readOnly = true;
+      search_box.value = closed_text;
+      caret_button.textContent = collapsed_caret_text;
+      entry_list.hidden = true;
+    }
+    function pulldown_close() {
+      closed_show();
+      on_close();
+    }
+    function pulldown_toggle() {
+      if (is_open) pulldown_close();
+      else pulldown_open("");
+    }
+    // The text the closed box reads, now and each time it closes again.
+    function closed_text_set(new_text) {
+      closed_text = new_text;
+      if (!is_open) search_box.value = closed_text;
+    }
+    // The one key handler, for a key typed in the box or handed over from
+    // elsewhere on the page. True when the key is taken.
+    function key_take(key_name, is_in_search_box) {
+      const is_command_key = pulldown_key_is_command(key_name);
+      if (!is_open) {
+        const is_opening_key =
+          !is_command_key ||
+          (is_in_search_box && key_name === STRIP_PULLDOWN_KEY_NAMES.next);
+        if (!is_opening_key) return false;
+        pulldown_open(is_command_key ? "" : key_name);
+        return true;
+      }
+      switch (key_name) {
+        case STRIP_PULLDOWN_KEY_NAMES.close:
+          pulldown_close();
+          return true;
+        case STRIP_PULLDOWN_KEY_NAMES.next:
+          highlight_step(1);
+          return true;
+        case STRIP_PULLDOWN_KEY_NAMES.previous:
+          highlight_step(-1);
+          return true;
+        case STRIP_PULLDOWN_KEY_NAMES.select:
+          if (matches.length) matches[highlight_index].click();
+          return true;
+      }
+      // the focused open box types for itself; a key from elsewhere is added
+      if (is_in_search_box) return false;
+      search_box.value += key_name;
+      entries_filter();
+      search_box_focus();
+      return true;
+    }
+
+    label_element.textContent = label_text;
+    no_match_note.textContent = window.ui_strings.text_of("str_no_match");
+    for (const pointer_target of [label_element, caret_button, entry_list]) {
+      pointer_target.addEventListener("mousedown", (pointer_event) =>
+        pointer_event.preventDefault(),
+      );
+    }
+    label_element.addEventListener("click", pulldown_toggle);
+    caret_button.addEventListener("click", pulldown_toggle);
+    search_box.addEventListener("click", () => {
+      if (!is_open) pulldown_open("");
+    });
+    search_box.addEventListener("blur", () => {
+      if (is_open) pulldown_close();
+    });
+    search_box.addEventListener("input", entries_filter);
+    search_box.addEventListener("keydown", (key_event) => {
+      const key_name = pulldown_key_of(key_event);
+      if (key_name && key_take(key_name, true)) key_event.preventDefault();
+    });
+    entry_list.addEventListener("pointermove", (pointer_event) => {
+      const entry_index = matches.indexOf(pointer_event.target.closest("a"));
+      if (entry_index >= 0 && entry_index !== highlight_index)
+        highlight_set(entry_index);
+    });
+    entry_list.addEventListener("click", (click_event) => {
+      if (!click_event.target.closest("a")) return;
+      pulldown_close();
+      search_box.blur();
+    });
+    closed_show();
+    return { closed_text_set, key_take };
+  }
 
   function width_total(widths) {
     return widths.reduce((total, width) => total + width, 0);
@@ -314,7 +544,7 @@ window.report_ui = (function () {
     return columns.map((column, column_index) => {
       let content_chars;
       if (column.width != null) content_chars = column.width;
-      else if (CSS_LAYOUT && column_index === grow_index) {
+      else if (column_index === grow_index) {
         content_chars = TABLE_GROW_COLUMN_NARROWEST_CHARS;
       } else {
         content_chars = column_longest(cell_rows, column_index);
@@ -326,18 +556,16 @@ window.report_ui = (function () {
     });
   }
   function column_limits(extent) {
-    const narrowest = CSS_LAYOUT ? extent.content_chars : extent.heading_chars;
     const widest = Math.max(extent.heading_chars, extent.content_chars);
     return [
-      narrowest + TABLE_COLUMN_EXTRA_WIDTH_CHARS,
+      extent.content_chars + TABLE_COLUMN_EXTRA_WIDTH_CHARS,
       widest + TABLE_COLUMN_EXTRA_WIDTH_CHARS,
     ];
   }
-  // Under CSS_LAYOUT, automatic table layout on the container's 100cqw: all
-  // widest if they fit, all narrowest if not even those, else between
+  // Automatic table layout on the container's 100cqw: all widest if they
+  // fit, all narrowest if not even those, else between
   function column_width_text(limits, column_index, grow_index) {
     const [narrowest, widest] = limits[column_index];
-    if (!CSS_LAYOUT) return widest + "ch";
     const shared = limits.filter(
       (limit, other_index) => other_index !== grow_index,
     );
@@ -377,32 +605,11 @@ window.report_ui = (function () {
     handle_bar[listener_method]("pointerup", on_pointer_release);
     handle_bar[listener_method]("pointercancel", on_pointer_release);
   }
-  // Both table emitters write data-min on every <col>: one without it is
-  // markup this file does not know, so it throws
-  function floor_text_read(column_element) {
-    const floor_text = column_element.dataset.min;
-    if (!floor_text) throw new Error("table <col> has no data-min");
-    return floor_text;
-  }
-  function minimum_width_px(column_element) {
-    const probe_element = column_element.ownerDocument.createElement("div");
-    probe_element.style.cssText =
-      "position:absolute;visibility:hidden;width:" +
-      floor_text_read(column_element);
-    column_element.ownerDocument.body.appendChild(probe_element);
-    const width_px = design_px(probe_element.getBoundingClientRect().width);
-    probe_element.remove();
-    return Math.max(TABLE_COLUMN_NARROWEST_DRAG_PX, Math.ceil(width_px));
-  }
-  // A drag is in pixels. Under CSS_LAYOUT its floor stays the <col>'s own
-  // characters, which CSS max() compares, where the old layout probes them
+  // A drag is in pixels; its floor stays the <col>'s own characters, the
+  // data-min both table emitters write, which CSS max() compares
   function drag_width_formatter(column_element) {
-    if (CSS_LAYOUT) {
-      const floor_text = floor_text_read(column_element);
-      return (width_px) => `max(${floor_text}, ${width_px}px)`;
-    }
-    const floor_px = minimum_width_px(column_element);
-    return (width_px) => Math.max(floor_px, width_px) + "px";
+    const floor_text = column_element.dataset.min;
+    return (width_px) => `max(${floor_text}, ${width_px}px)`;
   }
   function column_elements_of(table_element) {
     return [...table_element.querySelectorAll("colgroup > col")];
@@ -427,7 +634,6 @@ window.report_ui = (function () {
     const column_element = column_elements_of(table_element)[column_index];
     const header_cell = header_cells(table_element)[column_index];
     if (!column_element || !header_cell) return;
-    table_element.was_hand_resized = true;
     const start_client_x = pointer_event.clientX,
       width_text_of = drag_width_formatter(column_element);
     // a rect and clientX are screen px on a zoomed page; a style is design px
@@ -479,46 +685,6 @@ window.report_ui = (function () {
       table_element.resize_handles.push(handle_bar);
     }
   }
-  function nearest_scroller(start_element) {
-    let ancestor_element = start_element.parentElement;
-    for (
-      ;
-      ancestor_element;
-      ancestor_element = ancestor_element.parentElement
-    ) {
-      const overflow_y = getComputedStyle(ancestor_element).overflowY;
-      if (overflow_y === "auto" || overflow_y === "scroll") {
-        return ancestor_element;
-      }
-    }
-    return document.documentElement;
-  }
-  function grow_column_fill(table_element) {
-    if (!table_element.offsetWidth) return;
-    const column_elements = column_elements_of(table_element);
-    if (!column_elements.length) return;
-    const grow_column =
-      column_elements.find((column_element) =>
-        column_element.classList.contains("grow"),
-      ) || column_elements[column_elements.length - 1];
-    grow_column.style.width = grow_column.dataset.w;
-    const floor_px = minimum_width_px(grow_column);
-    const scroll_container = nearest_scroller(table_element);
-    const table_box = table_element.getBoundingClientRect();
-    const edge_inset_px =
-      design_px(
-        table_box.left - scroll_container.getBoundingClientRect().left,
-      ) + scroll_container.scrollLeft;
-    const target_width_px = Math.floor(
-      scroll_container.clientWidth - 2 * edge_inset_px,
-    );
-    const other_columns_px = design_px(
-      table_box.width - grow_column.getBoundingClientRect().width,
-    );
-    grow_column.style.width =
-      Math.max(floor_px, target_width_px - other_columns_px) + "px";
-  }
-
   function offsets_align(scroll_container) {
     let stacked_top_px = 0;
     for (const band_element of scroll_container.querySelectorAll(
@@ -538,13 +704,6 @@ window.report_ui = (function () {
     root_element = root_element || document.body;
     for (const table_element of root_element.querySelectorAll("table.cols")) {
       if (!table_element.resize_handles) continue;
-      if (
-        !CSS_LAYOUT &&
-        table_element.classList.contains("fill") &&
-        !table_element.was_hand_resized
-      ) {
-        grow_column_fill(table_element);
-      }
       handles_position(table_element);
     }
     const band_elements = [...root_element.querySelectorAll(".band")];
@@ -565,10 +724,6 @@ window.report_ui = (function () {
       if (!table_element.resize_handles) continue;
       for (const column_element of column_elements_of(table_element)) {
         column_element.style.width = column_element.dataset.w;
-      }
-      table_element.was_hand_resized = false;
-      if (!CSS_LAYOUT && table_element.classList.contains("fill")) {
-        grow_column_fill(table_element);
       }
       handles_position(table_element);
     }
@@ -704,6 +859,7 @@ window.report_ui = (function () {
     design_scale_travel_now,
     design_scale_travel_set,
     hash_publish,
+    heat_map_address: { hash_of_state, state_of_hash },
     human_text,
     is_framed,
     layout_activate,
@@ -716,6 +872,11 @@ window.report_ui = (function () {
     parent_listen,
     parent_post,
     percent_text,
+    pulldown: {
+      attach: pulldown_attach,
+      key_is_command: pulldown_key_is_command,
+      key_of: pulldown_key_of,
+    },
     ramp_channels_at,
     screen_px,
     signed_human_text,

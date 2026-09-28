@@ -25,9 +25,9 @@ _REPORT_SOURCES_DIR_NAME: str = ""
 settings.load_into(__name__)
 
 
-# ValidateReport - A structural smoke test over a finished report directory:
+# TestReport - A structural smoke test over a finished report directory:
 # every page present, closed, titled, and free of leftover markers.
-class ValidateReport:
+class TestReport:
     # ReportLayout - What one kind of report is expected to contain -- this is
     # the whole difference between checking a full report and a diff.
     class ReportLayout(NamedTuple):
@@ -41,6 +41,8 @@ class ValidateReport:
         manifest_version: str
         # the LABEL= rows MANIFEST.txt must have
         manifest_labels: tuple[str, ...]
+        # those of them whose value starts with a unix time
+        manifest_recorded_labels: tuple[str, ...]
         # whether a test records runs of its own: a perf log, a trace, a
         # flame graph. never true of the synthesized "all"
         test_has_rawdata: bool
@@ -48,19 +50,21 @@ class ValidateReport:
         # where its pages are built from data no other test's archive holds
         all_has_archive: bool
 
-    # ValidateArgs - Which report to check, and which layout to check it as.
-    class ValidateArgs(NamedTuple):
+    # TestArgs - Which report to check, and which layout to check it as.
+    class TestArgs(NamedTuple):
         # the report directory
         out_dir: str
         # check it as a diff report rather than a full one
         diff: bool
+        # print the ok line, on stdout: a quiet run prints nothing on success
+        verbose: bool
 
     def __init__(self) -> None:
         # every problem found so far, printed together at the end
         self.errors: list[str] = []
 
     # The POSIX cksum of every file except MANIFEST.txt, run through the
-    # very pipeline scripts/shared.sh wrote the row with, never our own.
+    # very pipeline scripts/utility.sh wrote the row with, never our own.
     def checksum_compute(self, out_dir: str) -> str:
         try:
             done = subprocess.run(
@@ -106,7 +110,7 @@ class ValidateReport:
         flame_dir = os.path.join(out_dir, _FLAME_GRAPH_VIEW_KEY)
         index_text = self.size_check(
             os.path.join(out_dir, "index.html"),
-            _VALIDATE_OVERVIEW_PAGE_LEAST_BYTES,
+            _TEST_OVERVIEW_PAGE_LEAST_BYTES,
             "index.html",
         )
         if not has_trace:
@@ -127,7 +131,7 @@ class ValidateReport:
         page = self.page_check(
             os.path.join(flame_dir, "index.html"),
             f"{_FLAME_GRAPH_VIEW_KEY}/index.html",
-            _VALIDATE_FLAME_GRAPH_PAGE_LEAST_BYTES,
+            _TEST_FLAME_GRAPH_PAGE_LEAST_BYTES,
         )
         # the engine is not here, so the page is only a page if it reaches
         # the shared bundle
@@ -136,14 +140,9 @@ class ValidateReport:
                 f"{_FLAME_GRAPH_VIEW_KEY}/index.html does not load the shared "
                 f"{_FLAME_GRAPH_APP_DIR_NAME}/ bundle: {flame_dir}/index.html"
             )
-        self.size_check(
-            os.path.join(flame_dir, "output.txt"),
-            _VALIDATE_FLAME_GRAPH_LOG_LEAST_BYTES,
-            f"{_FLAME_GRAPH_VIEW_KEY}/output.txt",
-        )
         script = self.size_check(
             os.path.join(flame_dir, "profile.js"),
-            _VALIDATE_FLAME_GRAPH_SCRIPT_LEAST_BYTES,
+            _TEST_FLAME_GRAPH_SCRIPT_LEAST_BYTES,
             f"{_FLAME_GRAPH_VIEW_KEY}/profile.js",
         )
         if not script:
@@ -195,7 +194,7 @@ class ValidateReport:
         text = self.page_check(
             path,
             f"{_HEAT_MAP_VIEW_KEY}/index.html",
-            _VALIDATE_HEAT_MAP_PAGE_LEAST_BYTES,
+            _TEST_HEAT_MAP_PAGE_LEAST_BYTES,
             f"{test_name} / {_HEAT_MAP_VIEW_LABEL}",
         )
         if text and "report_ui.layout_activate" not in text:
@@ -229,13 +228,13 @@ class ValidateReport:
         self,
         out_dir: str,
         test_name: str,
-        layout: ValidateReport.ReportLayout,
+        layout: TestReport.ReportLayout,
         has_rawdata: bool,
         has_archive: bool,
     ) -> None:
         path = os.path.join(out_dir, "index.html")
         text = self.page_check(
-            path, "index.html", _VALIDATE_OVERVIEW_PAGE_LEAST_BYTES, test_name
+            path, "index.html", _TEST_OVERVIEW_PAGE_LEAST_BYTES, test_name
         )
         if not text:
             return
@@ -260,11 +259,11 @@ class ValidateReport:
     # MANIFEST.txt line 1 must be exact and its checksum row must still
     # match the files beside it. Both failures name found and expected.
     def manifest_check(
-        self, out_dir: str, layout: ValidateReport.ReportLayout
+        self, out_dir: str, layout: TestReport.ReportLayout
     ) -> None:
         path = os.path.join(out_dir, "MANIFEST.txt")
         text = self.size_check(
-            path, _VALIDATE_MANIFEST_LEAST_BYTES, "MANIFEST.txt"
+            path, _TEST_MANIFEST_LEAST_BYTES, "MANIFEST.txt"
         )
         if not text:
             self.fail(
@@ -285,12 +284,13 @@ class ValidateReport:
                     f"MANIFEST.txt has no '{label}=' header row, so a"
                     f" reader of this report cannot show it: {path}"
                 )
-        stamp = self.manifest_stamp_value(text)
-        if not stamp.isdigit():
-            self.fail(
-                f"MANIFEST.txt stamp= row starts {stamp!r}, expected the"
-                f" unix time: {path}"
-            )
+        for label in layout.manifest_recorded_labels:
+            recorded_unix = self.manifest_recorded_value(text, label)
+            if not recorded_unix.isdigit():
+                self.fail(
+                    f"MANIFEST.txt {label}= row starts {recorded_unix!r},"
+                    f" expected the unix time: {path}"
+                )
         recorded = self.manifest_value(text, _REPORT_MANIFEST_CHECKSUM_LABEL)
         if not recorded:
             self.fail(
@@ -311,9 +311,9 @@ class ValidateReport:
                 f" after the report was written: {out_dir}"
             )
 
-    # The unix time out of a stamp= row, whose human tail nothing parses.
-    def manifest_stamp_value(self, text: str) -> str:
-        return self.manifest_value(text, "stamp").split(" ", 1)[0]
+    # The unix time out of one recorded row, whose human tail nothing parses.
+    def manifest_recorded_value(self, text: str, label: str) -> str:
+        return self.manifest_value(text, label).split(" ", 1)[0]
 
     # One LABEL= row out of a manifest's text.
     def manifest_value(self, text: str, label: str) -> str:
@@ -334,18 +334,16 @@ class ValidateReport:
         self,
         out_dir: str,
         tests: Sequence[str],
-        layout: ValidateReport.ReportLayout,
+        layout: TestReport.ReportLayout,
     ) -> None:
         path = os.path.join(out_dir, "index.html")
         text = self.page_check(
-            path, "index.html", _VALIDATE_OVERVIEW_PAGE_LEAST_BYTES, "overview"
+            path, "index.html", _TEST_OVERVIEW_PAGE_LEAST_BYTES, "overview"
         )
         if not text:
             return
-        if "<h2>test suites</h2>" not in text:
-            self.fail(
-                f"overview index.html has no 'test suites' section: {path}"
-            )
+        if "<h2>tests</h2>" not in text:
+            self.fail(f"overview index.html has no 'tests' section: {path}")
         for test_name in tests:
             if f'href="{test_name}/index.html"' not in text:
                 self.fail(
@@ -440,43 +438,39 @@ class ValidateReport:
             match = re.search(r"<title>(.*?)</title>", handle.read())
         return match.group(1) if match else None
 
-    # The perf log: a real timing line, and a section only where one exists.
+    # The perf log section: only where a timing run exists, and then holding
+    # a real timing line. The recording itself is an artifact, not shipped.
     def perf_tool_check(self, out_dir: str, has_perf_log: bool) -> None:
-        out_txt = os.path.join(out_dir, "perf-tool", "output.txt")
-        text = self.size_check(
-            out_txt, _VALIDATE_PERF_LOG_LEAST_BYTES, "perf-tool/output.txt"
-        )
-        if text and not re.search(r"^Time(/\w+)?:\s+\d", text, re.M):
-            self.fail(
-                "perf-tool/output.txt has no recognizable timing"
-                f" line: {out_txt}"
-            )
+        index_path = os.path.join(out_dir, "index.html")
         index_text = self.size_check(
-            os.path.join(out_dir, "index.html"),
-            _VALIDATE_OVERVIEW_PAGE_LEAST_BYTES,
-            "index.html",
+            index_path, _TEST_OVERVIEW_PAGE_LEAST_BYTES, "index.html"
         )
-        if index_text:
-            if has_perf_log and "<h2>perf log</h2>" not in index_text:
+        if not index_text:
+            return
+        if not has_perf_log:
+            if "<h2>perf log</h2>" in index_text:
                 self.fail(
-                    "index.html has no 'perf log' section: "
-                    f"{os.path.join(out_dir, 'index.html')}"
+                    "index.html has a 'perf log' section, but it should"
+                    f" not: {index_path}"
                 )
-            elif not has_perf_log and "<h2>perf log</h2>" in index_text:
-                self.fail(
-                    f"index.html has a 'perf log' section, but it should not: "
-                    f"{os.path.join(out_dir, 'index.html')}"
-                )
+            return
+        if "<h2>perf log</h2>" not in index_text:
+            self.fail(f"index.html has no 'perf log' section: {index_path}")
+        elif not re.search(r"^Time(/\w+)?:\s+\d", index_text, re.M):
+            self.fail(
+                "index.html's 'perf log' section has no recognizable"
+                f" timing line: {index_path}"
+            )
 
     # One archive: openable, holding a callgrind file, and naming no
     # absolute path from the box that made it.
     def raw_archive_check(self, path: str, name: str) -> None:
         # bytes, never size_check's text: an archive is not utf-8
         size = os.path.getsize(path)
-        if size < _VALIDATE_RAW_ARCHIVE_LEAST_BYTES:
+        if size < _TEST_RAW_ARCHIVE_LEAST_BYTES:
             self.fail(
                 f"raw/{name} suspiciously small ({size} bytes <"
-                f" {_VALIDATE_RAW_ARCHIVE_LEAST_BYTES}): {path}"
+                f" {_TEST_RAW_ARCHIVE_LEAST_BYTES}): {path}"
             )
         try:
             with tarfile.open(path, "r:xz") as archive:
@@ -539,7 +533,7 @@ class ValidateReport:
 
     # Check one whole report, overview or single test, and report every
     # problem at once.
-    def run(self, args: ValidateReport.ValidateArgs) -> int:
+    def run(self, args: TestReport.TestArgs) -> int:
         out_dir = os.path.abspath(args.out_dir)
         index_path = os.path.join(out_dir, "index.html")
         if not os.path.isfile(index_path):
@@ -572,14 +566,14 @@ class ValidateReport:
 
         if self.errors:
             print(
-                f"validate_report: {len(self.errors)} problem(s)"
-                f" in {out_dir}:",
+                f"test_report: {len(self.errors)} problem(s) in {out_dir}:",
                 file=sys.stderr,
             )
             for error in self.errors:
                 print(f"  - {error}", file=sys.stderr)
             return 1
-        print(f"validate_report: ok ({out_dir})", file=sys.stderr)
+        if args.verbose:
+            print(f"test_report: ok ({out_dir})")
         return 0
 
     # Read a text file, complaining if it is missing or implausibly small.
@@ -618,7 +612,7 @@ class ValidateReport:
 
     # Everything one test's directory should hold, per the layout.
     def test_report_check(
-        self, out_dir: str, name: str, layout: ValidateReport.ReportLayout
+        self, out_dir: str, name: str, layout: TestReport.ReportLayout
     ) -> None:
         has_rawdata = layout.test_has_rawdata and name != "all"
         # a diff stores one delta per test, "all" included, because it
@@ -644,36 +638,42 @@ _HEAT_MAP_VIEW_LABEL = _HEAT_MAP_VIEW_ENTRY[1]
 
 # What a perf2html_diff.sh report must contain: no flame graph, no timing.
 # The version line comes from settings.py, so this checks what wrote it.
-_LAYOUT_DIFF = ValidateReport.ReportLayout(
+_LAYOUT_DIFF = TestReport.ReportLayout(
     subpages=(_HEAT_MAP_VIEW_KEY,),
     heading=r"<h2>top \d+ functions by change in self</h2>",
     header_blocks=("baseline", "modified"),
     manifest_version=_REPORT_MANIFEST_VERSION_DIFF,
-    manifest_labels=("baseline", "modified", "stamp"),
+    manifest_labels=(
+        "baseline",
+        "modified",
+        "baseline_recorded",
+        "modified_recorded",
+    ),
+    manifest_recorded_labels=("baseline_recorded", "modified_recorded"),
     test_has_rawdata=False,
     all_has_archive=True,
 )
 
 # What a perf2html.sh report must contain.
-_LAYOUT_FULL = ValidateReport.ReportLayout(
+_LAYOUT_FULL = TestReport.ReportLayout(
     subpages=(_FLAME_GRAPH_VIEW_KEY, _HEAT_MAP_VIEW_KEY),
     heading=r"<h2>top \d+ functions by self</h2>",
     header_blocks=(),
     manifest_version=_REPORT_MANIFEST_VERSION_FULL,
     manifest_labels=(
-        "sampled",
         "revision",
         "cpu",
         "build",
         "executable",
-        "stamp",
+        "recorded",
     ),
+    manifest_recorded_labels=("recorded",),
     test_has_rawdata=True,
     all_has_archive=False,
 )
 
 # The POSIX pipeline this file re-derives the checksum row with, spelled
-# out separately from shared.sh's on purpose. See DECLAUDE.md: not a twin.
+# out separately from utility.sh's on purpose: not a twin.
 _REPORT_CHECKSUM_COMMAND = (
     "find . -type f ! -name MANIFEST.txt -print"
     " | LC_ALL=C sort | LC_ALL=C tr '\\n' '\\0'"
@@ -682,18 +682,16 @@ _REPORT_CHECKSUM_COMMAND = (
 )
 
 # Smallest a file can be before it is plainly a failed generate. The flame
-# graph page is a loader and the logs are appended text, so each has its own.
-_VALIDATE_FLAME_GRAPH_LOG_LEAST_BYTES = 20
-_VALIDATE_FLAME_GRAPH_PAGE_LEAST_BYTES = 300
-_VALIDATE_FLAME_GRAPH_SCRIPT_LEAST_BYTES = 200
-_VALIDATE_HEAT_MAP_PAGE_LEAST_BYTES = 5000
-_VALIDATE_MANIFEST_LEAST_BYTES = 40
-_VALIDATE_OVERVIEW_PAGE_LEAST_BYTES = 2000
-_VALIDATE_PERF_LOG_LEAST_BYTES = 20
-_VALIDATE_RAW_ARCHIVE_LEAST_BYTES = 100
+# graph page is a loader, so it has its own.
+_TEST_FLAME_GRAPH_PAGE_LEAST_BYTES = 300
+_TEST_FLAME_GRAPH_SCRIPT_LEAST_BYTES = 200
+_TEST_HEAT_MAP_PAGE_LEAST_BYTES = 5000
+_TEST_MANIFEST_LEAST_BYTES = 40
+_TEST_OVERVIEW_PAGE_LEAST_BYTES = 2000
+_TEST_RAW_ARCHIVE_LEAST_BYTES = 100
 
 
-# main - Check one report. Source is source_scan.py's, never this file's.
+# main - Check one report. Source is test_source_scan.py's, never this file's.
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("out_dir", help="a report directory")
@@ -702,11 +700,18 @@ def main() -> int:
         action="store_true",
         help="a perf2html_diff.sh report: heat map only",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print the ok line; a quiet run prints nothing on success",
+    )
     namespace = parser.parse_args()
-    validator = ValidateReport()
-    return validator.run(
-        ValidateReport.ValidateArgs(
-            out_dir=namespace.out_dir, diff=namespace.diff
+    checker = TestReport()
+    return checker.run(
+        TestReport.TestArgs(
+            out_dir=namespace.out_dir,
+            diff=namespace.diff,
+            verbose=namespace.verbose,
         )
     )
 

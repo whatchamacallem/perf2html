@@ -1,12 +1,27 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
-set -eu
+# This comment intentionally blank. No documentation goes here.
 
-# Otherwise git clean starts at the current directory.
+usage_show() {
+  cat <<'EOF'
+clean.sh [--help]
+    Clears ./.gitignore except tmp/. Clears profiling from ccache. --help is
+    the only argument.
+EOF
+}
+
+set -euo pipefail
+
+[ $# = 0 ] || { [[ $* =~ ^(-h|--help)$ ]] && usage_show && exit 0; } \
+  || { echo "error: unknown option: $*" && usage_show && exit 2; } >&2
+
 _SCRIPT="$(readlink -f "$0")"
 cd "$(dirname "$_SCRIPT")"
 
-# Nuke the files in .gitignore except docs/.
-git clean -Xdf -e '!docs/' -e '!docs/**'
+. ./scripts/settings.sh
 
-ccache --clear --zero-stats
+# git clean starts at the current directory, hence the cd above; tmp/ is
+# the user's and stays
+git clean -Xdf -e '!tmp/' -e '!tmp/**'
+
+ccache --evict-namespace "$BUILD_CCACHE_NAMESPACE"

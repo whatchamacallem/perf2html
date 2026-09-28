@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json, os, re, sys
+from collections.abc import Sequence
 from typing import NoReturn, get_origin, get_type_hints
 
 # Every setting the tools have, then the reader that checks and assigns
-# them. _SETTING_NAMES is the line between the two. See DECLAUDE.md 6.1.
+# them. _SETTING_NAMES is the line between the two.
 
 # What the report's one shared copy of the theme is written as: written once
 # at the report root and linked, never inlined. Each page links what it uses.
@@ -12,6 +13,12 @@ ASSET_ERROR_OVERLAY_SCRIPT_NAME = "error_overlay.js"
 ASSET_FRAME_SCRIPT_NAME = "frame.js"
 ASSET_HEAT_MAP_SCRIPT_NAME = "heatmap.js"
 ASSET_HEAT_MAP_STYLESHEET_NAME = "heatmap.css"
+ASSET_MENU_SCRIPT_NAME = "menu.js"
+
+# What each test's script in assets/ ends in, after the test's name: every
+# file and function its heat map opens, which the overview's pulldowns offer.
+ASSET_PULLDOWN_NAMES_SCRIPT_SUFFIX = ".pulldown_names.js"
+
 ASSET_SETTINGS_SCRIPT_NAME = "settings.js"
 
 # The four scripts/ files a generator reads as a template, each holding the
@@ -25,12 +32,8 @@ ASSET_THEME_SCRIPT_NAME = "theme.js"
 ASSET_THEME_STYLESHEET_NAME = "theme.css"
 ASSET_UI_STRINGS_SCRIPT_NAME = "ui_strings.js"
 
-# The character table layout: each <col> is a CSS clamp() on its container's
-# 100cqw, automatic table layout in CSS. False keeps the pixel-fitted layout.
-CSS_LAYOUT = True
-
 # Every counter callgrind never records, as the recorded ones it sums from
-# and each one's coefficient. Nothing stores one. See DECLAUDE.md 6.2.
+# and each one's coefficient. Nothing stores one.
 DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {
     "D1m": {"D1mr": 1, "D1mw": 1},
     "DLm": {"DLmr": 1, "DLmw": 1},
@@ -61,6 +64,10 @@ DESIGN_FONT_SIZE_PX = 12
 # the theme sets: 1 is the design font itself. Boundary.
 DESIGN_FONT_FIT_PROPERTY = "--font-fit"
 
+# Below this window width design_scale_apply() stops shrinking the zoom
+# further, so the browser's own horizontal scrollbar appears instead.
+DESIGN_MINIMUM_WINDOW_WIDTH_PX = 1280
+
 # What the scale slider multiplies the window's own fit by: on an untouched
 # page (mid-travel whatever the ends, each half geometric), then at each end.
 DESIGN_SCALE_DEFAULT_MULTIPLE = 1
@@ -87,9 +94,9 @@ FLAME_GRAPH_EXPORTER_NAME = "dev/scripts/trace_to_speedscope.py"
 # TESTS_C's 79-202 range. Retune if a test's shape changes.
 FLAME_GRAPH_MAX_RECORDED_CALLS = 200
 
-# All a per-test flame graph directory may hold: its page, its profile, the
-# trace log. Everything else is the shared bundle at the report root.
-FLAME_GRAPH_PAGE_FILE_NAMES = ("index.html", "output.txt", "profile.js")
+# All a per-test flame graph directory may hold: its page and its profile.
+# Everything else is the shared bundle at the report root.
+FLAME_GRAPH_PAGE_FILE_NAMES = ("index.html", "profile.js")
 
 # What the bootstrap plus its embedded profile gets written as.
 FLAME_GRAPH_PROFILE_SCRIPT_NAME = "profile.js"
@@ -116,7 +123,7 @@ HEAT_COLOR_FULL_SCALE_PERCENT = 100
 HEAT_COLOR_LIGHT_TEXT_ABOVE_SHARE = 0.45
 
 # The 12-stop heat ramp, cold to hot, exempt from the light/dark pair rule.
-# Carried opaque by a cell, stepped across by the wordmark: a retune hits both.
+# Carried opaque by a cell, stepped across by the logo: a retune hits both.
 HEAT_COLOR_LOGO_STOPS: list[str] = [
     "#3E4A89",
     "#31688E",
@@ -248,17 +255,13 @@ STORAGE_VERSION_KEY = "perf2html.version"
 # The "curl.se/perf" link in every page's util block.
 STRIP_CURL_PERF_SITE_HREF = "https://curl.se/perf/index.html"
 
-# Width of a strip's status row, its first cell: the longest "<test> /
-# <label>" is 26 today, plus margin. Too small clips mid-word.
-STRIP_STATUS_ROW_WIDTH_CHARS = 33
+# Spaces each overview pulldown's box adds beyond the longest test name, the
+# longest text a closed box reads. All three boxes are this one width.
+STRIP_PULLDOWN_EXTRA_WIDTH_CHARS = 2
 
-# Spaces the overview's test menu box adds beyond its longest test name,
-# shared either side of the centered name.
-STRIP_TEST_MENU_EXTRA_WIDTH_CHARS = 2
-
-# The keys the open test menu answers, and a framed summary forwards up to
-# it, as KeyboardEvent.key names. "next" also opens a closed, focused menu.
-STRIP_TEST_MENU_KEY_NAMES: dict[str, str] = {
+# The keys an open pulldown answers, and a framed summary forwards up to the
+# tests one, as KeyboardEvent.key names. "next" also opens a focused one.
+STRIP_PULLDOWN_KEY_NAMES: dict[str, str] = {
     "close": "Escape",
     "next": "ArrowDown",
     "previous": "ArrowUp",
@@ -266,16 +269,20 @@ STRIP_TEST_MENU_KEY_NAMES: dict[str, str] = {
 }
 
 # The test merging every other, named as perf2html.sh names its directory.
-# The test menu reads it while the overview shows: data, not a UI word.
-STRIP_TEST_MENU_MERGED_TEST_NAME = "all"
+# The pulldowns work in it at the overview's home: data, not a UI word.
+STRIP_PULLDOWN_MERGED_TEST_NAME = "all"
 
-# Printable keys that, typed outside a field, stay with the page instead of
-# opening the test menu: space scrolls it.
-STRIP_TEST_MENU_SKIPPED_KEY_NAMES: tuple[str, ...] = (" ",)
+# Printable keys no pulldown takes as typed: outside a field they stay with
+# the page (space scrolls it), in an open box they type themselves.
+STRIP_PULLDOWN_SKIPPED_KEY_NAMES: tuple[str, ...] = (" ",)
 
-# Where on the heat ramp the wordmark starts, its last letter always on the
+# Width of a strip's status row, its first cell: the longest "<test> /
+# <label>" is 26 today, plus margin. Too small clips mid-word.
+STRIP_STATUS_ROW_WIDTH_CHARS = 33
+
+# Where on the heat ramp the logo starts, its last letter always on the
 # hot end. Half way up reads as the ramp's warm half, not the whole of it.
-STRIP_WORDMARK_LOGO_START_FRACTION = 0.5
+LOGO_START_FRACTION = 0.5
 
 # Valgrind's own preamble, dropped from the log a page shows.
 SUMMARY_PERF_LOG_SKIPPED_HEAD_LINES = 9
@@ -302,15 +309,11 @@ SUMMARY_TOP_FUNCTION_ROWS = 50
 # Spaces added to every table column beyond its widest cell.
 TABLE_COLUMN_EXTRA_WIDTH_CHARS = 3
 
-# Pixels no table column is dragged or filled narrower than when CSS_LAYOUT
-# is False: a floor under the width each <col>'s data-min probes to.
-TABLE_COLUMN_NARROWEST_DRAG_PX = 24
-
 # Width of a table's function-name column, in characters.
 TABLE_FUNCTION_NAME_WIDTH_CHARS = 20
 
-# Under CSS_LAYOUT, the fewest characters a fill table's grow column without a
-# fixed width keeps, so it never looks gone: one function name's worth.
+# The fewest characters a fill table's grow column without a fixed width
+# keeps, so it never looks gone: one function name's worth.
 TABLE_GROW_COLUMN_NARROWEST_CHARS = 20
 
 # Where a table cuts a long "defined at" path.
@@ -389,6 +392,10 @@ def _is_setting_name(name: str) -> bool:
     return bool(bare) and bare[0].isupper() and bare.isupper()
 
 
+# manifest_table's line width: the dev/ 79-column source limit, unrelated to
+# any page's own width settings.
+_MANIFEST_TABLE_LINE_CHARS = 79
+
 # The scalar types the type check tests exactly. bool sits before int, being
 # an int subclass, so an int annotation must not accept True.
 _SCALAR_TYPES = (bool, int, float, str)
@@ -408,8 +415,8 @@ _SENTINEL_EMPTY_TYPES = (
     tuple,
 )
 
-# How the accepted sentinels are spelled in every message naming them, so
-# the errors and DECLAUDE.md say one list. None and Ellipsis are not on it.
+# How the accepted sentinels are spelled, so every message naming them says
+# one list. None and Ellipsis are not on it.
 _SENTINEL_TEXT = 'False, 0, 0.0, "", (), [], {}'
 
 # The scripts/ directory, which is where this file, settings.sh and the
@@ -488,6 +495,41 @@ class SettingsReader:
             "of them, correct the spelling here, or -- if this is the "
             "file's own constant -- move it below the load_into() call."
         )
+
+    # The manifest as an untitled markdown table: header ["", version], each
+    # row split at its first "=", right column wrapped at the 79-col limit.
+    def manifest_table(self, lines: Sequence[str]) -> str:
+        version, rows = lines[0], [line.partition("=") for line in lines[1:]]
+        left_width = max([len(version)] + [len(label) for label, _, _ in rows])
+        right_width = _MANIFEST_TABLE_LINE_CHARS - 7 - left_width
+        out = [
+            self.manifest_table_row("", version, left_width, right_width),
+            self.manifest_table_rule(left_width, right_width),
+        ]
+        for label, _, value in rows:
+            first = True
+            while value or first:
+                out.append(
+                    self.manifest_table_row(
+                        label if first else "",
+                        value[:right_width],
+                        left_width,
+                        right_width,
+                    )
+                )
+                value = value[right_width:]
+                first = False
+        return "\n".join(out)
+
+    # One manifest_table row, its label and value cells padded to width.
+    def manifest_table_row(
+        self, label: str, value: str, left_width: int, right_width: int
+    ) -> str:
+        return f"| {label.ljust(left_width)} | {value.ljust(right_width)} |"
+
+    # One manifest_table rule row, dashes the width of each column.
+    def manifest_table_rule(self, left_width: int, right_width: int) -> str:
+        return f"|{'-' * (left_width + 2)}|{'-' * (right_width + 2)}|"
 
     # Build assets/settings.js: every setting as one frozen JSON literal in
     # settings_handler.js, wholesale, with no list of what a page may see.
@@ -688,7 +730,7 @@ class SettingsReader:
 
 
 # The reader, then the cut: the shell's settings bind first, so every one
-# is bound before the list is taken. See DECLAUDE.md 6.1 for the spelling.
+# is bound before the list is taken.
 _reader = SettingsReader()
 globals().update(_reader.shell_settings_read())
 _SETTING_NAMES = frozenset(
@@ -704,7 +746,13 @@ def load_into(module_name: str) -> None:
     _reader.load_into(module_name)
 
 
+# The manifest as an untitled markdown table, for report_complete.js.
+def manifest_table(lines: Sequence[str]) -> str:
+    return _reader.manifest_table(lines)
+
+
 # Build assets/settings.js: every setting this module holds, shipped to the
-# browser as one frozen object, with no list of which a page may see.
-def settings_script_write() -> str:
+# browser as one frozen object; manifest_lines is unused, kept for symmetry.
+def settings_script_write(manifest_lines: Sequence[str]) -> str:
+    del manifest_lines
     return _reader.script_write()

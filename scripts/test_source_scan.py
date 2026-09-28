@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# enforcer.sh uses this to enforce comment length and ascii-only.
+# test_expected_behavior.sh uses this to enforce comment length and
+# ascii-only.
 from __future__ import annotations
 
 import argparse, os, re, sys
@@ -87,13 +88,15 @@ class SourceScan:
             " file; add its extension to _COMMENT_SYNTAX_BY_EXTENSION"
         )
 
-    # Print every fault, or the one ok line, and give the exit code.
-    def exit_code(self, file_count: int) -> int:
+    # Print every fault, or under --verbose the one ok line, and give the
+    # exit code. A quiet run prints nothing on success.
+    def exit_code(self, file_count: int, verbose: bool) -> int:
         if not self.faults:
-            print(
-                f"{file_count} file(s): no comment block over"
-                f" {_COMMENT_BLOCK_MAX_LINES} lines, no stray non-ASCII"
-            )
+            if verbose:
+                print(
+                    f"{file_count} file(s): no comment block over"
+                    f" {_COMMENT_BLOCK_MAX_LINES} lines, no stray non-ASCII"
+                )
             return 0
         for fault in sorted(self.faults):
             relative = os.path.relpath(fault.path, callgrind.REPO_ROOT)
@@ -121,8 +124,8 @@ class SourceScan:
         self.unicode_check(path, lines, non_ascii)
         self.comment_check(path, lines, syntax)
 
-    # Scan each file named, and only those: enforcer.sh expands the list
-    # from its whitelist, so no directory is walked here.
+    # Scan each file named, and only those: test_expected_behavior.sh
+    # expands the list from its whitelist, so no directory is walked here.
     def files_scan(self, paths: list[str]) -> None:
         non_ascii = self.non_ascii_re()
         for path in paths:
@@ -155,7 +158,7 @@ class SourceScan:
                     f"a comment block of {length} lines, over the limit of"
                     f" {_COMMENT_BLOCK_MAX_LINES}. Say it in"
                     f" {_COMMENT_BLOCK_MAX_LINES} lines or move the rest"
-                    " into README.md or DECLAUDE.md",
+                    " into README.md or test_expected_behavior.md",
                 )
             )
 
@@ -211,19 +214,24 @@ _SOURCE_SCAN_ALLOWED_NON_ASCII_CHARS = (
 )
 
 
-# main - Scan exactly the files named. enforcer.sh names every whitelisted
-# one, so nothing here decides which files are source.
+# main - Scan exactly the files named. test_expected_behavior.sh names
+# every whitelisted one, so nothing here decides which files are source.
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "paths",
         nargs="+",
-        help="the files to scan, as enforcer.sh expands its whitelist",
+        help="the files to scan, as the caller expands its whitelist",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print the ok line; a quiet run prints nothing on success",
     )
     namespace = parser.parse_args()
     scanner = SourceScan()
     scanner.files_scan(namespace.paths)
-    return scanner.exit_code(len(namespace.paths))
+    return scanner.exit_code(len(namespace.paths), namespace.verbose)
 
 
 if __name__ == "__main__":

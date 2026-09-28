@@ -1,9 +1,18 @@
-# perf2html README
+# perf2html README.md
 
-The HTML will open straight from disk, with no server. If you start by opening
-the top level `index.html` in the report then bookmarks should work.
+`perf2html` is a collection of scripts that profile `perf` and generate html
+reports about the results.
 
-## The Scripts
+## Using A Report
+
+The HTML will open straight from disk, with no server. Start by opening the top
+level `index.html` in the report and then bookmarks will work.
+
+The html app is stateless following REST style. This means the navigation URLs
+are immutable (so bookmarks work) and the file URLs used by JavaScript are also
+immutable (so no server is needed and perfect caching is possible).
+
+## Running the Generator Scripts
 
 These are the scripts for using `perf2html`. While the scripts directory does
 contain a few more interesting files, none of them should be needed to use the
@@ -14,6 +23,10 @@ generators.
   `perf2html.sh` reports.
 - `perf2html_batch.sh` : Generate 3 reports, a baseline version, a modified
   version, and a diff.
+- `clean.sh` : Delete every generated file under `dev/` and the ccache entries
+  the builds made.
+
+Each script's `--help` prints the following.
 
 ```txt
 perf2html.sh [debug-flags] [--report=DIR] [cmake-flags...]
@@ -24,34 +37,40 @@ perf2html.sh [debug-flags] [--report=DIR] [cmake-flags...]
                       perf2html_modified_report when a cmake flag is given.
                       Pass it yourself after a source-only change.
     cmake-flags       Everything else, e.g. -D CMAKE_C_FLAGS=-Os.
+```
 
+```txt
 perf2html_diff.sh [debug-flags] [baseline] [modified] [diff]
     Measures nothing: Compares the counters in two profiling reports and
     generates a diff. Directories default to
     ./perf2html_{baseline,modified,diff}_report. Both baseline and modified
     must be a perf2html.sh report. A diff can't be diffed.
+```
 
+```txt
 perf2html_batch.sh [debug-flags] [--target-dir=DIR] [cmake-flags...]
     Profiles baseline, modified and then does a diff of them.
     --target-dir=DIR  Holds the three default-named reports (default CWD). The
                       batch cannot rename them.
-    cmake-flags       Every argument not one of its own options, applied to the
+    cmake-flags:      Every argument not one of its own options, applied to the
                       modified build (default -D CMAKE_C_FLAGS=-Os).
 ```
 
-These are developer flags for the iterative development of `perf2html` itself.
+These are shared developer flags for the iterative development of `perf2html`
+itself.
 
 ```txt
+    These are the same debug-flags as the README.md documents:
     --artifacts=TMP   The profiler artifacts directory. Defaults to
                       perf2html_temporary_artifacts/ beside the report
                       directory (inside the target dir for a batch).
-    --keep-artifacts  Do not delete the profiler artifacts directory after use.
-                      Required for a later --regenerate.
+    --keep-artifacts  Flushes the report's stale artifacts subdirectory, then
+                      keeps this run's recordings, which is what a later
+                      --regenerate reuses.
     --regenerate      Rebuilds all pages from the last run's profiler
-                      artifacts, re-measuring nothing. Implies
-                      --keep-artifacts.
-    --verbose         Enables diagnostic information. Repeating it (--verbose
-                      --verbose) increments the verbosity level.
+                      artifacts, re-measuring nothing and keeping them.
+    --verbose         Enables diagnostic information in Markdown. Repeating it
+                      (--verbose --verbose) increments the verbosity level.
 ```
 
 ## Callgrind Counters
@@ -84,12 +103,12 @@ the heat map, under these same names.
 
 `CEst` weights a miss by roughly what it costs and is used by default.
 
-See the [callgrind](https://valgrind.org/docs/manual/cl-manual.html) docs. GPL
+See the [callgrind](https://valgrind.org/tmp/manual/cl-manual.html) tmp. GPL
 Version 3, 29 June 2007.
 
-## Reading a Diff Report
+## Reading A Diff Report
 
-### Regular report
+### Regular Report
 
 A regular report shows you a percentage of a total as you might expect. In most
 places it is a percentage of a global total cycle count, however in the source
@@ -102,7 +121,7 @@ view it may also be a percentage of a file or function if selected.
 | 500 / 5000  |  10.0% |
 | 5000 / 5000 | 100.0% |
 
-### Diff report
+### Diff Report
 
 A diff report uses percentages the same way a stock market ticker does. Every
 number in it is the modified profile minus the baseline one, per function, file

@@ -2,20 +2,6 @@
 
 # This comment intentionally blank. No documentation goes here.
 
-set -euo pipefail
-
-TIMESTAMP="$(date +%s)"
-INVOKED_FROM="$PWD"
-_SCRIPT="$(readlink -f "$0")"
-PERF2HTML_DIR_="$(dirname "$_SCRIPT")"
-cd "$PERF2HTML_DIR_"
-
-. ./scripts/settings.sh
-. ./scripts/shared.sh
-
-_REPO="$(dirname "$PERF2HTML_DIR_")"
-
-# usage_show - the one usage text, printed by -h and on a bad argument
 usage_show() {
   cat <<'EOF'
 perf2html.sh [debug-flags] [--report=DIR] [cmake-flags...]
@@ -27,19 +13,32 @@ perf2html.sh [debug-flags] [--report=DIR] [cmake-flags...]
                       Pass it yourself after a source-only change.
     cmake-flags       Everything else, e.g. -D CMAKE_C_FLAGS=-Os.
 
-  debug-flags:
+    These are the same debug-flags as the README.md documents:
     --artifacts=TMP   The profiler artifacts directory. Defaults to
                       perf2html_temporary_artifacts/ beside the report
                       directory (inside the target dir for a batch).
-    --keep-artifacts  Do not delete the profiler artifacts directory after use.
-                      Required for a later --regenerate.
+    --keep-artifacts  Flushes the report's stale artifacts subdirectory, then
+                      keeps this run's recordings, which is what a later
+                      --regenerate reuses.
     --regenerate      Rebuilds all pages from the last run's profiler
-                      artifacts, re-measuring nothing. Implies
-                      --keep-artifacts.
-    --verbose         Enables diagnostic information. Repeating it (--verbose
-                      --verbose) increments the verbosity level.
+                      artifacts, re-measuring nothing and keeping them.
+    --verbose         Enables diagnostic information in Markdown. Repeating it
+                      (--verbose --verbose) increments the verbosity level.
 EOF
 }
+
+set -euo pipefail
+
+TIMESTAMP="$(date +%s)"
+INVOKED_FROM="$PWD"
+_SCRIPT="$(readlink -f "$0")"
+PERF2HTML_DIR_="$(dirname "$_SCRIPT")"
+cd "$PERF2HTML_DIR_"
+
+. ./scripts/settings.sh
+. ./scripts/utility.sh
+
+_REPO="$(dirname "$PERF2HTML_DIR_")"
 
 # args_parse - reads the command line into the run's settings and $_TESTS.
 args_parse() {
@@ -87,9 +86,19 @@ args_parse() {
   fi
   _OUT_DIR="$(absolute_path "$_OUT_DIR")"
   if [ -z "$ARTIFACTS_DIR" ]; then
-    ARTIFACTS_DIR="$(dirname "$_OUT_DIR")/$ARTIFACTS_NAME"
+    if [ "$_KEEP_ARTIFACTS" = 0 ] && [ "$_REGENERATE" = 0 ]; then
+      ARTIFACTS_DIR="$(mktemp -d)"
+      log_verbose "using --artifacts=\"$ARTIFACTS_DIR\""
+    else
+      ARTIFACTS_DIR="$_TARGET_DIR/$ARTIFACTS_NAME"
+    fi
   fi
   ARTIFACTS_DIR="$(absolute_path "$ARTIFACTS_DIR")"
+  # each report owns one subdirectory of the artifacts dir, so no run can
+  # flush or keep a sibling report's recordings
+  ARTIFACTS_DIR="$ARTIFACTS_DIR/$(basename "$_OUT_DIR")"
+  # the run's rows, named after its report: what --regenerate reads back
+  _HEADER_FILE="$ARTIFACTS_DIR/$HEADER_ROWS_NAME.$(basename "$_OUT_DIR").txt"
   # -O2 -g leads CMAKE_C_FLAGS because -O0 costs are not the shipped build's
   # (nothing inlined); a later -O the user passes, like -Os, still wins
   local _index _seen=0 _split=0 _flag
@@ -124,60 +133,58 @@ ${_flag#-DCMAKE_C_FLAGS=}"
     "error: no TESTS_C entry in $_REPO/tests/perf/Makefile.inc"
 }
 
-# stamp_reuse - takes $TIMESTAMP back from a verified report, for --regenerate.
-stamp_reuse() {
-  # version line and checksum must both still hold, so --regenerate cannot
-  # read back what an aborted run or a later edit left behind
-  TIMESTAMP="$(manifest_stamp_of "$_OUT_DIR" "--regenerate input" \
-    "$REPORT_MANIFEST_VERSION_FULL")"
+# header_row_of - one LABEL= row of the run's header rows file.
+header_row_of() {
+  sed -n "s/^$1=//p" "$_HEADER_FILE" | head -1
+}
+
+# recorded_reuse - takes $TIMESTAMP back from the recorded= row the last
+# measuring run left in the artifacts dir, and proves every recording it names.
+recorded_reuse() {
+  [ -d "$ARTIFACTS_DIR" ] || error_exit 2 \
+    "error: --regenerate: no recordings at $ARTIFACTS_DIR"
+  [ -f "$_HEADER_FILE" ] || error_exit 2 \
+    "error: --regenerate: $ARTIFACTS_DIR is missing $(basename \
+      "$_HEADER_FILE"), the rows of the run to reuse"
+  TIMESTAMP="$(header_row_of recorded)"
+  TIMESTAMP="${TIMESTAMP%% *}"
+  [ -n "$TIMESTAMP" ] || error_exit 2 \
+    "error: --regenerate: no recorded= row in $_HEADER_FILE"
   local _test_name _loops _file _missing=() _dir="$ARTIFACTS_DIR"
   for _test_name in "${_TESTS[@]}"; do
     _loops=$CALLGRIND_LOOPS
     for _file in "$_dir/callgrind.out.$_test_name.$_loops.$TIMESTAMP" \
       "$_dir/valgrind.$_test_name.$_loops.$TIMESTAMP.log" \
       "$_dir/$PROFILE_TIMING_FILE_PREFIX.$_test_name.$TIMESTAMP.csv" \
+      "$_dir/$PROFILE_TIMING_FILE_PREFIX.$_test_name.$TIMESTAMP.txt" \
+      "$_dir/trace.$_test_name.$_loops.$TIMESTAMP.log" \
       "$_dir/trace.$_test_name.$_loops.$TIMESTAMP.speedscope.json"; do
       [ -f "$_file" ] || _missing+=("$_file")
     done
   done
   [ "${#_missing[@]}" != 0 ] || return 0
-  local _lines=("error: --regenerate is missing ${#_missing[@]} recorded")
-  _lines[0]="${_lines[0]} file(s) for stamp $TIMESTAMP:"
-  for _file in "${_missing[@]}"; do _lines+=("       $_file"); done
-  _lines+=("       ($ARTIFACTS_DIR was cleaned; re-run perf2html.sh"
-    "       --keep-artifacts to record them again)")
+  local _lines=("error: --regenerate is missing ${#_missing[@]} file(s)")
+  _lines[0]="${_lines[0]} recorded at $TIMESTAMP in $ARTIFACTS_DIR:"
+  for _file in "${_missing[@]}"; do _lines+=("  $_file"); done
   error_exit 2 "${_lines[@]}"
 }
 
 # build_manifest - collects the rows describing what was measured and how.
 build_manifest() {
   if [ "$_REGENERATE" = 1 ]; then
-    _SAMPLED="$(manifest_value "$_OUT_DIR" sampled)"
-    _REVISION="$(manifest_value "$_OUT_DIR" revision)"
-    _CPU_MODEL="$(manifest_value "$_OUT_DIR" cpu)"
-    # build_compile wants this one, and runs after main has dropped the
-    # manifest. Every read of the previous run's rows happens here.
-    _BUILD_DESC="$(manifest_value "$_OUT_DIR" build)"
-    # the checksum leaves the manifest out, so a torn row passes it and
-    # would be copied into the new manifest as nothing
-    if [ -z "$_SAMPLED" ] || [ -z "$_REVISION" ] || [ -z "$_CPU_MODEL" ] \
+    _REVISION="$(header_row_of revision)"
+    _CPU_MODEL="$(header_row_of cpu)"
+    # build_compile wants this one too: every read of the measuring run's
+    # rows happens here, and an empty one is a torn file, never a value
+    _BUILD_DESC="$(header_row_of build)"
+    if [ -z "$_REVISION" ] || [ -z "$_CPU_MODEL" ] \
       || [ -z "$_BUILD_DESC" ]; then
-      error_exit 2 "error: --regenerate: $_OUT_DIR/MANIFEST.txt is missing" \
-        "       one of its sampled=, revision=, cpu= or build= rows"
+      error_exit 2 "error: --regenerate: $_HEADER_FILE is missing one of its \
+revision=, cpu= or build= rows"
     fi
     return
   fi
-  _SAMPLED="$(date +'%Y/%m/%d %H:%M:%S %Z')"
-  # dev/ lives in the curl checkout, so git failing here is git's own error
-  _REVISION="$(cd "$_REPO" && git rev-parse --short HEAD)"
-  # git diff --quiet answers 1 for a dirty tree; any other code is a fault
-  local _dirty=0
-  (cd "$_REPO" && git diff --quiet HEAD --) || _dirty=$?
-  if [ "$_dirty" = 1 ]; then
-    _REVISION="$_REVISION-dirty"
-  elif [ "$_dirty" != 0 ]; then
-    error_exit 1 "error: git diff --quiet exited $_dirty in $_REPO"
-  fi
+  _REVISION="$(revision_describe "$_REPO")"
   # a box whose lscpu prints no model name is not a failure, so the grep
   # cannot be allowed to end the run under pipefail
   _CPU_MODEL="$(lscpu | grep -E 'Model name' | head -1 \
@@ -190,6 +197,9 @@ tree_build() {
   local _dir="$1"
   shift
   rm -f "$_dir/CMakeCache.txt"
+  # ccache's own variable, exported to this function's two cmake children
+  # alone: it tags every compile so clean.sh can evict ours by name
+  local -x CCACHE_NAMESPACE="$BUILD_CCACHE_NAMESPACE"
   local _configure_command=(cmake -S "$_REPO" -B "$_dir" -G Ninja
     -DCURL_USE_LIBPSL=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache "$@")
   local _command_line _exit_code=0
@@ -200,7 +210,7 @@ tree_build() {
   # below that, users can run the printed cmake command in its printed tree
   child_capture_noisy "${_configure_command[@]}" || _exit_code=$?
   [ "$_exit_code" = 0 ] \
-    || error_exit "$_exit_code" "cmake failed to build $_command_line"
+    || error_exit "$_exit_code" "error: cmake failed to build $_command_line"
   command_run cmake --build "$_dir" --parallel --target perf
 }
 
@@ -273,7 +283,7 @@ trace_run() {
 }
 
 # trace_convert - the trace file to speedscope JSON, its lines written the
-# way the page reads them: no artifacts dir, no stamp. Args: bin, json, name.
+# way the page reads them: no artifacts dir or time. Args: bin, json, name.
 trace_convert() {
   python3 "$PERF2HTML_DIR_/scripts/trace_to_speedscope.py" "$1" -o "$2" \
     --name "$3" 2>&1 | sed "s#$ARTIFACTS_DIR/##g; s#\\.$TIMESTAMP##g"
@@ -293,16 +303,15 @@ flame_app_install() {
   local _out="$1"
   local _pattern
   local -a _found
-  rm -rf "$_out/$FLAME_GRAPH_APP_DIR_NAME"
   mkdir -p "$_out/$FLAME_GRAPH_APP_DIR_NAME"
   for _pattern in "${FLAME_GRAPH_APP_FILE_GLOBS[@]}"; do
     # find, not a bare glob: a release directory holding a space would be
     # word-split by the expansion and match nothing that exists.
     mapfile -t _found < <(find "$SPEEDSCOPE_RELEASE" -maxdepth 1 \
       -name "$_pattern" | sort)
+    local _reason="error: $_pattern matched ${#_found[@]} files in"
     [ "${#_found[@]}" = 1 ] || error_exit 1 \
-      "error: $_pattern matched ${#_found[@]} files in" \
-      "       $SPEEDSCOPE_RELEASE, expected exactly 1"
+      "$_reason $SPEEDSCOPE_RELEASE, expected exactly 1"
     cp "${_found[0]}" "$_out/$FLAME_GRAPH_APP_DIR_NAME"/
     case "$_pattern" in
       *.js) _FLAME_APP_JS="$(basename "${_found[0]}")" ;;
@@ -312,30 +321,23 @@ flame_app_install() {
 }
 
 # trace_render - counting run, then sampling run, then the flame graph page.
+# SETS _TRACE_JSON and _TRACE_LOG, the recordings the pages are built from.
 trace_render() {
   local _test="$1" _out="$2" _loops="$3"
   local _seen _tree_display _name
   local _trace_file="$ARTIFACTS_DIR/trace.$_test.$_loops.$TIMESTAMP.bin"
-  local _log="$_out/flame-graph/output.txt"
+  _TRACE_LOG="$ARTIFACTS_DIR/trace.$_test.$_loops.$TIMESTAMP.log"
   _TRACE_JSON="$ARTIFACTS_DIR/trace.$_test.$_loops"
   _TRACE_JSON="$_TRACE_JSON.$TIMESTAMP.speedscope.json"
 
+  mkdir -p "$_out/flame-graph"
   if [ "$_REGENERATE" = 1 ]; then
     heading_print "python3 build_flame_graph.py $_test"
-    local _saved
-    _saved="$(mktemp)"
-    cp "$_log" "$_saved"
-    rm -rf "$_out/flame-graph"
-    mkdir -p "$_out/flame-graph"
-    cp "$_saved" "$_log"
-    rm -f "$_saved"
     flame_graph_build "$_out"
     return
   fi
   _name="$(basename "${_trace_file/.$TIMESTAMP/}")"
   heading_print "PERF_TRACE_OUT=$_name perf $_test $_loops"
-  rm -rf "$_out/flame-graph"
-  mkdir -p "$_out/flame-graph"
   _tree_display="$(path_display "$_TRACE_TREE" "$_REPO")"
   {
     echo "# $_tree_display = this report's build flags +"
@@ -343,24 +345,26 @@ trace_render() {
     echo "# reads rdtsc at every function enter and exit. Run 1 counts events,"
     echo "# run 2 keeps the ones right after the run's midpoint"
     echo "# (CYG_CALLBACKS_MAX_REC in dev/src/cyg_callback.c)."
-  } >"$_log"
+  } >"$_TRACE_LOG"
   # run 1 counts every event; run 2 keeps the ones after the midpoint
-  trace_run "$_test" "$_loops" "$_trace_file" "$TRACE_SKIP_ALL" "$_log"
+  trace_run "$_test" "$_loops" "$_trace_file" "$TRACE_SKIP_ALL" "$_TRACE_LOG"
   _seen="$(python3 "$PERF2HTML_DIR_/scripts/trace_to_speedscope.py" --seen \
     "$_trace_file")"
-  trace_run "$_test" "$_loops" "$_trace_file" "$((_seen / 2))" "$_log"
+  [ -n "$_seen" ] || error_exit 1 "error: no --seen count for $_trace_file"
+  trace_run "$_test" "$_loops" "$_trace_file" "$((_seen / 2))" "$_TRACE_LOG"
   local _shown="python3 $PERF2HTML_DIR_/scripts/trace_to_speedscope.py"
   _shown="$_shown $_trace_file -o $_TRACE_JSON"
   _shown="$_shown --name \"$_test (loops=$_loops)\""
-  page_command_run "$_log" "$_shown" \
+  page_command_run "$_TRACE_LOG" "$_shown" \
     trace_convert "$_trace_file" "$_TRACE_JSON" "$_test (loops=$_loops)"
   flame_graph_build "$_out"
 }
 
-# report_render - one test's heat map, summary page and raw archive.
+# report_render - one test's heat map, summary page and raw archive. Args:
+# name, dir, speedscope JSON, perf log, trace log; "all" has only the two.
 report_render() {
-  local _name="$1" _out="$2" _json="$3"
-  local _log_args=() _raw_args=() _log_file
+  local _name="$1" _out="$2" _json="$3" _perf_log="$4" _trace_log="$5"
+  local _log_args=() _raw_args=() _perf_log_args=() _log_file
 
   heading_print "python3 callgrind_to_heatmap.py $_name"
   command_run python3 "$PERF2HTML_DIR_/scripts/callgrind_to_heatmap.py" \
@@ -369,14 +373,11 @@ report_render() {
     --title "$_name / heat map"
 
   heading_print "python3 build_report.py test $_name"
-  rm -rf "$_out/raw"
   for _log_file in "${_LOG_FILES[@]}"; do _log_args+=(--log "$_log_file"); done
-  local _perf_log_args=(--perf-log "$_out/perf-tool/output.txt"
-    --trace-log "$_out/flame-graph/output.txt")
   if [ "$_name" = all ]; then
     _log_args+=(--no-log)
-    _perf_log_args=()
   else
+    _perf_log_args=(--perf-log "$_perf_log" --trace-log "$_trace_log")
     archive_write "$_name" "$_out" "$_REPO" \
       "${_CALLGRIND_FILES[@]}" "$_json"
     _raw_args+=(--raw-data "$_out/raw/$_name$REPORT_RAW_ARCHIVE_SUFFIX")
@@ -396,23 +397,29 @@ timing_record() {
       $3 ~ /instructions/ { printf "Instructions: %s\n", $1 }' "$2"
 }
 
+# perf_page_of - the timing run's page text of one test, or of "all", a
+# recording in the artifacts dir: what the summary and the overview read.
+perf_page_of() {
+  echo "$ARTIFACTS_DIR/$PROFILE_TIMING_FILE_PREFIX.$1.$TIMESTAMP.txt"
+}
+
 # run_one - one test end to end: callgrind, native timing, trace, pages.
 run_one() {
   local _test="$1" _out="$2"
   local _loops _cg_file _log _start _line _timing _shown
-  local _stat_file _page="$_out/perf-tool/output.txt"
+  local _stat_file _page
   _stat_file="$ARTIFACTS_DIR/$PROFILE_TIMING_FILE_PREFIX"
   _stat_file="$_stat_file.$_test.$TIMESTAMP.csv"
+  _page="$(perf_page_of "$_test")"
   _loops=$CALLGRIND_LOOPS
   _cg_file="$ARTIFACTS_DIR/callgrind.out.$_test.$_loops.$TIMESTAMP"
   _log="$ARTIFACTS_DIR/valgrind.$_test.$_loops.$TIMESTAMP.log"
-  mkdir -p "$_out/perf-tool"
 
   if [ "$_REGENERATE" = 1 ]; then
     trace_render "$_test" "$_out" "$_loops"
     _CALLGRIND_FILES=("$_cg_file")
     _LOG_FILES=("$_log")
-    report_render "$_test" "$_out" "$_TRACE_JSON"
+    report_render "$_test" "$_out" "$_TRACE_JSON" "$_page" "$_TRACE_LOG"
     log_verbose "$(printf '%-13sloops=%s | reused' "$_test" "$_loops")"
     return
   fi
@@ -452,15 +459,15 @@ run_one() {
   trace_render "$_test" "$_out" "$_loops"
   _CALLGRIND_FILES=("$_cg_file")
   _LOG_FILES=("$_log")
-  report_render "$_test" "$_out" "$_TRACE_JSON"
+  report_render "$_test" "$_out" "$_TRACE_JSON" "$_page" "$_TRACE_LOG"
 }
 
 # run_all - the synthetic "all" test's pages, then the overview page.
 run_all() {
   local _out="$1"
   local _test_name _loops _usecs _total=0 _rows="" _args _timing_lines=()
-  local _page="$_out/perf-tool/output.txt"
-  mkdir -p "$_out/perf-tool"
+  local _page _test_page _perf_log_args=()
+  _page="$(perf_page_of all)"
   _CALLGRIND_FILES=()
   _LOG_FILES=()
   for _test_name in "${_TESTS[@]}"; do
@@ -475,13 +482,13 @@ run_all() {
 
   heading_print "taskset -c $PROFILE_PINNED_CPU perf <test>"
   for _test_name in "${_TESTS[@]}"; do
-    _usecs="$(awk '/^Time:/ { print $2; exit }' \
-      "$_OUT_DIR/$_test_name/perf-tool/output.txt")"
-    [ -n "$_usecs" ] || error_exit 1 \
-      "error: no Time: line in $_OUT_DIR/$_test_name/perf-tool/output.txt"
+    _test_page="$(perf_page_of "$_test_name")"
+    _usecs="$(awk '/^Time:/ { print $2; exit }' "$_test_page")"
+    [ -n "$_usecs" ] || error_exit 1 "error: no Time: line in $_test_page"
     _rows+="$(printf '  %-14s %12s usecs' "$_test_name:" "$_usecs")"$'\n'
     _timing_lines+=("$_test_name: $_usecs usecs")
     _total=$((_total + _usecs))
+    _perf_log_args+=(--perf-log "$_test_name=$_test_page")
   done
   {
     echo "\$ taskset -c $PROFILE_PINNED_CPU $_BIN_REL <test>"
@@ -494,24 +501,23 @@ run_all() {
   # page's command line with its rows nested the way a run's lines are
   command_item_print "taskset -c $PROFILE_PINNED_CPU $_BIN <test>"
   item_output_print "${_timing_lines[@]}" "Time: $_total usecs"
+  _perf_log_args+=(--perf-log "all=$_page")
 
-  rm -rf "$_out/flame-graph"
-  report_render all "$_out" ""
+  report_render all "$_out" "" "" ""
 
   heading_print "python3 build_report.py overview"
-  # the rows the overview renders, in a working file: MANIFEST.txt cannot
-  # be it, because the manifest is written after every page exists
+  # the rows the overview renders, in the run's header rows file, which a
+  # later --regenerate reads back: MANIFEST.txt is written after every page
   _HEADER_ROWS=(
-    "sampled=$_SAMPLED"
     "revision=$_REVISION"
     "cpu=$_CPU_MODEL"
     "build=$_BUILD_DESC"
     "executable=$_BIN_REL <test>  (native, pinned to CPU $PROFILE_PINNED_CPU)"
-    "$(manifest_stamp_row)"
+    "$(manifest_recorded_row)"
   )
-  local _header_file="$ARTIFACTS_DIR/$HEADER_ROWS_NAME.$TIMESTAMP.txt"
-  printf '%s\n' "${_HEADER_ROWS[@]}" >"$_header_file"
-  _args=(-o "$_OUT_DIR/index.html" --header-file "$_header_file")
+  printf '%s\n' "${_HEADER_ROWS[@]}" >"$_HEADER_FILE"
+  _args=(-o "$_OUT_DIR/index.html" --header-file "$_HEADER_FILE"
+    "${_perf_log_args[@]}")
   for _test_name in "${_TESTS[@]}" all; do _args+=(--test "$_test_name"); done
   command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" overview \
     "${_args[@]}"
@@ -524,24 +530,23 @@ main() {
   args_parse "$@"
   verbose_begin
   title_print "$_SCRIPT" "$@"
-  # the manifest is --regenerate's first step: nothing is created or
-  # deleted before a missing or broken one stops the run
-  if [ "$_REGENERATE" = 1 ]; then stamp_reuse; fi
+  # the recordings are --regenerate's whole input: nothing is created or
+  # deleted before a missing one stops the run
+  if [ "$_REGENERATE" = 1 ]; then recorded_reuse; fi
   toolchain_check
-  [ "$_KEEP_ARTIFACTS" = 1 ] || artifacts_clean
-  # the last reader of the previous run's manifest: report_begin below
-  # drops it, and clears the report unless this is a --regenerate
   build_manifest
+  # the report is output only, deleted whatever the mode, and before the
+  # flush below: a refused delete leaves the last run's recordings standing
+  report_delete "$_OUT_DIR"
+  # --keep-artifacts flushes stale recordings first; only --regenerate reuses
+  [ "$_REGENERATE" = 1 ] || artifacts_clean
   _HEADER_ROWS=()
   local _log_name="profile.$TIMESTAMP.log"
-  # --regenerate rebuilds the pages from the artifacts dir and reads the
-  # report back to find them, so it is the one mode that must not clear it
   if [ "$_REGENERATE" = 1 ]; then
     _log_name="regenerate.$TIMESTAMP.$(date +%s).log"
   fi
   report_begin "$_OUT_DIR" "$_log_name" \
-    "dev/perf2html.sh $TIMESTAMP: ${_CMAKE_FLAGS[*]} -> $_OUT_DIR" \
-    "$_REGENERATE"
+    "dev/perf2html.sh $TIMESTAMP: ${_CMAKE_FLAGS[*]} -> $_OUT_DIR"
   build_compile
   flame_app_install "$_OUT_DIR"
 

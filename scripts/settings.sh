@@ -3,8 +3,13 @@
 # the temporary artifacts directory's default name, beside the report
 ARTIFACTS_NAME=perf2html_temporary_artifacts
 
-# the assets/ script an error page reads the manifest rows back from
-ASSET_REPORT_MANIFEST_SCRIPT_NAME=report_manifest.js
+# the assets/ script written last and counted by the checksum, whose one
+# line names the manifest version, proving the run finished
+ASSET_REPORT_COMPLETE_SCRIPT_NAME=report_complete.js
+
+# the ccache namespace tree_build tags every compile with, so clean.sh
+# evicts our entries and nobody else's
+BUILD_CCACHE_NAMESPACE=perf2html
 
 # dir at the repo root holding the trees profiling reads, one per set of
 # cmake flags, named by build_paths
@@ -35,8 +40,8 @@ FLAME_GRAPH_APP_DIR_NAME=flame-graph-app
 # so sourcing never expands one against the current directory
 FLAME_GRAPH_APP_FILE_GLOBS=('speedscope-*.js' 'speedscope-*.css' '*.woff2')
 
-# working file the overview reads its LABEL=VALUE rows from. MANIFEST.txt
-# cannot be it, being written after every page exists
+# working file holding a measured run's LABEL=VALUE rows, named after its
+# report: the overview reads it; --regenerate finds the run's recorded= in it
 HEADER_ROWS_NAME=header.overview
 
 # lines of a failed child's output reprinted on the terminal. The whole of
@@ -47,7 +52,7 @@ LOG_FAILURE_TAIL_LINES=40
 PROFILE_PINNED_CPU=3
 
 # what one test's native timing recording is named, before its test name,
-# stamp and .csv. It is the artifact --regenerate dates the executable against
+# recorded time and .csv: what --regenerate dates the executable against
 PROFILE_TIMING_FILE_PREFIX=perf-stat
 
 # the report-root directory holding the shared copy of our own theme
@@ -60,7 +65,7 @@ REPORT_BASELINE_DIR_NAME=perf2html_baseline_report
 REPORT_DIFF_DIR_NAME=perf2html_diff_report
 
 # the LABEL= row a report's MANIFEST.txt records its checksum on. The shell
-# writes and reads it; validate_report.py and enforcer.sh check it
+# writes and reads it; test_report.py and test_expected_behavior.sh read
 REPORT_MANIFEST_CHECKSUM_LABEL=checksum
 
 # the exact first line of a MANIFEST.txt, one per kind of report, and the only
@@ -87,6 +92,3 @@ TRACE_SKIP_ALL=18446744073709551615
 # the diagnostic level, one per --verbose given: 0 prints no diagnostics, 1
 # the steps and their output, 2 cmake's configure output too
 VERBOSE=0
-
-# the column every --verbose line wraps at, the markdown's own hard max
-VERBOSE_LINE_WIDTH_CHARS=79
