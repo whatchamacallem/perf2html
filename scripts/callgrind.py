@@ -1,210 +1,191 @@
 from __future__ import annotations
 
-import collections, dataclasses, os, posixpath, re, sys
+import collections, dataclasses, functools, os, posixpath, re, sys
 from collections.abc import Sequence
 from typing import Literal, NamedTuple, TypeAlias, TypeVar
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import settings
 
-# All constants needed from settings.py have to be loaded here before anything
-# else.
+_CACHE_ROOT_DIR: str = ""
 _DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {}
+_RANKING_COUNTER_NAME: str = ""
 settings.load_into(__name__)
 
-# One cost number per counter, in the order the file's "events:" line names
-# them. That line is callgrind's own wire format and keeps its spelling.
 Costs: TypeAlias = list[int]
-# Where a source file came from, deciding whether the heat map shows it.
 Group = Literal["repo", "system", "external"]
-# The key type of whichever table a shared accumulate helper is given.
-_Key = TypeVar("_Key")
 
-# The curl checkout, three levels up from here -- every path is
-# reported relative to it.
 REPO_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
 
+_Key = TypeVar("_Key")
 
-# Caller - The one place a function was called from.
+_CALLGRIND_UNKNOWN_FILE_NAME = "???"
+
+
+@functools.cache
+def external_source_roots() -> tuple[str, ...]:
+    root = os.path.expanduser(_CACHE_ROOT_DIR)
+    if not os.path.isdir(root):
+        return ()
+    found: list[str] = []
+    for package in sorted(os.listdir(root)):
+        versions = os.path.join(root, package)
+        if not os.path.isdir(versions):
+            continue
+        for version in sorted(os.listdir(versions)):
+            tree = os.path.join(versions, version)
+            if os.path.isdir(tree):
+                found.append(tree)
+    return tuple(found)
+
+
 class Caller(NamedTuple):
-    # who did the calling
     function: str
-    # the file that call sits in
     file: str
-    # the line that call sits on
     line: int
 
 
-# CallSite - One line that calls one callee -- the other end of a Caller.
 class CallSite(NamedTuple):
-    # the file doing the calling
     file: str
-    # the line doing the calling
     line: int
-    # who gets called
     callee: str
 
 
-# PathInfo - One source path, resolved three ways at once.
-class PathInfo(NamedTuple):
-    # repo-relative, safe to print into a page
-    display: str
-    # readable on this box, or None when the source is gone
-    local: str | None
-    # repo, system or external
-    group: Group
+class CounterSchema:
+    def __init__(self, counters: Sequence[str]) -> None:
+        self.counters = list(counters)
+        self.recorded_slots = {
+            name: slot for slot, name in enumerate(counters)
+        }
+        self.derived_counters = [
+            ResolvedDerivedCounter(
+                name,
+                tuple(
+                    ResolvedTerm(coefficient, self.recorded_slots[input_name])
+                    for input_name, coefficient in terms.items()
+                ),
+            )
+            for name, terms in _DERIVED_COUNTER_TERMS.items()
+            if all(input_name in self.recorded_slots for input_name in terms)
+        ]
+        self.derived_terms = {
+            entry.name: entry.terms for entry in self.derived_counters
+        }
+
+    def counter_names(self) -> list[str]:
+        return list(self.counters) + [
+            entry.name for entry in self.derived_counters
+        ]
+
+    def value(self, costs: Costs, name: str) -> int:
+        slot = self.recorded_slots.get(name)
+        if slot is not None:
+            return costs[slot] if slot < len(costs) else 0
+        terms = self.derived_terms.get(name)
+        if terms is None:
+            raise KeyError(name)
+        return sum(
+            term.coefficient
+            * (
+                costs[term.counter_index]
+                if term.counter_index < len(costs)
+                else 0
+            )
+            for term in terms
+        )
 
 
-# Profile - Everything one callgrind run measured, indexed every way
-# the pages ask for.
 @dataclasses.dataclass
-class Profile:
-    # the recorded counters, in cost-vector order
+class LineProfile:
     counters: list[str] = dataclasses.field(default_factory=list)
-    # the profiled command line
     command: str = ""
-    # callgrind's own total -- the self-check divides by it
     summary: list[int] = dataclasses.field(default_factory=list)
-    # cost spent on the line itself
     line_self: dict[SourceLine, Costs] = dataclasses.field(
         default_factory=dict
     )
-    # cost spent below the calls made from it
-    line_calls: dict[SourceLine, Costs] = dataclasses.field(
-        default_factory=dict
-    )
-    # how many calls the line made
-    line_call_count: collections.defaultdict[SourceLine, int] = (
-        dataclasses.field(default_factory=lambda: collections.defaultdict(int))
-    )
-    # which function owns the line
     line_function: dict[SourceLine, str] = dataclasses.field(
         default_factory=dict
     )
-    # the file a function is declared in
     function_home: dict[str, str] = dataclasses.field(default_factory=dict)
-    # cost in the function itself, not in what it calls
     function_self: dict[str, Costs] = dataclasses.field(default_factory=dict)
-    # per (function, line) cost -- the only per-context table, and
-    # what a diff subtracts
     function_lines: collections.defaultdict[str, dict[SourceLine, Costs]] = (
         dataclasses.field(
             default_factory=lambda: collections.defaultdict(dict)
         )
     )
-    # cost below everything the function calls
-    function_calls: dict[str, Costs] = dataclasses.field(default_factory=dict)
-    # the line to jump to when opening a function
     function_entry: dict[str, SourceLine] = dataclasses.field(
         default_factory=dict
     )
-    # per call site, how many calls and what they cost
-    callees: dict[CallSite, Tally] = dataclasses.field(default_factory=dict)
-    # the same the other way round: per callee, who called it
-    callers: collections.defaultdict[str, dict[Caller, Tally]] = (
-        dataclasses.field(
-            default_factory=lambda: collections.defaultdict(dict)
-        )
-    )
-    # the binary each file was compiled into
     file_ob: dict[str, str] = dataclasses.field(default_factory=dict)
 
-    # Every counter a page may show: recorded first, then the ones we add up.
     def counter_names(self) -> list[str]:
-        return list(self.counters) + [
-            derived.name for derived in self.resolved_derived_counters()
-        ]
+        return counter_schema(tuple(self.counters)).counter_names()
 
-    # The derived counters this run can supply, each input counter's name
-    # swapped for its slot. Walked straight off DERIVED_COUNTER_TERMS.
     def resolved_derived_counters(self) -> list[ResolvedDerivedCounter]:
-        return [
-            ResolvedDerivedCounter(
-                name,
-                tuple(
-                    ResolvedTerm(coefficient, self.counters.index(input_name))
-                    for input_name, coefficient in terms.items()
-                ),
-            )
-            for name, terms in _DERIVED_COUNTER_TERMS.items()
-            if all(input_name in self.counters for input_name in terms)
-        ]
+        return list(counter_schema(tuple(self.counters)).derived_counters)
 
-    # The whole run's cost: callgrind's own summary line.
     def totals(self) -> Costs:
         if not self.summary:
             raise ValueError(f"no summary: command={self.command!r}")
         return list(self.summary)
 
-    # Pull one named counter out of a cost vector, recorded or derived.
     def value(self, costs: Costs, name: str) -> int:
-        if name in self.counters:
-            slot = self.counters.index(name)
-            return costs[slot] if slot < len(costs) else 0
-        for derived in self.resolved_derived_counters():
-            if derived.name == name:
-                return sum(
-                    term.coefficient
-                    * (
-                        costs[term.counter_index]
-                        if term.counter_index < len(costs)
-                        else 0
-                    )
-                    for term in derived.terms
-                )
-        raise KeyError(name)
+        return counter_schema(tuple(self.counters)).value(costs, name)
 
-    # An all-zero cost vector of the right width for this profile.
     def zeros(self) -> Costs:
         return [0] * len(self.counters)
 
 
-# ResolvedDerivedCounter - One derived counter whose input names have been
-# swapped for the cost-vector slots holding them, ready to sum.
+class PathInfo(NamedTuple):
+    display: str
+    local: str | None
+    group: Group
+
+
+@dataclasses.dataclass
+class Profile(LineProfile):
+    line_calls: dict[SourceLine, Costs] = dataclasses.field(
+        default_factory=dict
+    )
+    line_call_count: collections.defaultdict[SourceLine, int] = (
+        dataclasses.field(default_factory=lambda: collections.defaultdict(int))
+    )
+    function_calls: dict[str, Costs] = dataclasses.field(default_factory=dict)
+    callees: dict[CallSite, Tally] = dataclasses.field(default_factory=dict)
+    callers: collections.defaultdict[str, dict[Caller, Tally]] = (
+        dataclasses.field(
+            default_factory=lambda: collections.defaultdict(dict)
+        )
+    )
+
+
 class ResolvedDerivedCounter(NamedTuple):
-    # what to call it
     name: str
-    # the slots to add up, with weights
     terms: tuple[ResolvedTerm, ...]
 
 
-# ResolvedTerm - One weighted slot of a cost vector.
 class ResolvedTerm(NamedTuple):
-    # what to multiply it by
     coefficient: int
-    # which slot of the cost vector
     counter_index: int
 
 
-# SourceLine - One line of one file -- the key most tables here are keyed by.
 class SourceLine(NamedTuple):
-    # the file, exactly as callgrind spelled it
     file: str
-    # 1-based line number
     line: int
 
 
-# Tally - A cost plus how many calls produced it.
 @dataclasses.dataclass
 class Tally:
-    # how many calls
     count: int
-    # what they cost between them
     costs: Costs
 
 
-# Callgrind - Reads callgrind's output format into a Profile, and
-# resolves the paths in it.
 class Callgrind:
-    # matches a "(7)" name reference, with the name when it is spelled out
     NAME_COMPRESSION_RE = re.compile(r"^\((\d+)\)(?: (.*))?$")
 
-    # CompressedNames - Callgrind writes "(7) name" once, then just
-    # "(7)" -- this remembers which is which.
     class CompressedNames:
-        # Start with no names learned, one table per name kind.
         def __init__(self) -> None:
             self.names: dict[str, dict[str, str]] = {
                 "fl": {},
@@ -212,8 +193,6 @@ class Callgrind:
                 "ob": {},
             }
 
-        # Expand one "(7)" back to its name, learning it where spelled out.
-        # A miss is a dropped line: "(7)" would reach a page as the name.
         def uncompress(self, kind: str, value: str) -> str:
             match = Callgrind.NAME_COMPRESSION_RE.match(value)
             if not match:
@@ -230,24 +209,16 @@ class Callgrind:
                 )
             return known
 
-    # PendingCall - A "calls=" line, waiting for the cost line that follows it.
     class PendingCall(NamedTuple):
-        # how many times
         call_count: int
-        # the line jumped to
         target_line: int
 
-    # PositionDecoder - Cost lines give positions relative to the last
-    # one -- this tracks the running value.
     class PositionDecoder:
-        # Start on the one-column "line" positions callgrind defaults to.
         def __init__(self) -> None:
             self.count = 1
             self.line_index = 0
             self.previous: list[int] = [0]
 
-        # Read one position token: "*" repeats, "+n"/"-n" step,
-        # anything else is absolute.
         def decode(self, token: str, position: int) -> int:
             if token == "*":
                 return self.previous[position]
@@ -259,8 +230,6 @@ class Callgrind:
                 return int(token, 16)
             return int(token)
 
-        # Start over for a new "positions:" line, finding which column
-        # holds the line number.
         def reset(self, names: Sequence[str]) -> None:
             self.count = len(names)
             self.line_index = (
@@ -268,8 +237,6 @@ class Callgrind:
             )
             self.previous = [0] * self.count
 
-        # Advance past one cost line's positions and hand back the
-        # line number it lands on.
         def step(self, tokens: Sequence[str]) -> int:
             for position in range(self.count):
                 self.previous[position] = self.decode(
@@ -277,24 +244,6 @@ class Callgrind:
                 )
             return self.previous[self.line_index]
 
-    # How one line's baseline slot is spelled, everywhere it is written
-    # and everywhere it is read back.
-    def baseline_line_key(
-        self, function: str, display: str, line: int | str
-    ) -> str:
-        return f"{function}\n{display}\n{line}"
-
-    # How a path prints on a page: an external file carries its owning object,
-    # so same-named headers stay apart. Both sides of a baseline key use it.
-    def display_path_of(self, path: str, object_path: str) -> str:
-        info = self.path_norm(path)
-        if info.group != "external":
-            return info.display
-        owner = os.path.basename(object_path) or "(unknown object)"
-        return f"{owner}/{info.display}"
-
-    # Give every still-unplaced function an entry line, so the pages
-    # can link to it.
     def entries_fill(self, profile: Profile) -> None:
         for function, lines in profile.function_lines.items():
             home = profile.function_home.get(function)
@@ -306,12 +255,9 @@ class Callgrind:
             if line:
                 profile.function_entry[function] = SourceLine(home, line)
 
-    # Read every given file and merge them into one profile.
     def load(self, paths: Sequence[str]) -> Profile:
         return self.merge([self.load_one(path) for path in paths])
 
-    # Read one file, and refuse it unless its per-line costs add up
-    # to its own summary.
     def load_one(self, path: str) -> Profile:
         with open(path, encoding="utf-8", errors="replace") as handle:
             profile = self.parse(handle.read())
@@ -337,7 +283,6 @@ class Callgrind:
             )
         return profile
 
-    # Add several profiles of the same counters together.
     def merge(self, profiles: Sequence[Profile]) -> Profile:
         if len(profiles) == 1:
             return profiles[0]
@@ -366,8 +311,6 @@ class Callgrind:
             self.merge_one(merged, other)
         return merged
 
-    # One command line standing for all of them, sharing the program
-    # name when they agree on it.
     def merge_command(self, profiles: Sequence[Profile]) -> str:
         commands = [other.command.split() for other in profiles]
         if all(
@@ -380,7 +323,6 @@ class Callgrind:
             )
         return " + ".join(other.command for other in profiles)
 
-    # Fold one profile's every table into the one being built.
     def merge_one(self, merged: Profile, other: Profile) -> None:
         for key, costs in other.line_self.items():
             costs_accumulate(merged.line_self, key, costs)
@@ -411,8 +353,6 @@ class Callgrind:
         for file, ob in other.file_ob.items():
             merged.file_ob.setdefault(file, ob)
 
-    # Walk the file once, carrying the current file/function/object
-    # as callgrind's headers change them.
     def parse(self, text: str) -> Profile:
         profile = Profile()
         names = Callgrind.CompressedNames()
@@ -496,7 +436,7 @@ class Callgrind:
                     raw_line[equals_index + 1 :],
                 )
                 if key in ("fl", "fi", "fe"):
-                    cur_file = names.uncompress("fl", val)
+                    cur_file = file_key_of(names.uncompress("fl", val), cur_ob)
                 elif key == "fn":
                     cur_function = names.uncompress("fn", val)
                     profile.function_home.setdefault(cur_function, cur_file)
@@ -506,12 +446,12 @@ class Callgrind:
                 elif key == "cob":
                     cur_callee_ob = names.uncompress("ob", val)
                 elif key in ("cfl", "cfi"):
-                    cur_callee_file = names.uncompress("fl", val)
+                    cur_callee_file = file_key_of(
+                        names.uncompress("fl", val), cur_callee_ob or cur_ob
+                    )
                 elif key == "cfn":
                     cur_callee_function = names.uncompress("fn", val)
                 elif key in ("jfi", "jfn"):
-                    # --collect-jumps names a jump target in the fl/fn name
-                    # spaces: learned, but neither current name moves.
                     names.uncompress("fl" if key == "jfi" else "fn", val)
                 elif key == "calls":
                     parts = val.split()
@@ -545,36 +485,29 @@ class Callgrind:
         self.entries_fill(profile)
         return profile
 
-    # Work out how to print a path, whether we can still read it, and
-    # where it came from.
-    def path_norm(self, path: str) -> PathInfo:
-        if path == "???":
-            return PathInfo("(unknown)", None, "external")
-        root = REPO_ROOT + "/"
-        if os.path.isabs(path):
-            path = posixpath.normpath(path)
-        if path.startswith(root):
-            relative = path[len(root) :]
-            local = os.path.join(REPO_ROOT, relative)
-            return PathInfo(
-                relative, local if os.path.isfile(local) else None, "repo"
-            )
-        if os.path.isabs(path):
-            if os.path.isfile(path):
-                return PathInfo(path.lstrip("/"), path, "system")
-            return PathInfo(path.lstrip("/"), None, "external")
-        candidate = os.path.join(REPO_ROOT, path)
-        if os.path.isfile(candidate):
-            return PathInfo(posixpath.normpath(path), candidate, "repo")
-        return PathInfo(posixpath.normpath(path), None, "external")
+
+_profile_parser = Callgrind()
 
 
-# How one line's baseline slot is spelled, on both sides of the diff.
-def baseline_line_key(function: str, display: str, line: int | str) -> str:
-    return Callgrind().baseline_line_key(function, display, line)
+def baseline_line_key(display: str, line: int | str) -> str:
+    return f"{display}\n{line}"
 
 
-# Add a cost vector into a table, starting a fresh entry when the key is new.
+def cached_source_of(display: str) -> str | None:
+    if display.startswith(".."):
+        return None
+    parts = display.split("/")
+    wanted = [display]
+    if len(parts) > 1 and parts[0] == parts[1]:
+        wanted.append("/".join(parts[1:]))
+    for tree in external_source_roots():
+        for relative in wanted:
+            local = os.path.join(tree, relative)
+            if os.path.isfile(local):
+                return local
+    return None
+
+
 def costs_accumulate(
     table: dict[_Key, Costs], key: _Key, costs: Costs
 ) -> None:
@@ -585,43 +518,97 @@ def costs_accumulate(
         costs_add(current, costs)
 
 
-# Add one cost vector into another, in place.
 def costs_add(dst: Costs, src: Costs) -> None:
     for index, value in enumerate(src):
         dst[index] += value
 
 
-# Every counter a vector written against these recorded ones can supply:
-# the recorded ones, then the derived ones they add up to.
+def costs_fit(costs: Costs, width: int) -> Costs:
+    return costs_trim(list(costs) + [0] * (width - len(costs)))
+
+
+def costs_sub(modified: Costs, baseline: Costs) -> Costs:
+    return [
+        (modified[index] if index < len(modified) else 0)
+        - (baseline[index] if index < len(baseline) else 0)
+        for index in range(max(len(modified), len(baseline)))
+    ]
+
+
+def costs_trim(costs: Costs) -> Costs:
+    length = len(costs)
+    while length and costs[length - 1] == 0:
+        length -= 1
+    return costs[:length]
+
+
 def counter_names(counters: Sequence[str]) -> list[str]:
-    return Profile(counters=list(counters)).counter_names()
+    return counter_schema(tuple(counters)).counter_names()
 
 
-# Pull one named counter out of a stored cost vector -- the one door a
-# derived counter is computed through outside a live Profile.
+@functools.cache
+def counter_schema(counters: tuple[str, ...]) -> CounterSchema:
+    return CounterSchema(counters)
+
+
 def counter_value(counters: Sequence[str], costs: Costs, name: str) -> int:
-    return Profile(counters=list(counters)).value(costs, name)
+    return counter_schema(tuple(counters)).value(costs, name)
 
 
-# How a path is printed on a page, an external file qualified by the
-# object owning it.
 def display_path_of(path: str, object_path: str) -> str:
-    return Callgrind().display_path_of(path, object_path)
+    info = path_norm(path)
+    if info.group != "external":
+        return info.display
+    owner = os.path.basename(object_path) or "(unknown object)"
+    return f"{owner}/{info.display}"
 
 
-# Work out how to print a path, whether we can still read it, and
-# where it came from.
+def file_key_of(path: str, object_path: str) -> str:
+    if path != _CALLGRIND_UNKNOWN_FILE_NAME:
+        return path
+    return f"{os.path.basename(object_path)}/{path}"
+
+
 def path_norm(path: str) -> PathInfo:
-    return Callgrind().path_norm(path)
+    if posixpath.basename(path) == _CALLGRIND_UNKNOWN_FILE_NAME:
+        return PathInfo("(unknown)", None, "external")
+    root = REPO_ROOT + "/"
+    if os.path.isabs(path):
+        path = posixpath.normpath(path)
+    if path.startswith(root):
+        relative = path[len(root) :]
+        local = os.path.join(REPO_ROOT, relative)
+        return PathInfo(
+            relative, local if os.path.isfile(local) else None, "repo"
+        )
+    if os.path.isabs(path):
+        if os.path.isfile(path):
+            return PathInfo(path.lstrip("/"), path, "system")
+        return PathInfo(path.lstrip("/"), None, "external")
+    candidate = os.path.join(REPO_ROOT, path)
+    if os.path.isfile(candidate):
+        return PathInfo(posixpath.normpath(path), candidate, "repo")
+    display = posixpath.normpath(path)
+    cached = cached_source_of(display)
+    if cached is not None:
+        return PathInfo(display, cached, "system")
+    return PathInfo(display, None, "external")
 
 
-# Read callgrind files into one profile, refusing any that do not add up.
 def profile_load(paths: Sequence[str]) -> Profile:
-    return Callgrind().load(paths)
+    return _profile_parser.load(paths)
 
 
-# Add a call count and its cost into a table, starting a fresh entry
-# when the key is new.
+def ranking_counter_check(counters: Sequence[str], source: str) -> None:
+    if _RANKING_COUNTER_NAME in counter_names(counters):
+        return
+    sys.exit(
+        f"error: {source} cannot supply {_RANKING_COUNTER_NAME}, the"
+        f" counter every page ranks and divides by: it records"
+        f" {' '.join(counters)}"
+    )
+
+
 def tally_accumulate(
     table: dict[_Key, Tally], key: _Key, count: int, costs: Costs
 ) -> None:

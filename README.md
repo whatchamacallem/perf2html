@@ -5,12 +5,20 @@ reports about the results.
 
 ## Using A Report
 
+The main menu can be operated with the keyboard using the numbers each button
+is labelled with. Tab also moves focus forward through interactive elements
+(links, buttons, inputs), and Shift+Tab moves backward. This is the primary
+navigation system for keyboard-only users, including screen reader users and
+switch device users. Enter or Space activates the focused element, and arrow
+keys control widgets
+
 The HTML will open straight from disk, with no server. Start by opening the top
 level `index.html` in the report and then bookmarks will work.
 
 The html app is stateless following REST style. This means the navigation URLs
-are immutable (so bookmarks work) and the file URLs used by JavaScript are also
-immutable (so no server is needed and perfect caching is possible).
+are immutable (so bookmarks work) and the module URLs used by JavaScript on the
+back end are also immutable (so no server is needed and perfect caching is
+possible).
 
 ## Running the Generator Scripts
 
@@ -33,25 +41,32 @@ perf2html.sh [debug-flags] [--report=DIR] [cmake-flags...]
     Builds RelWithDebInfo, profiles every TESTS_C test under callgrind plus a
     native perf stat timing run and a traced run for the flame graph,
     generates one report.
-    --report=DIR      Defaults to perf2html_baseline_report, or
+    --report=NAME     Defaults to perf2html_baseline_report, or
                       perf2html_modified_report when a cmake flag is given.
-                      Pass it yourself after a source-only change.
+    --target-dir=DIR  Default directory for reports (default $PWD).
+    --txz             Create .txz archives of all reports generated.
+                      .txz files may also be used as inputs.
     cmake-flags       Everything else, e.g. -D CMAKE_C_FLAGS=-Os.
 ```
 
 ```txt
-perf2html_diff.sh [debug-flags] [baseline] [modified] [diff]
+perf2html_diff.sh [debug-flags] [--target-dir=DIR] [baseline] [modified] [diff]
     Measures nothing: Compares the counters in two profiling reports and
-    generates a diff. Directories default to
+    generates a diff. Report names default to
     ./perf2html_{baseline,modified,diff}_report. Both baseline and modified
-    must be a perf2html.sh report. A diff can't be diffed.
+    must be a perf2html.sh report. And a diff can't be re-diffed.
+    --target-dir=DIR  Default directory for reports (default $PWD).
+    --txz             Create .txz archives of all reports generated.
+                      .txz files may also be used as inputs.
 ```
 
 ```txt
 perf2html_batch.sh [debug-flags] [--target-dir=DIR] [cmake-flags...]
     Profiles baseline, modified and then does a diff of them.
-    --target-dir=DIR  Holds the three default-named reports (default CWD). The
+    --target-dir=DIR  Holds the three default-named reports (default $PWD). The
                       batch cannot rename them.
+    --txz             Create .txz archives of all reports generated.
+                      .txz files may also be used as inputs.
     cmake-flags:      Every argument not one of its own options, applied to the
                       modified build (default -D CMAKE_C_FLAGS=-Os).
 ```
@@ -60,7 +75,6 @@ These are shared developer flags for the iterative development of `perf2html`
 itself.
 
 ```txt
-    These are the same debug-flags as the README.md documents:
     --artifacts=TMP   The profiler artifacts directory. Defaults to
                       perf2html_temporary_artifacts/ beside the report
                       directory (inside the target dir for a batch).
@@ -110,16 +124,20 @@ Version 3, 29 June 2007.
 
 ### Regular Report
 
-A regular report shows you a percentage of a total as you might expect. In most
-places it is a percentage of a global total cycle count, however in the source
-view it may also be a percentage of a file or function if selected.
+A regular report contains a suite of tests that can be explored using a menu.
+There is heat map data, call graph data, and a flame graph.
 
-| example     |      % |
-| ----------- | -----: |
-| 1 / 50000   | <0.01% |
-| 1 / 5000    |  0.02% |
-| 500 / 5000  |  10.0% |
-| 5000 / 5000 | 100.0% |
+A regular report shows you the selected counter, a total for that counter and
+a percentage of that total. places it is a percentage of a global total cycle
+count, however in the source view it may also be a percentage of a file or
+function if selected.
+
+| example     |       % |
+| ----------- | ------: |
+| 1 / 50000   |  ≈0.00% |
+| 1 / 5000    |   0.02% |
+| 500 / 5000  |  10.00% |
+| 5000 / 5000 | 100.00% |
 
 ### Diff Report
 
@@ -127,22 +145,23 @@ A diff report uses percentages the same way a stock market ticker does. Every
 number in it is the modified profile minus the baseline one, per function, file
 and line, and every share divides that difference by the same thing's own
 baseline count. So a share says how much this line moved against what it used
-to cost, not what part of the report it is. Half as long is `▼-50.0%`, twice as
-long is `▲100.0%`, and smaller is better.
+to cost, not what part of the report it is. Half as long is `▼-50.00%`, twice
+as long is `▲100.00%`, and smaller is better.
 
-| example            |        % |
-| ------------------ | -------: |
-| 1000 -> 1000       |          |
-| 1000 -> 1000000    | ▲999.00x |
-| 1000 -> 1001000    |  ▲>1000x |
-| 1000 -> 101000     | ▲100.00x |
-| 1000 -> 2000       |  ▲100.0% |
-| 1000 -> 2010       |   ▲1.01x |
-| 1000 -> 900        |  ▼-10.0% |
-| 5000 -> 0          | ▼-100.0% |
-| 5000000 -> 4999999 |  ▼≈0.00% |
-| 5000000 -> 5000001 |  ▲≈0.00% |
-| 90 -> 100          |   ▲11.1% |
+| example            |         % |
+| ------------------ | --------: |
+| 0 -> 1000          | ▲      ∞% |
+| 1000 -> 1000       |           |
+| 1000 -> 1000000    | ▲ 999.00x |
+| 1000 -> 1001000    | ▲     ≈∞% |
+| 1000 -> 101000     | ▲ 100.00x |
+| 1000 -> 2000       | ▲ 100.00% |
+| 1000 -> 2010       | ▲   1.01x |
+| 1000 -> 900        | ▼ -10.00% |
+| 5000 -> 0          | ▼-100.00% |
+| 5000000 -> 4999999 | ▼  ≈0.00% |
+| 5000000 -> 5000001 | ▲  ≈0.00% |
+| 90 -> 100          | ▲  11.11% |
 
 ## Flame Graph (speedscope)
 
@@ -158,8 +177,9 @@ hooks cost time too and that time is in the boxes, so a function of a few
 instructions looks slower than it is, and the traced run is slower than the
 perf log's native one. Use the perf log for speed and the flame graph for
 shape: what calls what, in which order, and which call was the slow one. The
-summary's "trace log" has the commands and the traced run's own output, and
-"raw data" links the same profile as a speedscope JSON file.
+callers page's "trace log" has the commands and the traced run's own output,
+and the overview's "raw data" archive holds the same profile as a speedscope
+JSON file.
 
 The merged "all" report and a diff have no flame graph: a trace neither adds up
 nor subtracts.

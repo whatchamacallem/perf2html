@@ -1,30 +1,33 @@
-<div id="hdr" class="strip">
+<div id="heat-map-menu-" class="menu-strip-">
   <label
-    ><span id="counterLabel"></span>
-    <select id="counter"></select
+    ><span id="heat-map-menu-counter-label-"></span>
+    <select id="heat-map-menu-counter-select-"></select
   ></label>
   <label
-    ><span id="scaleLabel"></span>
-    <select id="scale"></select
+    ><span id="heat-map-menu-scale-label-"></span>
+    <select id="heat-map-menu-scale-select-"></select
   ></label>
   <label
-    ><span id="sortLabel"></span>
-    <select id="sort">
+    ><span id="heat-map-menu-tree-label-"></span>
+    <select id="heat-map-menu-tree-select-">
       <option value="heat"></option>
       <option value="name"></option></select
   ></label>
-  <label><span id="searchLabel"></span> <input id="q" type="search" /></label>
+  <label
+    ><span id="heat-map-menu-search-label-"></span>
+    <input id="heat-map-menu-search-box-" type="search"
+  /></label>
 </div>
-<div id="layout">
-  <nav id="tree"></nav>
-  <div id="split" class="split"></div>
-  <section id="main"></section>
-  <div id="minimap" class="empty">
-    <div id="mmBox"></div>
-    <div id="mmViewport" hidden></div>
+<div id="layout-">
+  <div id="heat-map-tree-" role="tree"></div>
+  <div
+    id="heat-map-tree-resize-handle-"
+    class="heat-map-tree-resize-handle-"
+  ></div>
+  <section id="heat-map-main-" tabindex="0"></section>
+  <div id="heat-map-minimap-" class="empty_" aria-hidden="true">
+    <div id="heat-map-minimap-box-"></div>
+    <div id="heat-map-minimap-viewport-" hidden></div>
   </div>
 </div>
-<script id="heatdata" type="application/json">
-  __DATA__
-</script>
 __SCRIPTS__

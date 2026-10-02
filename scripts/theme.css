@@ -1,385 +1,182 @@
-* {
+.callers-collapsed-section-file-name- {
+  color: var(--callers-collapsed-section-file-name-fg-dim-);
+  max-width: var(--callers-collapsed-section-file-name-max-width-);
+}
+
+pre.callers-collapsed-section-log-box- {
+  background: var(--callers-collapsed-section-log-box-bg-dim-);
+  max-height: calc(
+    var(--callers-collapsed-section-log-box-max-height-share-) *
+      var(--design-viewport-height-)
+  );
+  overflow: auto;
+}
+pre.callers-collapsed-section-log-box-:focus-visible {
+  background: var(--callers-collapsed-section-log-box-focus-bg-);
+}
+pre.callers-collapsed-section-log-box-::-webkit-scrollbar-track,
+pre.callers-collapsed-section-log-box-::-webkit-scrollbar-corner {
+  background: var(--callers-collapsed-section-log-box-scrollbar-bg-dim-);
+}
+
+.callers-collapsed-section-title- {
+  cursor: pointer;
+  color: var(--callers-collapsed-section-title-fg-dim-);
+}
+.callers-collapsed-section-title-:focus-visible {
+  background: var(--callers-collapsed-section-title-focus-bg-);
+  color: var(--callers-collapsed-section-title-focus-fg-);
+}
+.callers-collapsed-section-title-::marker {
+  color: var(--callers-collapsed-section-title-marker-fg-dim-);
+}
+
+*,
+::before,
+::after,
+::placeholder {
   box-sizing: border-box;
+  font: inherit;
+  text-decoration: none;
+  outline: none;
+  border: 0;
 }
 [hidden] {
   display: none !important;
 }
+pre {
+  margin: 0;
+  white-space: pre;
+  overflow-x: auto;
+}
+select,
+input {
+  color: var(--heat-map-menu-field-fg-);
+  padding: 0;
+  border-radius: 0;
+}
+
 html,
 body {
   height: 100%;
   margin: 0;
 }
-/* every font size is the design size times the fit theme.js measured, so a
-   ch is the design ch under whatever monospace this box has */
 body {
-  background: var(--bg);
-  color: var(--fg);
-  font-family: var(--font);
-  font-size: calc(var(--font-px) * var(--font-fit));
-  line-height: 1.5;
+  background: var(--page-body-bg-dim-);
+  color: var(--page-body-fg-);
+  font-family: var(--page-font-family-);
+  font-size: calc(var(--design-font-size-px-) * var(--design-font-fit-));
+  line-height: var(--page-body-line-height-);
 }
-a {
-  color: var(--link);
-  text-decoration: none;
-}
-a:hover {
-  text-decoration: underline;
-}
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-h2 {
-  color: var(--fg-dim);
-  margin: 0;
-}
-p {
-  margin: 0;
-  color: var(--muted);
-  max-width: 96ch;
-}
-b {
-  color: var(--fg);
-  font-weight: normal;
-}
-pre {
-  font: inherit;
-  margin: 0;
-  white-space: pre;
-  overflow-x: auto;
-}
-
-select,
-input {
-  font: inherit;
-  color: var(--fg);
-  background: var(--bg);
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-}
-
-.strip {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  flex: none;
-  background: var(--nav);
-  overflow: hidden;
-}
-.strip a {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 40ch;
-  flex: none;
-}
-.strip .sep {
-  flex: none;
-  margin: 0 1ch;
-  color: var(--muted);
-}
-.strip a:hover {
-  background: var(--link);
-  color: var(--nav);
-  text-decoration: none;
-}
-.strip .pulldown-list a:hover {
-  background: none;
-  color: var(--link);
-}
-.strip a.on,
-.strip .pulldown-list a.on {
-  background: var(--hot);
-  color: var(--hot-fg);
-}
-.strip .pulldown-list a.highlighted-entry {
-  background: var(--link);
-  color: var(--nav);
-}
-
-.strip .title {
-  font-weight: normal;
-  color: var(--title-fg);
-  background: var(--title-bg);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: var(--title-w);
-}
-.strip .title:has(.logo-letter) {
-  background: var(--nav);
-  cursor: pointer;
-}
-.strip .title .logo-letter {
-  flex: none;
-  padding: 0;
-  margin: 0;
-  white-space: pre;
-}
-
-.strip .sp {
-  flex: 1 0 0;
-  min-width: 0;
-}
-
-.strip .scale {
-  display: flex;
-  align-items: center;
-  gap: 1ch;
-  flex: none;
-  color: var(--muted);
-  white-space: nowrap;
-}
-.strip .scale input {
-  width: 80px;
-  padding: 0;
-  accent-color: var(--link);
-  cursor: pointer;
-}
-
-.strip .util {
-  display: flex;
-  align-items: center;
-  flex: none;
-}
-
-.strip:has(.pulldown) {
-  overflow: visible;
-}
-/* label, caret, box: the caret points at the box's text and the list drops
-   below the box. Bare: no part draws a border, ring or box of its own */
-.strip .pulldown {
-  position: relative;
-  display: inline-grid;
-  grid-template-columns: auto 2ch auto;
-  column-gap: 1ch;
-  flex: none;
-}
-.strip .pulldown-label,
-.strip .pulldown-caret {
-  color: var(--muted);
-  cursor: pointer;
-}
-.strip .pulldown-caret {
-  font: inherit;
-  background: none;
-  border: 0;
-  padding: 0;
-  text-align: center;
-}
-.strip .pulldown-search {
-  background: none;
-}
-.strip .pulldown-search[readonly] {
-  cursor: pointer;
-}
-.strip .pulldown :focus {
-  outline: none;
-}
-.strip .pulldown-list {
-  position: absolute;
-  grid-column: 3;
-  grid-row: 1;
-  top: 100%;
-  left: 0;
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  min-width: 100%;
-  max-height: calc(0.6 * var(--design-vh));
-  overflow-y: auto;
-  background: var(--nav);
-}
-.strip .pulldown-list a,
-.strip .pulldown-no-match {
-  max-width: none;
-  white-space: nowrap;
-}
-.strip .pulldown-no-match {
-  color: var(--muted);
-}
-
-html:has(body.frame),
-body.frame {
+html:has(body.frame_) {
   overflow-x: auto;
   overflow-y: hidden;
 }
-body.frame {
+body.frame_ {
   display: flex;
   flex-direction: column;
-  height: var(--design-vh, 100vh);
+  height: var(--design-viewport-height-);
 }
-body.frame > main {
+body.frame_ > main {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
-body.frame > iframe {
+body.frame_ > iframe {
   flex: 1;
   min-height: 0;
   width: 100%;
-  border: 0;
-  background: var(--bg);
-}
-/* the box a page's tables sit in is a container, so 100cqw in a <col> is
-   exactly the room its own table has */
-.page {
-  container-type: inline-size;
+  background: var(--overview-view-frame-bg-dim-);
 }
 
-.tbl {
+.page-heading- {
+  color: var(--page-heading-fg-dim-);
+}
+
+a {
+  color: var(--page-link-fg-);
+}
+a:focus-visible {
+  background: var(--page-link-focus-bg-);
+  color: var(--page-link-focus-fg-);
+}
+
+::-webkit-scrollbar {
+  width: var(--page-scrollbar-thickness-);
+  height: var(--page-scrollbar-thickness-);
+}
+::-webkit-scrollbar-track {
+  background: var(--page-scrollbar-track-bg-dim-);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--page-scrollbar-thumb-bg-dim-);
+  border-radius: 0;
+}
+::-webkit-scrollbar-corner {
+  background: var(--page-scrollbar-corner-bg-dim-);
+}
+
+.page_ {
+  container-type: inline-size;
+}
+.table-box- {
   position: relative;
   width: fit-content;
 }
-.band {
+.band_ {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: var(--heat-map-band-z-index-);
 }
-.tbl-cols {
-  position: relative;
+.table-columns- {
   width: fit-content;
 }
-table.cols {
+table.columns_ {
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   width: 0;
 }
-table.cols col.alt {
-  background: var(--bg-alt);
+table.columns_ col.alternate_ {
+  background: var(--page-table-alternate-column-bg-);
 }
-table.cols th,
-table.cols td {
-  padding: 0 1ch;
+table.columns_ th,
+table.columns_ td {
+  padding: 0 var(--page-table-cell-padding-inline-);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: top;
-  border: 0;
 }
-table.cols th {
+table.columns_ th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--page-table-column-title-z-index-);
   text-align: left;
-  font-weight: normal;
-  color: var(--fg-dim);
-  background: var(--panel);
+  color: var(--page-table-column-title-fg-dim-);
+  background: var(--page-table-column-title-bg-dim-);
 }
-table.cols .n {
+table.columns_ .numeric_ {
   text-align: right;
-  font-variant-numeric: tabular-nums;
+  white-space: pre;
 }
-table.cols .dim {
-  color: var(--muted);
+table.columns_ .dimmed_ {
+  color: var(--page-table-dimmed-text-fg-dim-);
 }
-
-.bar {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 9px;
-  margin-left: -5px;
-  z-index: 1;
-  cursor: col-resize;
-  touch-action: none;
-}
-.bar::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 2.5px;
-  width: 4px;
-}
-.bar:hover::before,
-.bar.active::before {
-  background: var(--bar);
+table.columns_ > tbody > tr:focus-visible > td {
+  background: var(--page-table-row-focus-bg-) !important;
+  color: var(--page-table-row-focus-fg-) !important;
 }
 
-.bar:last-child {
-  margin-left: -9px;
-}
-.bar:last-child::before {
-  left: 5px;
-}
-
-/* the list marker is drawn in the padding: one glyph and one blank */
-ul.rawdata {
-  margin: 0;
-  padding-left: 2ch;
-}
-
-details.sec summary {
-  cursor: pointer;
-  color: var(--fg-dim);
-  font-weight: normal;
-}
-details.sec summary::marker {
-  color: var(--fg-dim);
-}
-details.sec summary h2 {
-  display: inline;
-  color: inherit;
-}
-pre.logbox {
-  background: var(--panel);
-  max-height: calc(0.6 * var(--design-vh, 100vh));
-  overflow: auto;
-}
-
-.split {
-  flex: none;
-  width: 7px;
-  cursor: col-resize;
-  touch-action: none;
-  background: none;
-}
-.split:hover,
-.split.active {
-  background: linear-gradient(
-    90deg,
-    transparent 1.5px,
-    var(--bar) 1.5px,
-    var(--bar) 5.5px,
-    transparent 5.5px
-  );
-}
-
-::-webkit-scrollbar {
-  width: 14px;
-  height: 14px;
-}
-::-webkit-scrollbar-track {
-  background: var(--bg);
-}
-::-webkit-scrollbar-thumb {
-  background: var(--blue);
-  border-radius: 0;
-}
-::-webkit-scrollbar-corner {
-  background: var(--bg);
-}
-
-pre.logbox::-webkit-scrollbar-track,
-pre.logbox::-webkit-scrollbar-corner {
-  background: var(--panel);
-}
-
-.screenshot-label {
+.screenshot-label- {
   position: fixed;
   left: 0;
   bottom: 0;
-  z-index: 3;
-  background: #000;
-  color: var(--fg);
-  font-size: 2em;
-  border: 1ch solid #000;
+  z-index: var(--screenshot-label-z-index-);
+  background: var(--screenshot-label-bg-);
+  color: var(--screenshot-label-fg-);
+  font-size: var(--screenshot-label-font-size-);
+  border: var(--screenshot-label-border-width-) solid
+    var(--screenshot-label-border-);
 }

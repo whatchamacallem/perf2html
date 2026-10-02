@@ -6,12 +6,14 @@ usage_show() {
   cat <<'EOF'
 perf2html_batch.sh [debug-flags] [--target-dir=DIR] [cmake-flags...]
     Profiles baseline, modified and then does a diff of them.
-    --target-dir=DIR  Holds the three default-named reports (default CWD). The
+    --target-dir=DIR  Holds the three default-named reports (default $PWD). The
                       batch cannot rename them.
+    --txz             Create .txz archives of all reports generated.
+                      .txz files may also be used as inputs.
     cmake-flags:      Every argument not one of its own options, applied to the
                       modified build (default -D CMAKE_C_FLAGS=-Os).
 
-    These are the same debug-flags as the README.md documents:
+    The debug-flags are the same as the README.md documents.
     --artifacts=TMP   The profiler artifacts directory. Defaults to
                       perf2html_temporary_artifacts/ beside the report
                       directory (inside the target dir for a batch).
@@ -38,23 +40,18 @@ cd "$PERF2HTML_DIR_"
 
 _REPO="$(dirname "$PERF2HTML_DIR_")"
 
-# step_run - run one numbered step, its output reaching the terminal as it
-# is. A failed step is a hard error: one line here, then the child's code.
 step_run() {
   local _number="$1" _name="$2"
   shift 2
   local _exit_code=0 _start
   _start="$(clock_microseconds)"
-  log_verbose "== $_number $_name =="
-  # the child prints its own title, every line under it and its own
-  # refusal; nothing here captures, buffers or reprints any of it
+  log_verbose "Starting: $_number $_name..."
   "$@" || _exit_code=$?
   _STEP_NAMES+=("$_name")
   _STEP_SECONDS+=("$((($(clock_microseconds) - _start) / 1000000))s")
-  log_verbose "== $_number $_name: end =="
   if [ "$_exit_code" = 0 ]; then
-    log_verbose "[$(elapsed_format)s] done: step $_number $_name in" \
-      "$(duration_format "$_start")"
+    log_verbose "[$(elapsed_format)s] Done: step $_number $_name in" \
+      "$(duration_format "$_start")."
     return 0
   fi
   printf '\n[%ss] FAILED: step %s %s, exit %s, after %s\n\n' \
@@ -63,10 +60,7 @@ step_run() {
   exit "$_exit_code"
 }
 
-# header_table_print - under --verbose, the one-row table naming what this
-# run measures on: when, which revision, toolchain, kernel and pinned core.
 header_table_print() {
-  # every value first: a fault in one ends the run instead of an empty cell
   local _revision _cmake_version _cc_version _curl_version
   _revision="$(revision_describe "$_REPO")"
   _cmake_version="$(cmake --version | head -1)"
@@ -80,68 +74,25 @@ header_table_print() {
     "$_curl_version" "$(uname -r)" "$PROFILE_PINNED_CPU"
 }
 
-# args_parse - read the command line, deriving every absolute *_DIR from
-# the target dir. Every argument it does not name is a cmake flag.
 args_parse() {
-  _KEEP_ARTIFACTS=0
-  _REGENERATE=0
-  _PASS_ARGS=()
-  _CMAKE_FLAGS=()
-  _TARGET_DIR="."
-  ARTIFACTS_DIR=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      -h | --help)
-        usage_show
-        exit 0
-        ;;
-      --verbose)
-        VERBOSE=$((VERBOSE + 1))
-        shift
-        ;;
-      --keep-artifacts)
-        _KEEP_ARTIFACTS=1
-        _PASS_ARGS+=(--keep-artifacts)
-        shift
-        ;;
-      --regenerate)
-        _REGENERATE=1
-        _KEEP_ARTIFACTS=1
-        _PASS_ARGS+=(--regenerate)
-        shift
-        ;;
-      --artifacts=*)
-        ARTIFACTS_DIR="${1#--artifacts=}"
-        shift
-        ;;
-      --target-dir=*)
-        _TARGET_DIR="${1#--target-dir=}"
-        shift
-        ;;
-      *)
-        _CMAKE_FLAGS+=("$1")
-        shift
+  shared_options_parse "$@"
+  local _remaining_argument
+  for _remaining_argument in "${REMAINING_ARGUMENTS[@]}"; do
+    case "$_remaining_argument" in
+      --report=*)
+        error_exit 2 \
+          "error: the batch takes no --report=: $_remaining_argument"
         ;;
     esac
   done
+  _CMAKE_FLAGS=("${REMAINING_ARGUMENTS[@]}")
   [ "${#_CMAKE_FLAGS[@]}" -gt 0 ] || _CMAKE_FLAGS=("${DEFAULT_FLAGS[@]}")
-  _TARGET_DIR="$(absolute_path "$_TARGET_DIR")"
-  if [ -z "$ARTIFACTS_DIR" ]; then
-    if [ "$_KEEP_ARTIFACTS" = 0 ] && [ "$_REGENERATE" = 0 ]; then
-      ARTIFACTS_DIR="$(mktemp -d)"
-      log_verbose "using --artifacts=\"$ARTIFACTS_DIR\""
-    else
-      ARTIFACTS_DIR="$_TARGET_DIR/$ARTIFACTS_NAME"
-    fi
-  fi
-  ARTIFACTS_DIR="$(absolute_path "$ARTIFACTS_DIR")"
-  _BASE_DIR="$_TARGET_DIR/$REPORT_BASELINE_DIR_NAME"
-  _MOD_DIR="$_TARGET_DIR/$REPORT_MODIFIED_DIR_NAME"
-  _DIFF_DIR="$_TARGET_DIR/$REPORT_DIFF_DIR_NAME"
+  artifacts_dir_resolve "$TARGET_DIR"
+  _BASE_DIR="$(report_path_of "$REPORT_BASELINE_DIR_NAME")"
+  _MOD_DIR="$(report_path_of "$REPORT_MODIFIED_DIR_NAME")"
+  _DIFF_DIR="$(report_path_of "$REPORT_DIFF_DIR_NAME")"
 }
 
-# main - runs baseline, modified and diff, stopping at the first failure,
-# and owns the end-of-run deletion of the artifacts directory.
 main() {
   args_parse "$@"
   verbose_begin
@@ -153,24 +104,25 @@ main() {
     "$_BASE_DIR" "baseline report" \
     "$_MOD_DIR" "modified report" \
     "$_DIFF_DIR" "diff report"
-  if [ "$_REGENERATE" = 1 ]; then
+  if [ "$REGENERATE" = 1 ]; then
     for _dir in "$_BASE_DIR" "$_MOD_DIR" "$_DIFF_DIR"; do
       _cache="$ARTIFACTS_DIR/$(basename "$_dir")"
       [ -d "$_cache" ] || error_exit 2 \
         "error: --regenerate: no recordings at $_cache"
     done
   fi
-  local _child_args=("${_PASS_ARGS[@]}" "--artifacts=$ARTIFACTS_DIR")
-  if [ "$_KEEP_ARTIFACTS" = 0 ]; then
+  local _child_args=("--target-dir=$TARGET_DIR" "--artifacts=$ARTIFACTS_DIR")
+  if [ "$REGENERATE" = 1 ]; then
+    _child_args+=(--regenerate)
+  else
     _child_args+=(--keep-artifacts)
   fi
+  [ "$WRITE_REPORT_ARCHIVE" = 0 ] || _child_args+=(--txz)
   local _verbose_args=()
   mapfile -t _verbose_args < <(verbose_flags_of)
   log_verbose "[$(elapsed_format)s] $_SCRIPT $TIMESTAMP: modified build" \
     "flags: ${_CMAKE_FLAGS[*]}"
 
-  # the reports are output only: a --regenerate rebuilds them from the kept
-  # recordings, reading nothing back from them
   log_verbose "[$(elapsed_format)s] removing previous reports"
   for _dir in "$_BASE_DIR" "$_MOD_DIR" "$_DIFF_DIR"; do
     report_delete "$_dir"
@@ -178,24 +130,21 @@ main() {
 
   _STEP_NAMES=()
   _STEP_SECONDS=()
-  step_run 1 baseline ./perf2html.sh "${_verbose_args[@]}" \
-    "${_child_args[@]}" "--report=$_BASE_DIR"
+  step_run 1 baseline ./perf2html.sh "${_verbose_args[@]}" "${_child_args[@]}"
   step_run 2 modified ./perf2html.sh "${_verbose_args[@]}" \
-    "${_child_args[@]}" "--report=$_MOD_DIR" "${_CMAKE_FLAGS[@]}"
+    "${_child_args[@]}" "${_CMAKE_FLAGS[@]}"
   step_run 3 diff ./perf2html_diff.sh "${_verbose_args[@]}" \
-    "${_child_args[@]}" "$_BASE_DIR" "$_MOD_DIR" "$_DIFF_DIR"
+    "${_child_args[@]}"
 
   heading_print "$_SCRIPT, after the three steps"
   table_print "${#_STEP_NAMES[@]}" "${_STEP_NAMES[@]}" "${_STEP_SECONDS[@]}"
 
-  # only a run reaching here succeeded, so a failed one leaves its
-  # recordings behind for diagnosis without being told to
-  if [ "$_KEEP_ARTIFACTS" = 0 ]; then
+  if [ "$KEEP_ARTIFACTS" = 0 ]; then
     log_verbose "[$(elapsed_format)s] removing $ARTIFACTS_DIR/"
     rm -rf "$ARTIFACTS_DIR" \
       || error_exit 1 "error: could not remove $ARTIFACTS_DIR/"
   else
-    log_verbose "[$(elapsed_format)s] artifacts kept"
+    log_verbose "[$(elapsed_format)s] keeping $ARTIFACTS_DIR/"
   fi
   log_verbose "[$(elapsed_format)s] $_DIFF_DIR/index.html"
 }

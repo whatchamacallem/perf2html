@@ -1,152 +1,136 @@
-(function () {
+window.catch_show_throw_(function () {
   "use strict";
 
-  const DESIGN_FONT_CHARACTER_WIDTH_PX = settings(
-    "DESIGN_FONT_CHARACTER_WIDTH_PX",
-  );
-  const HEAT_COLOR_FULL_SCALE_PERCENT = settings(
-    "HEAT_COLOR_FULL_SCALE_PERCENT",
-  );
-  const HEAT_COLOR_LIGHT_TEXT_ABOVE_SHARE = settings(
-    "HEAT_COLOR_LIGHT_TEXT_ABOVE_SHARE",
-  );
-  const HEAT_MAP_CONTROL_DROPDOWN_EXTRA_WIDTH_CHARS = settings(
-    "HEAT_MAP_CONTROL_DROPDOWN_EXTRA_WIDTH_CHARS",
-  );
-  const HEAT_MAP_COUNTER_DESCRIPTION_STRING_ID_PREFIX = settings(
+  const HEAT_MAP_COUNTER_DESCRIPTION_STRING_ID_PREFIX = settings_(
     "HEAT_MAP_COUNTER_DESCRIPTION_STRING_ID_PREFIX",
   );
-  const HEAT_MAP_HOME_LINES_LOCATION_MAX_CHARS = settings(
+  const HEAT_MAP_HOME_LINES_LOCATION_MAX_CHARS = settings_(
     "HEAT_MAP_HOME_LINES_LOCATION_MAX_CHARS",
   );
-  const HEAT_MAP_HOME_LINES_SOURCE_COLUMN_MAX_CHARS = settings(
+  const HEAT_MAP_HOME_LINES_SOURCE_COLUMN_MAX_CHARS = settings_(
     "HEAT_MAP_HOME_LINES_SOURCE_COLUMN_MAX_CHARS",
   );
-  const HEAT_MAP_HOME_LINES_SOURCE_SNIPPET_MAX_CHARS = settings(
+  const HEAT_MAP_HOME_LINES_SOURCE_SNIPPET_MAX_CHARS = settings_(
     "HEAT_MAP_HOME_LINES_SOURCE_SNIPPET_MAX_CHARS",
   );
-  const HEAT_MAP_HOME_TABLE_MAX_ROWS = settings(
+  const HEAT_MAP_HOME_TABLE_MAX_ROWS = settings_(
     "HEAT_MAP_HOME_TABLE_MAX_ROWS",
   );
-  const HEAT_MAP_MINIMAP_SHOWN_ABOVE_FILE_LINES = settings(
-    "HEAT_MAP_MINIMAP_SHOWN_ABOVE_FILE_LINES",
-  );
-  const HEAT_MAP_MINIMAP_SOURCE_WIDTH_CHARS = settings(
+  const HEAT_MAP_MINIMAP_SOURCE_WIDTH_CHARS = settings_(
     "HEAT_MAP_MINIMAP_SOURCE_WIDTH_CHARS",
   );
-  const HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX = settings(
+  const HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX = settings_(
     "HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX",
   );
-  const HEAT_MAP_SECONDARY_COUNTER_NAMES = settings(
+  const HEAT_MAP_MODEL_DIR_NAME = settings_("HEAT_MAP_MODEL_DIR_NAME");
+  const HEAT_MAP_MODEL_GLOBAL_NAME = settings_("HEAT_MAP_MODEL_GLOBAL_NAME");
+  const HEAT_MAP_SECONDARY_COUNTER_NAMES = settings_(
     "HEAT_MAP_SECONDARY_COUNTER_NAMES",
   );
-  const HEAT_MAP_SOURCE_HOT_LINE_BUTTON_LEAST_SHARE = settings(
-    "HEAT_MAP_SOURCE_HOT_LINE_BUTTON_LEAST_SHARE",
+  const HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE = settings_(
+    "HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE",
   );
-  const HEAT_MAP_SOURCE_HOT_LINE_BUTTON_MAX_COUNT = settings(
-    "HEAT_MAP_SOURCE_HOT_LINE_BUTTON_MAX_COUNT",
+  const HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_MAX_COUNT = settings_(
+    "HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_MAX_COUNT",
   );
-  const HEAT_MAP_SOURCE_VIEW_WIDTH_CHARS = settings(
+  const HEAT_MAP_SOURCE_VIEW_WIDTH_CHARS = settings_(
     "HEAT_MAP_SOURCE_VIEW_WIDTH_CHARS",
   );
-  const HEAT_MAP_TREE_AUTO_EXPAND_ABOVE_SHARE = settings(
+  const HEAT_MAP_TREE_AUTO_EXPAND_ABOVE_SHARE = settings_(
     "HEAT_MAP_TREE_AUTO_EXPAND_ABOVE_SHARE",
   );
-  const HEAT_MAP_TREE_INDENT_FIRST_LEVEL_PX = settings(
-    "HEAT_MAP_TREE_INDENT_FIRST_LEVEL_PX",
-  );
-  const HEAT_MAP_TREE_INDENT_PER_LEVEL_PX = settings(
-    "HEAT_MAP_TREE_INDENT_PER_LEVEL_PX",
-  );
-  const HEAT_MAP_TREE_PANE_NARROWEST_PX = settings(
-    "HEAT_MAP_TREE_PANE_NARROWEST_PX",
-  );
-  const LAYOUT_RESIZE_SETTLE_DELAY_MS = settings(
+  const HEAT_MAP_VIEW_ENTRY = settings_("HEAT_MAP_VIEW_ENTRY");
+  const LAYOUT_RESIZE_SETTLE_DELAY_MS = settings_(
     "LAYOUT_RESIZE_SETTLE_DELAY_MS",
   );
-  const TABLE_FUNCTION_NAME_WIDTH_CHARS = settings(
-    "TABLE_FUNCTION_NAME_WIDTH_CHARS",
+  const RANKING_COUNTER_NAME = settings_("RANKING_COUNTER_NAME");
+  const STYLE_DESIGN_FONT_CHARACTER_WIDTH_PX = settings_(
+    "STYLE_DESIGN_FONT_CHARACTER_WIDTH_PX",
   );
-  const TABLE_LOCATION_COLUMN_MAX_CHARS = settings(
-    "TABLE_LOCATION_COLUMN_MAX_CHARS",
+  const STYLE_HEAT_CELL_ON_BRIGHT_ABOVE_LUMINANCE_SHARE = settings_(
+    "STYLE_HEAT_CELL_ON_BRIGHT_ABOVE_LUMINANCE_SHARE",
   );
-  const profile_model = JSON.parse(
-    document.getElementById("heatdata").textContent,
+  const STYLE_HEAT_COLOR_FULL_SCALE_PERCENT = settings_(
+    "STYLE_HEAT_COLOR_FULL_SCALE_PERCENT",
   );
-  const file_table = profile_model.files,
-    function_table = profile_model.functions;
-  const tree_panel = document.getElementById("tree");
-  const main_panel = document.getElementById("main");
-  const minimap_panel = document.getElementById("minimap");
-  const minimap_box = document.getElementById("mmBox");
-  const minimap_viewport = document.getElementById("mmViewport");
-  const view_storage = report_ui.view_storage;
-  let sort_mode = view_storage.value_read("heat.sort") || "heat";
+  const STYLE_HEAT_MAP_MENU_DROPDOWN_EXTRA_WIDTH_CHARS = settings_(
+    "STYLE_HEAT_MAP_MENU_DROPDOWN_EXTRA_WIDTH_CHARS",
+  );
+  const STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_CHARS = settings_(
+    "STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_CHARS",
+  );
+  const STYLE_HEAT_MAP_TREE_INDENT_PER_LEVEL_CHARS = settings_(
+    "STYLE_HEAT_MAP_TREE_INDENT_PER_LEVEL_CHARS",
+  );
+  const STYLE_HEAT_MAP_TREE_PANE_NARROWEST_PX = settings_(
+    "STYLE_HEAT_MAP_TREE_PANE_NARROWEST_PX",
+  );
+  const STYLE_TABLE_FUNCTION_NAME_WIDTH_CHARS = settings_(
+    "STYLE_TABLE_FUNCTION_NAME_WIDTH_CHARS",
+  );
+  const STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS = settings_(
+    "STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS",
+  );
+  const WIDGET_KEY_NAMES = settings_("WIDGET_KEY_NAMES");
+  let profile_model = null,
+    file_table = null,
+    function_table = null,
+    shown_test_name = null;
+  const tree_panel = document.getElementById("heat-map-tree-");
+  const main_panel = document.getElementById("heat-map-main-");
+  const minimap_panel = document.getElementById("heat-map-minimap-");
+  const minimap_box = document.getElementById("heat-map-minimap-box-");
+  const minimap_viewport = document.getElementById(
+    "heat-map-minimap-viewport-",
+  );
+  const view_storage = report_ui_.view_storage;
+  let sort_mode = null;
   let current_file_path = null,
     search_query = "";
-  const sort_select = document.getElementById("sort");
-  document.getElementById("counterLabel").textContent =
-    window.ui_strings.text_of("str_control_counter");
-  document.getElementById("scaleLabel").textContent =
-    window.ui_strings.text_of("str_control_scale");
-  document.getElementById("sortLabel").textContent =
-    window.ui_strings.text_of("str_control_tree");
-  document.getElementById("searchLabel").textContent =
-    window.ui_strings.text_of("str_control_search");
+  const sort_select = document.getElementById("heat-map-menu-tree-select-");
+  const sort_mode_stored = () =>
+    stored_choice_of(sort_select, "heat.sort", "heat");
+  document.getElementById("heat-map-menu-counter-label-").textContent =
+    window.ui_strings_.text_of("str_heat_map_menu_counter");
+  document.getElementById("heat-map-menu-scale-label-").textContent =
+    window.ui_strings_.text_of("str_heat_map_menu_scale");
+  document.getElementById("heat-map-menu-tree-label-").textContent =
+    window.ui_strings_.text_of("str_heat_map_menu_tree");
+  document.getElementById("heat-map-menu-search-label-").textContent =
+    window.ui_strings_.text_of("str_heat_map_menu_search");
   sort_select.options[0].textContent =
-    window.ui_strings.text_of("str_sort_by_heat");
+    window.ui_strings_.text_of("str_sort_by_heat");
   sort_select.options[1].textContent =
-    window.ui_strings.text_of("str_sort_by_name");
-  document.getElementById("q").placeholder = window.ui_strings.text_of(
-    "str_search_placeholder",
+    window.ui_strings_.text_of("str_sort_by_name");
+  document.getElementById("heat-map-menu-search-box-").placeholder =
+    window.ui_strings_.text_of("str_search_placeholder");
+  tree_panel.setAttribute(
+    "aria-label",
+    window.ui_strings_.text_of("str_heat_map_tree_label"),
   );
-  sort_select.value = sort_mode;
-  tree_panel.style.minWidth = HEAT_MAP_TREE_PANE_NARROWEST_PX + "px";
-  report_ui.pane_splitter.attach(
-    document.getElementById("split"),
+  main_panel.setAttribute(
+    "aria-label",
+    window.ui_strings_.text_of("str_heat_map_main_label"),
+  );
+  sort_mode_apply(sort_mode_stored());
+  tree_panel.style.minWidth = STYLE_HEAT_MAP_TREE_PANE_NARROWEST_PX + "px";
+  report_ui_.pane_splitter.attach(
+    document.getElementById("heat-map-tree-resize-handle-"),
     tree_panel,
     "heat.tree",
-    HEAT_MAP_TREE_PANE_NARROWEST_PX,
+    STYLE_HEAT_MAP_TREE_PANE_NARROWEST_PX,
   );
 
   const vector_at = (cost_vector, index) =>
     cost_vector && index < cost_vector.length ? cost_vector[index] : 0;
-  const counter_list = [];
-  profile_model.heatMapTotals.counters.forEach((name, index) => {
-    counter_list.push({
-      key: name,
-      get: (cost_vector) => vector_at(cost_vector, index),
-      contributing_counters: [],
-    });
-  });
-  for (const [name, terms] of profile_model.heatMapTotals.derived) {
-    const get = (cost_vector) =>
-      terms.reduce(
-        (running_total, term) =>
-          running_total + term[0] * vector_at(cost_vector, term[1]),
-        0,
-      );
-    // the recorded counters fill counter_list's first slots in cost-vector
-    // order, so a term's slot is the index of the counter it reads
-    counter_list.push({
-      key: name,
-      get,
-      derived: true,
-      contributing_counters: terms.map((term) => counter_list[term[1]]),
-    });
-  }
+  let counter_list = null,
+    secondary_counters = null;
   const counter_find = (key) =>
     counter_list.find((counter) => counter.key === key);
-  // the generator proved the default is a column it emitted; a select entry
-  // is one too, and route_render checks the counter an address names
-  let current_counter = counter_find(
-    profile_model.heatMapTotals.defaultCounter,
-  );
-  const secondary_counters =
-    HEAT_MAP_SECONDARY_COUNTER_NAMES.map(counter_find).filter(Boolean);
+  let current_counter = null;
 
-  const text_of = window.ui_strings.text_of;
-  const text_fill = window.ui_strings.text_fill;
+  const text_of = window.ui_strings_.text_of;
+  const text_fill = window.ui_strings_.text_fill;
   const counter_label = (counter) =>
     text_of(
       HEAT_MAP_COUNTER_DESCRIPTION_STRING_ID_PREFIX +
@@ -154,22 +138,57 @@
     ) +
     " / " +
     counter.key;
-  const counter_select = document.getElementById("counter");
-  let counter_label_width = 0;
-  for (const counter of counter_list) {
-    const option = document.createElement("option");
-    option.value = counter.key;
-    option.textContent = counter_label(counter);
-    counter_label_width = Math.max(
-      counter_label_width,
-      option.textContent.length,
+  const counter_select = document.getElementById(
+    "heat-map-menu-counter-select-",
+  );
+  const counter_key_stored = () =>
+    stored_choice_of(
+      counter_select,
+      "heat.counter",
+      profile_model.heatMapTotals.defaultCounter,
     );
-    counter_select.appendChild(option);
+  function counters_build() {
+    counter_list = [];
+    profile_model.heatMapTotals.counters.forEach((name, index) => {
+      counter_list.push({
+        key: name,
+        get: (cost_vector) => vector_at(cost_vector, index),
+        contributing_counters: [],
+      });
+    });
+    for (const [name, terms] of profile_model.heatMapTotals.derived) {
+      const get = (cost_vector) =>
+        terms.reduce(
+          (running_total, term) =>
+            running_total + term[0] * vector_at(cost_vector, term[1]),
+          0,
+        );
+      counter_list.push({
+        key: name,
+        get,
+        derived: true,
+        contributing_counters: terms.map((term) => counter_list[term[1]]),
+      });
+    }
+    secondary_counters =
+      HEAT_MAP_SECONDARY_COUNTER_NAMES.map(counter_find).filter(Boolean);
+    let counter_label_width = 0;
+    counter_select.replaceChildren();
+    for (const counter of counter_list) {
+      const option = document.createElement("option");
+      option.value = counter.key;
+      option.textContent = counter_label(counter);
+      counter_label_width = Math.max(
+        counter_label_width,
+        option.textContent.length,
+      );
+      counter_select.appendChild(option);
+    }
+    counter_select.style.width =
+      counter_label_width +
+      STYLE_HEAT_MAP_MENU_DROPDOWN_EXTRA_WIDTH_CHARS +
+      "ch";
   }
-  counter_select.value = current_counter.key;
-
-  counter_select.style.width =
-    counter_label_width + HEAT_MAP_CONTROL_DROPDOWN_EXTRA_WIDTH_CHARS + "ch";
   let total_cost = 1,
     secondary_totals = {};
   const current_value = (cost_vector) => current_counter.get(cost_vector);
@@ -191,26 +210,24 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   const share_of_total = (value) => (100 * value) / total_cost;
-  let share_text = report_ui.percent_text;
+  let share_text = report_ui_.percent_text;
   const share_of_total_text = (value) => share_text(share_of_total(value));
 
-  let human_text = report_ui.human_text;
+  let human_text = report_ui_.human_text;
   const cell_number = (value) => ({
     text: human_text(value),
   });
   let HEADING_PREFIX = text_of("str_heading_prefix_self"),
-    CHIP_HEADING = text_of("str_chip_heading_self");
+    TICKER_TAPE_HEADING = text_of("str_ticker_tape_heading_self");
   const SELF_COLUMN = {
     label: text_of("str_column_self"),
     numeric: true,
   };
-  const HAS_CALL_GRAPH = function_table.some(
-    (function_entry) => function_entry.callers.length > 0,
-  );
+  let HAS_CALL_GRAPH = null;
 
-  const IS_DIFF = !!profile_model.heatMapTotals.diff;
-  const function_baselines = profile_model.functionBaseline || [];
-  const file_baselines = profile_model.fileBaseline || {};
+  let IS_DIFF = null;
+  let function_baselines = null,
+    file_baselines = null;
   let counter_baseline_of = () => null;
   let heat_position_of = (heat_value) => heat_value;
   let share_of_baseline = (value, baseline_cost) => share_of_total(value);
@@ -237,46 +254,45 @@
     line_number != null
       ? share_in_scope(self_cost, secondary, line_number)
       : (100 * self_cost) / secondary_totals[secondary.key];
-  if (IS_DIFF) {
-    share_text = report_ui.signed_percent_text;
-    human_text = report_ui.signed_human_text;
-    HEADING_PREFIX = text_of("str_heading_prefix_diff");
-    CHIP_HEADING = text_of("str_chip_heading_diff");
-    counter_baseline_of = (cost_vector, counter) => {
-      if (!cost_vector) return null;
-      const baseline_cost = absolute(counter.get(cost_vector));
-      return baseline_cost ? baseline_cost : null;
-    };
-    share_of_baseline = (value, baseline_cost) =>
-      baseline_cost
-        ? (100 * value) / baseline_cost
-        : value
-          ? Math.sign(value) * Infinity
-          : 0;
-    scope_choices_build = () => [["line", text_of("str_scope_line")]];
-    secondary_share = (value, counter, baseline_cost) =>
-      share_of_baseline(value, baseline_cost);
-    line_share = (value, baseline_cost) =>
-      share_of_baseline(value, baseline_cost);
-    line_share_text = (value, baseline_cost) =>
-      share_of_baseline_text(value, baseline_cost);
-    heat_signed = (curved, percent) => (percent < 0 ? -curved : curved);
-    heat_position_of = (heat_value) => (heat_value + 1) * 0.5;
-    secondary_percent_of_file = (self_cost, file_path, secondary) =>
-      share_of_baseline(
+  function report_kind_set(first_model) {
+    IS_DIFF = !!first_model.heatMapTotals.diff;
+    if (IS_DIFF) {
+      share_text = report_ui_.signed_percent_text;
+      human_text = report_ui_.signed_human_text;
+      HEADING_PREFIX = text_of("str_heading_prefix_diff");
+      TICKER_TAPE_HEADING = text_of("str_ticker_tape_heading_diff");
+      counter_baseline_of = (cost_vector, counter) => {
+        if (!cost_vector) return null;
+        const baseline_cost = absolute(counter.get(cost_vector));
+        return baseline_cost ? baseline_cost : null;
+      };
+      share_of_baseline = report_ui_.diff_share_of;
+      scope_choices_build = () => [["line", text_of("str_scope_line")]];
+      secondary_share = (value, counter, baseline_cost) =>
+        share_of_baseline(value, baseline_cost);
+      line_share = (value, baseline_cost) =>
+        share_of_baseline(value, baseline_cost);
+      line_share_text = (value, baseline_cost) =>
+        share_of_baseline_text(value, baseline_cost);
+      heat_signed = (curved, percent) => (percent < 0 ? -curved : curved);
+      heat_position_of = (heat_value) => (heat_value + 1) * 0.5;
+      secondary_percent_of_file = (self_cost, file_path, secondary) =>
+        share_of_baseline(
+          self_cost,
+          file_counter_baseline(file_path, secondary),
+        );
+      secondary_percent_of_cell = (
         self_cost,
-        file_counter_baseline(file_path, secondary),
-      );
-    secondary_percent_of_cell = (
-      self_cost,
-      secondary,
-      line_number,
-      baseline_lookup,
-    ) =>
-      share_of_baseline(
-        self_cost,
-        baseline_lookup ? baseline_lookup(secondary) : null,
-      );
+        secondary,
+        line_number,
+        baseline_lookup,
+      ) =>
+        share_of_baseline(
+          self_cost,
+          baseline_lookup ? baseline_lookup(secondary) : null,
+        );
+    }
+    scale_pulldown_fill();
   }
   const baseline_of = (cost_vector) =>
     counter_baseline_of(cost_vector, current_counter);
@@ -300,44 +316,47 @@
   const file_baseline_of = (file_path) =>
     file_counter_baseline(file_path, current_counter);
 
-  const scale_select = document.getElementById("scale");
-  const SCOPE_CHOICES = scope_choices_build();
+  const scale_select = document.getElementById("heat-map-menu-scale-select-");
   const CURVE_CHOICES = [
     ["log", text_of("str_scale_curve_log")],
     ["linear", text_of("str_scale_curve_linear")],
   ];
   const SCALE_CHOICES = [];
-  CURVE_CHOICES.forEach((curve) => {
-    SCOPE_CHOICES.forEach((scope) =>
-      SCALE_CHOICES.push({
-        value: curve[0] + "/" + scope[0],
-        curve: curve[0],
-        scope: scope[0],
-        label:
-          SCOPE_CHOICES.length > 1
-            ? text_fill("str_scale_entry", {
-                curve: curve[1],
-                scope: scope[1],
-              })
-            : curve[1],
-      }),
-    );
-  });
-  let active_scale =
-    SCALE_CHOICES.find(
-      (entry) => entry.value === view_storage.value_read("heat.scale"),
-    ) || SCALE_CHOICES[0];
-  let scale_label_width = 0;
-  SCALE_CHOICES.forEach((entry) => {
-    const option = document.createElement("option");
-    option.value = entry.value;
-    option.textContent = entry.label;
-    scale_select.appendChild(option);
-    scale_label_width = Math.max(scale_label_width, entry.label.length);
-  });
-  scale_select.value = active_scale.value;
-  scale_select.style.width =
-    scale_label_width + HEAT_MAP_CONTROL_DROPDOWN_EXTRA_WIDTH_CHARS + "ch";
+  let active_scale = null;
+  const scale_value_stored = () =>
+    stored_choice_of(scale_select, "heat.scale", SCALE_CHOICES[0].value);
+  function scale_pulldown_fill() {
+    const scope_choices = scope_choices_build();
+    CURVE_CHOICES.forEach((curve) => {
+      scope_choices.forEach((scope) =>
+        SCALE_CHOICES.push({
+          value: curve[0] + "/" + scope[0],
+          curve: curve[0],
+          scope: scope[0],
+          label:
+            scope_choices.length > 1
+              ? text_fill("str_scale_entry", {
+                  curve: curve[1],
+                  scope: scope[1],
+                })
+              : curve[1],
+        }),
+      );
+    });
+    let scale_label_width = 0;
+    SCALE_CHOICES.forEach((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.value;
+      option.textContent = entry.label;
+      scale_select.appendChild(option);
+      scale_label_width = Math.max(scale_label_width, entry.label.length);
+    });
+    scale_select.style.width =
+      scale_label_width +
+      STYLE_HEAT_MAP_MENU_DROPDOWN_EXTRA_WIDTH_CHARS +
+      "ch";
+    scale_apply(scale_value_stored());
+  }
 
   let scope_totals = null;
   const SCOPE_SHARE_STRING_IDS = {
@@ -393,10 +412,10 @@
   function heat_of_share(percent) {
     const magnitude = Math.min(
       absolute(percent),
-      HEAT_COLOR_FULL_SCALE_PERCENT,
+      STYLE_HEAT_COLOR_FULL_SCALE_PERCENT,
     );
     if (magnitude <= 0) return 0;
-    const fraction = magnitude / HEAT_COLOR_FULL_SCALE_PERCENT;
+    const fraction = magnitude / STYLE_HEAT_COLOR_FULL_SCALE_PERCENT;
     const curved =
       active_scale.curve === "log" ? Math.log10(1 + 9 * fraction) : fraction;
     return heat_signed(curved, percent);
@@ -405,7 +424,7 @@
     return heat_of_share(share_of_baseline(cost, baseline_cost));
   }
 
-  const ramp_channels_at = report_ui.ramp_channels_at;
+  const ramp_channels_at = report_ui_.ramp_channels_at;
   function cell_style(heat_value) {
     if (absolute(heat_value) <= 0) return "";
     const mixed_channels = ramp_channels_at(heat_position_of(heat_value));
@@ -415,7 +434,7 @@
         0.0722 * mixed_channels[2]) /
       255;
     const foreground_color =
-      luminance > 0.5
+      luminance > STYLE_HEAT_CELL_ON_BRIGHT_ABOVE_LUMINANCE_SHARE
         ? profile_model.theme.fgDark
         : profile_model.theme.fgLight;
     return (
@@ -423,17 +442,8 @@
       `color:${foreground_color}`
     );
   }
-  const per_function_calls = function_table.map((function_entry) =>
-    function_entry.callers.reduce(
-      (running_total, caller) => running_total + caller[4],
-      0,
-    ),
-  );
-  const CALLS_TOTAL =
-    per_function_calls.reduce(
-      (running_total, call_count) => running_total + call_count,
-      0,
-    ) || 1;
+  let per_function_calls = null,
+    CALLS_TOTAL = null;
   const call_count_cell = (call_count) =>
     call_count
       ? {
@@ -442,20 +452,19 @@
         }
       : "";
 
-  const hash_of_state = report_ui.heat_map_address.hash_of_state;
-  const state_of_hash = report_ui.heat_map_address.state_of_hash;
-  // The counter an address on this page names: the one shown, whenever the
-  // report has more than one to choose between.
-  const addressed_counter_key = () =>
-    counter_list.length > 1 ? current_counter.key : null;
   const hash_for_line = (file_path, line) =>
-    hash_of_state({
+    report_ui_.address.hash_of({
+      test: shown_test_name,
+      view: HEAT_MAP_VIEW_ENTRY[0],
       file: file_path,
-      line: line,
-      ev: addressed_counter_key(),
+      line: line || null,
     });
   const hash_for_function = (name) =>
-    hash_of_state({ fn: name, ev: addressed_counter_key() });
+    report_ui_.address.hash_of({
+      test: shown_test_name,
+      view: HEAT_MAP_VIEW_ENTRY[0],
+      function: name,
+    });
   function function_name(index) {
     return index != null && function_table[index]
       ? function_table[index].name
@@ -465,7 +474,7 @@
   function source_text(file_path) {
     const file = file_table[file_path];
     if (!file || file.source == null) return null;
-    const sources = window.report_sources;
+    const sources = window.report_sources_;
     return (sources && sources[file_path]) != null ? sources[file_path] : null;
   }
 
@@ -499,43 +508,44 @@
     const grow_index = options.fill
       ? columns.findIndex((column) => column.grow)
       : -1;
-    const column_limit_list = report_ui
+    const column_limit_list = report_ui_
       .column_extents(columns, cell_rows, grow_index)
-      .map(report_ui.column_limits);
+      .map(report_ui_.column_limits);
     const table_classes = [
-      "cols",
-      options.fill ? "fill" : "",
+      "columns_",
+      options.fill ? "fill_" : "",
       options.cls || "",
     ]
       .filter(Boolean)
       .join(" ");
     let markup = options.bare
       ? ""
-      : `<div class="tbl${options.fill ? " fill" : ""}">`;
+      : `<div class="table-box-${options.fill ? " fill_" : ""}">`;
     markup +=
-      `<div class="tbl-cols"><table class="${table_classes}"` +
-      ` data-key="${html_escape(key)}"><colgroup>`;
+      `<div class="table-columns-"><table class="${table_classes}"` +
+      ` data-key-="${html_escape(key)}"><colgroup>`;
     column_limit_list.forEach((limit, column_index) => {
       const column_classes = [
-        column_index % 2 ? "alt" : "",
-        column_index === grow_index ? "grow" : "",
+        column_index % 2 ? "alternate_" : "",
+        column_index === grow_index ? "grow_" : "",
       ]
         .filter(Boolean)
         .join(" ");
-      const width_text = report_ui.column_width_text(
+      const width_text = report_ui_.column_width_text(
         column_limit_list,
         column_index,
         grow_index,
       );
       markup +=
         `<col${column_classes ? ` class="${column_classes}"` : ""}` +
-        ` data-min="${limit[0]}ch" style="width:${width_text}">`;
+        ` data-min-="${limit[0]}ch" style="width:${width_text}">`;
     });
     markup += `</colgroup><thead><tr>`;
     for (const column of columns) {
       const heading = html_escape(column.label);
       markup +=
-        `<th${column.numeric ? ' class="n"' : ""} title="${heading}">` +
+        `<th${column.numeric ? ' class="numeric_"' : ""}` +
+        ` title="${heading}">` +
         `${heading}</th>`;
     }
     markup += `</tr></thead><tbody>`;
@@ -544,16 +554,15 @@
       const row_attribute_text =
         options.row_attributes && options.row_attributes[row_index];
       markup += href
-        ? `<tr class="rowlink" data-href="${html_escape(href)}">`
+        ? `<tr class="row-link-" data-href-="${html_escape(href)}">`
         : row_attribute_text
           ? `<tr ${row_attribute_text}>`
           : "<tr>";
       row.forEach((cell, column_index) => {
         const column = columns[column_index];
         const class_names = [
-          column.numeric ? "n" : "",
+          column.numeric ? "numeric_" : "",
           column.cls || "",
-          cell.cls || "",
         ]
           .filter(Boolean)
           .join(" ");
@@ -574,7 +583,7 @@
     const column_width_list = columns.map((column, column_index) =>
       Math.max(
         column.label.length,
-        report_ui.column_longest(cell_rows, column_index),
+        report_ui_.column_longest(cell_rows, column_index),
       ),
     );
     const pad = (text, width, numeric) =>
@@ -616,7 +625,7 @@
     secondary_counters.map((secondary) =>
       counter_column(secondary, {
         label: counter_label(secondary),
-        cls: "x",
+        cls: "heat-map-source-table-secondary-counter-cell-",
       }),
     );
   function secondary_cells(cost_vector, line_number, baseline_lookup) {
@@ -628,11 +637,9 @@
         line_number,
         baseline_lookup,
       );
-      const heat_value = heat_of_share(percent);
       return {
         text: self_cost ? share_text(percent) : "",
-        style: cell_style(heat_value),
-        cls: heat_value > HEAT_COLOR_LIGHT_TEXT_ABOVE_SHARE ? "hot" : "",
+        style: cell_style(heat_of_share(percent)),
       };
     });
   }
@@ -718,13 +725,13 @@
     return false;
   }
   const caret_of = (is_expanded) =>
-    text_of(is_expanded ? "str_caret_expanded" : "str_caret_collapsed");
+    text_of(is_expanded ? "str_caret_down" : "str_caret_right");
+  const treeitem_attributes_of = (node_level) =>
+    ` role="treeitem" aria-level="${node_level}" tabindex="-1"`;
   function tree_render() {
     const output_parts = [];
     function nodes_emit(tree_node, depth) {
-      const indent_px =
-        HEAT_MAP_TREE_INDENT_FIRST_LEVEL_PX +
-        depth * HEAT_MAP_TREE_INDENT_PER_LEVEL_PX;
+      const indent_chars = depth * STYLE_HEAT_MAP_TREE_INDENT_PER_LEVEL_CHARS;
       const directories = [...tree_node.dirs.values()]
         .filter(subtree_matches)
         .sort(node_compare);
@@ -736,92 +743,234 @@
           heat_of_delta(directory_node.self, directory_node.base),
         );
         output_parts.push(
-          `<div class="node dir${heat_style_attribute ? " heat" : ""}"` +
-            ` data-dir="${html_escape(directory_node.path)}"` +
-            ` style="padding-left:${indent_px}px;` +
+          `<div class="heat-map-tree-node- dir_` +
+            `${heat_style_attribute ? " heat_" : ""}"` +
+            `${treeitem_attributes_of(depth + 1)}` +
+            ` aria-expanded="${is_expanded}"` +
+            ` data-dir-="${html_escape(directory_node.path)}"` +
+            ` style="padding-left:${indent_chars}ch;` +
             `${heat_style_attribute}">` +
-            `<span class="caret">` +
+            `<span class="heat-map-tree-node-caret-">` +
             `${caret_of(is_expanded)}</span>` +
-            `<span class="name">` +
+            `<span class="heat-map-tree-node-name-">` +
             `${html_escape(directory_node.name)}/</span>` +
-            `<span class="pct">` +
+            `<span class="heat-map-tree-node-share-percent-">` +
             `${share_of_baseline_text(
               directory_node.self,
               directory_node.base,
             )}` +
             `</span></div>`,
         );
-        output_parts.push(`<div class="kids${is_expanded ? " open" : ""}">`);
+        output_parts.push(
+          `<div class="heat-map-tree-node-child-group-` +
+            `${is_expanded ? " open_" : ""}" role="group">`,
+        );
         nodes_emit(directory_node, depth + 1);
         output_parts.push(`</div>`);
       }
       const file_list = tree_node.files
         .filter((file) => path_matches(file.path))
         .sort(node_compare);
-      const file_row_emit = (file) => {
-        const selected_class = file.path === current_file_path ? " sel" : "";
+      const file_row_emit = (file, node_level) => {
+        const selected_class =
+          file.path === current_file_path ? " selected_" : "";
+        const selected_attribute = selected_class
+          ? ' aria-selected="true"'
+          : "";
         const heat_style_attribute = file.cold
           ? ""
           : cell_style(heat_of_delta(file.self, file.base));
         output_parts.push(
-          `<div class="node file${file.cold ? " cold" : ""}` +
-            `${heat_style_attribute ? " heat" : ""}${selected_class}"` +
-            ` data-file="${html_escape(file.path)}"` +
-            ` style="padding-left:${indent_px}px;` +
+          `<div class="heat-map-tree-node- file_${file.cold ? " cold_" : ""}` +
+            `${heat_style_attribute ? " heat_" : ""}${selected_class}"` +
+            `${treeitem_attributes_of(node_level)}${selected_attribute}` +
+            ` data-file-="${html_escape(file.path)}"` +
+            ` style="padding-left:${indent_chars}ch;` +
             `${heat_style_attribute}">` +
-            `<span class="caret">` +
+            `<span class="heat-map-tree-node-caret-">` +
             `${caret_of(false)}</span>` +
-            `<span class="name">` +
+            `<span class="heat-map-tree-node-name-">` +
             `${html_escape(file.name)}</span>` +
-            `<span class="pct">` +
+            `<span class="heat-map-tree-node-share-percent-">` +
             `${share_of_baseline_text(file.self, file.base)}` +
             `</span></div>`,
         );
       };
       const zero_cost_files = file_list.filter((file) => file.zero);
-      for (const file of file_list) if (!file.zero) file_row_emit(file);
+      for (const file of file_list)
+        if (!file.zero) file_row_emit(file, depth + 1);
       if (zero_cost_files.length) {
         const is_expanded = search_query
           ? true
           : expanded_cold_groups.has(tree_node.path);
         output_parts.push(
-          `<div class="node more"` +
-            ` data-more="${html_escape(tree_node.path)}"` +
-            ` style="padding-left:${indent_px}px">` +
-            `<span class="caret">` +
+          `<div class="heat-map-tree-node- more_"` +
+            `${treeitem_attributes_of(depth + 1)}` +
+            ` aria-expanded="${is_expanded}"` +
+            ` data-more-="${html_escape(tree_node.path)}"` +
+            ` style="padding-left:${indent_chars}ch">` +
+            `<span class="heat-map-tree-node-caret-">` +
             `${caret_of(is_expanded)}</span>` +
-            `<span class="name">` +
+            `<span class="heat-map-tree-node-name-">` +
             `${text_of("str_no_samples")}</span>` +
-            `<span class="pct"></span></div>`,
+            `<span class="heat-map-tree-node-share-percent-"></span></div>`,
         );
         if (is_expanded) {
-          for (const file of zero_cost_files) file_row_emit(file);
+          output_parts.push(
+            `<div class="heat-map-tree-node-child-group- open_"` +
+              ` role="group">`,
+          );
+          for (const file of zero_cost_files) file_row_emit(file, depth + 2);
+          output_parts.push(`</div>`);
         }
       }
     }
+    const tree_had_focus =
+      document.hasFocus() && tree_panel.contains(document.activeElement);
     nodes_emit(tree_root, 0);
     tree_panel.innerHTML = output_parts.join("");
+    tree_tab_stop_place(tree_had_focus);
   }
-  tree_panel.addEventListener("click", (click_event) => {
-    const tree_node = click_event.target.closest(".node");
-    if (!tree_node) return;
-    if (tree_node.dataset.dir != null) {
-      const file_path = tree_node.dataset.dir;
-      if (expanded_directories.has(file_path)) {
-        expanded_directories.delete(file_path);
-      } else expanded_directories.add(file_path);
-      tree_render();
-    } else if (tree_node.dataset.more != null) {
-      const file_path = tree_node.dataset.more;
-      if (expanded_cold_groups.has(file_path)) {
-        expanded_cold_groups.delete(file_path);
-      } else expanded_cold_groups.add(file_path);
-      tree_render();
-    } else if (tree_node.dataset.file != null) {
-      if (tree_node.classList.contains("cold")) return;
-      location.hash = hash_for_line(tree_node.dataset.file);
+  let tree_focus_selector = null;
+  const TREE_NODE_KEY_ATTRIBUTE_NAMES = [
+    "data-dir-",
+    "data-file-",
+    "data-more-",
+  ];
+  function tree_node_selector_of(tree_node) {
+    const key_attribute_name = TREE_NODE_KEY_ATTRIBUTE_NAMES.find(
+      (attribute_name) => tree_node.hasAttribute(attribute_name),
+    );
+    const key_value = CSS.escape(tree_node.getAttribute(key_attribute_name));
+    return `.heat-map-tree-node-[${key_attribute_name}="${key_value}"]`;
+  }
+  function tree_visible_nodes() {
+    return [...tree_panel.querySelectorAll(".heat-map-tree-node-")].filter(
+      (tree_node) =>
+        !tree_node.closest(".heat-map-tree-node-child-group-:not(.open_)"),
+    );
+  }
+  function tree_parent_of(tree_node) {
+    const holding_group = tree_node.parentElement.closest(
+      ".heat-map-tree-node-child-group-",
+    );
+    return holding_group ? holding_group.previousElementSibling : null;
+  }
+  const tree_first_child_of = (tree_node) =>
+    tree_node.nextElementSibling.querySelector(
+      ":scope > .heat-map-tree-node-",
+    );
+  function tree_tab_stop_place(takes_focus) {
+    const visible_nodes = tree_visible_nodes();
+    const candidate_nodes = [
+      takes_focus && tree_focus_selector
+        ? tree_panel.querySelector(tree_focus_selector)
+        : null,
+      tree_panel.querySelector(".heat-map-tree-node-.selected_"),
+      visible_nodes[0],
+    ];
+    const tab_stop = candidate_nodes.find((candidate_node) =>
+      visible_nodes.includes(candidate_node),
+    );
+    if (tab_stop) report_ui_.tab_stop_move(null, tab_stop, takes_focus);
+  }
+  function tree_key_take(key_event, key_name, tree_node) {
+    if (report_ui_.widget_key.activates(key_name)) {
+      key_event.preventDefault();
+      if (!key_event.repeat) tree_node.click();
+      return;
     }
-  });
+    const visible_nodes = tree_visible_nodes();
+    const node_index = visible_nodes.indexOf(tree_node);
+    const is_open = tree_node.getAttribute("aria-expanded") === "true";
+    const is_closed = tree_node.getAttribute("aria-expanded") === "false";
+    let next_node = null;
+    switch (key_name) {
+      case WIDGET_KEY_NAMES.down:
+        next_node = visible_nodes[node_index + 1];
+        break;
+      case WIDGET_KEY_NAMES.first:
+        next_node = visible_nodes[0];
+        break;
+      case WIDGET_KEY_NAMES.last:
+        next_node = visible_nodes[visible_nodes.length - 1];
+        break;
+      case WIDGET_KEY_NAMES.left:
+        if (is_open && !search_query) tree_node.click();
+        else next_node = tree_parent_of(tree_node);
+        break;
+      case WIDGET_KEY_NAMES.right:
+        if (is_closed) tree_node.click();
+        else if (is_open) next_node = tree_first_child_of(tree_node);
+        break;
+      case WIDGET_KEY_NAMES.up:
+        next_node = visible_nodes[node_index - 1];
+        break;
+      default:
+        return;
+    }
+    key_event.preventDefault();
+    if (next_node) report_ui_.tab_stop_move(tree_node, next_node, true);
+  }
+  tree_panel.addEventListener(
+    "focusin",
+    window.catch_show_throw_((focus_event) => {
+      const tree_node = focus_event.target.closest(".heat-map-tree-node-");
+      if (!tree_node) return;
+      tree_focus_selector = tree_node_selector_of(tree_node);
+      report_ui_.tab_stop_move(
+        tree_panel.querySelector('.heat-map-tree-node-[tabindex="0"]'),
+        tree_node,
+        false,
+      );
+    }),
+  );
+  tree_panel.addEventListener(
+    "keydown",
+    window.catch_show_throw_((key_event) => {
+      const key_name = report_ui_.widget_key.of(key_event);
+      const tree_node = key_event.target.closest(".heat-map-tree-node-");
+      if (key_name && tree_node) tree_key_take(key_event, key_name, tree_node);
+    }),
+  );
+  tree_panel.addEventListener(
+    "click",
+    window.catch_show_throw_((click_event) => {
+      const tree_node = click_event.target.closest(".heat-map-tree-node-");
+      if (!tree_node) return;
+      if (tree_node.getAttribute("data-dir-") != null) {
+        const file_path = tree_node.getAttribute("data-dir-");
+        if (expanded_directories.has(file_path)) {
+          expanded_directories.delete(file_path);
+        } else expanded_directories.add(file_path);
+        tree_render();
+        if (!search_query && expanded_directories.has(file_path))
+          group_opening_show(tree_node);
+      } else if (tree_node.getAttribute("data-more-") != null) {
+        const file_path = tree_node.getAttribute("data-more-");
+        if (expanded_cold_groups.has(file_path)) {
+          expanded_cold_groups.delete(file_path);
+        } else expanded_cold_groups.add(file_path);
+        tree_render();
+        if (!search_query && expanded_cold_groups.has(file_path))
+          group_opening_show(tree_node);
+      } else if (tree_node.getAttribute("data-file-") != null) {
+        if (tree_node.classList.contains("cold_")) return;
+        report_ui_.address.request(
+          hash_for_line(tree_node.getAttribute("data-file-")),
+        );
+      }
+    }),
+  );
+  function group_opening_show(clicked_node) {
+    const opened_node = tree_panel.querySelector(
+      tree_node_selector_of(clicked_node),
+    );
+    const tree_rect = design_rect_of(tree_panel);
+    const group_rect = design_rect_of(opened_node.nextElementSibling);
+    if (group_rect.bottom <= tree_rect.top + tree_panel.clientHeight) return;
+    tree_panel.scrollTop += group_rect.top - tree_rect.top;
+  }
   function tree_reveal(file_path) {
     const path_parts = file_path.split("/");
     let accumulated_path = "";
@@ -837,13 +986,7 @@
     }
   }
 
-  const entry_line_index = {};
-  function_table.forEach((function_entry, index) => {
-    if (!function_entry.line) return;
-    entry_line_index[function_entry.file] =
-      entry_line_index[function_entry.file] || {};
-    entry_line_index[function_entry.file][function_entry.line] = index;
-  });
+  let entry_line_index = null;
 
   function top_lines(count) {
     const all = [];
@@ -878,15 +1021,15 @@
   function home_render() {
     current_file_path = null;
     scope_totals = null;
-    let markup = `<div class="home">`;
+    let markup = `<div class="heat-map-home-">`;
     const line_rows = top_lines(HEAT_MAP_HOME_TABLE_MAX_ROWS);
     markup +=
-      `<h2>${html_escape(
+      `<div class="page-heading-">${html_escape(
         text_fill("str_heading_lines_by_counter", {
           prefix: HEADING_PREFIX,
           counter: counter_label(current_counter),
         }),
-      )}</h2>` +
+      )}</div>` +
       table_render(
         "heat.home.lines",
         [
@@ -894,7 +1037,7 @@
           SELF_COLUMN,
           {
             label: text_of("str_column_function"),
-            width: TABLE_FUNCTION_NAME_WIDTH_CHARS,
+            width: STYLE_TABLE_FUNCTION_NAME_WIDTH_CHARS,
           },
           {
             label: text_of("str_column_defined_at"),
@@ -965,12 +1108,12 @@
         ]
       : [];
     markup +=
-      `<h2>${html_escape(
+      `<div class="page-heading-">${html_escape(
         text_fill("str_heading_functions_by_self", {
           prefix: HEADING_PREFIX,
           counter: counter_label(current_counter),
         }),
-      )}</h2>` +
+      )}</div>` +
       table_render(
         "heat.home.functions",
         [
@@ -978,11 +1121,11 @@
           SELF_COLUMN,
           {
             label: text_of("str_column_function"),
-            width: TABLE_FUNCTION_NAME_WIDTH_CHARS,
+            width: STYLE_TABLE_FUNCTION_NAME_WIDTH_CHARS,
           },
           {
             label: text_of("str_column_defined_at"),
-            clip: TABLE_LOCATION_COLUMN_MAX_CHARS,
+            clip: STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS,
           },
           ...call_columns,
           ...secondary_columns(),
@@ -1031,7 +1174,7 @@
     main_panel.innerHTML = markup;
     main_panel.scrollTop = 0;
     tree_render();
-    report_ui.layout_activate(main_panel);
+    report_ui_.layout_activate(main_panel);
     minimap_clear();
   }
 
@@ -1039,7 +1182,7 @@
     const file = file_table[file_path];
     if (!file)
       throw new Error(
-        window.ui_strings.text_fill("str_error_hash_file_unknown", [
+        window.ui_strings_.text_fill("str_error_hash_file_unknown", [
           file_path,
         ]),
       );
@@ -1050,19 +1193,20 @@
     const lines = file.lines;
     scope_totals = scope_totals_build(file_path);
     let markup =
-      `<div class="srcwrap"><div class="fhead band">` +
-      `<span class="path">${html_escape(file_path)}</span>`;
+      `<div class="heat-map-source-">` +
+      `<div class="heat-map-source-file-header- band_">` +
+      `<span class="heat-map-source-file-header-path-">` +
+      `${html_escape(file_path)}</span>`;
     const file_self_cost = current_value(file.self);
     const file_baseline_cost = file_baseline_of(file_path) || 0;
     const file_amount_text = human_text(file_self_cost);
     markup +=
-      `<span class="stat">` +
-      `${html_escape(text_of("str_column_self"))} <b>` +
-      `${
-        share_of_baseline_text(file_self_cost, file_baseline_cost) ||
-        text_of("str_share_zero")
-      }` +
-      `</b>` +
+      `<span class="heat-map-source-file-header-statistic-">` +
+      `${html_escape(text_of("str_column_self"))} ` +
+      `<span class="heat-map-source-file-header-statistic-share-">` +
+      (share_of_baseline_text(file_self_cost, file_baseline_cost) ||
+        report_ui_.zero_percent_text()) +
+      `</span>` +
       (file_amount_text
         ? ` (${file_amount_text}` +
           ` ${html_escape(counter_label(current_counter))})`
@@ -1077,48 +1221,55 @@
         secondary,
       );
       markup +=
-        `<span class="stat">` +
+        `<span class="heat-map-source-file-header-statistic-">` +
         `${html_escape(counter_label(secondary))}` +
-        ` <b>${share_text(secondary_percent)}</b>` +
+        ` <span class="heat-map-source-file-header-statistic-share-">` +
+        `${share_text(secondary_percent)}</span>` +
         ` (${human_text(self_cost)})</span>`;
     }
     if (file.group === "external") {
       const note = text_fill("str_not_in_repo", { path: file.raw });
-      markup += `<span class="stat">${html_escape(note)}</span>`;
+      markup +=
+        `<span class="heat-map-source-file-header-statistic-">` +
+        `${html_escape(note)}</span>`;
     }
     markup += `</div>`;
     const file_source = source_text(file_path);
     if (file_source == null) {
       const note = html_escape(text_of("str_source_unavailable"));
-      markup += `<div class="nosrc">${note}</div>`;
+      markup += `<div class="heat-map-source-unavailable-note-">${note}</div>`;
     }
 
     const hot_lines = Object.keys(lines)
       .map((line_key) => [+line_key, current_value(lines[line_key][0])])
       .filter((entry) => absolute(entry[1]) > 0)
       .sort((entry_a, entry_b) => absolute(entry_b[1]) - absolute(entry_a[1]));
-    const chip_lines = hot_lines
+    const ticker_tape_lines = hot_lines
       .filter(
         (entry) =>
           absolute(
             line_share(entry[1], line_baseline(file_path, entry[0]), entry[0]),
-          ) >= HEAT_MAP_SOURCE_HOT_LINE_BUTTON_LEAST_SHARE,
+          ) >= HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE,
       )
-      .slice(0, HEAT_MAP_SOURCE_HOT_LINE_BUTTON_MAX_COUNT);
-    if (chip_lines.length) {
+      .slice(0, HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_MAX_COUNT);
+    if (ticker_tape_lines.length) {
       markup +=
-        `<div class="chips">` +
-        `<span class="lbl">${html_escape(CHIP_HEADING)}</span>`;
-      for (const [line_number, cost] of chip_lines) {
+        `<div class="heat-map-source-ticker-tape-" role="toolbar"` +
+        ` aria-label="${html_escape(TICKER_TAPE_HEADING)}">` +
+        `<span class="heat-map-source-ticker-tape-label-">` +
+        `${html_escape(TICKER_TAPE_HEADING)}</span>`;
+      ticker_tape_lines.forEach(([line_number, cost], entry_index) => {
         const baseline_cost = line_baseline(file_path, line_number);
         markup +=
-          `<span class="chip" data-goto="${line_number}"` +
+          `<span class="heat-map-source-ticker-tape-entry-" role="link"` +
+          ` tabindex="${entry_index ? -1 : 0}"` +
+          ` data-goto-="${line_number}"` +
           ` style="${cell_style(
             heat_of_line(cost, baseline_cost, line_number),
           )}">` +
           `${line_number} -` +
           ` ${line_share_text(cost, baseline_cost, line_number)}</span>`;
-      }
+      });
       markup += `</div>`;
     }
 
@@ -1129,19 +1280,19 @@
       const self_cost = line_costs ? current_value(line_costs[0]) : 0,
         calls = line_costs ? current_value(line_costs[1]) : 0;
       const baseline_cost = line_baseline(file_path, line_number);
-      const heat_value = heat_of_line(self_cost, baseline_cost, line_number),
-        heat_style_attribute = cell_style(heat_value);
-      // no address names line 0, so its row opens no panel
+      const heat_style_attribute = cell_style(
+        heat_of_line(self_cost, baseline_cost, line_number),
+      );
       const class_names = [
-        line_costs && line_number ? "clickable" : "",
-        file.callees[line_number] ? "hasc" : "",
+        line_costs && line_number ? "clickable_" : "",
+        file.callees[line_number] ? "has-callee-" : "",
       ]
         .filter(Boolean)
         .join(" ");
       attrs.push(
-        `id="L${line_number}"` +
+        `id="L${line_number}-"` +
           `${class_names ? ` class="${class_names}"` : ""}` +
-          ` data-ln="${line_number}"`,
+          ` data-line-number-="${line_number}"`,
       );
       const call_cell = HAS_CALL_GRAPH
         ? [
@@ -1157,7 +1308,6 @@
         {
           text: line_share_text(self_cost, baseline_cost, line_number),
           style: heat_style_attribute,
-          cls: heat_value > HEAT_COLOR_LIGHT_TEXT_ABOVE_SHARE ? "hot" : "",
         },
         { text: String(line_number), style: heat_style_attribute },
         { text, style: heat_style_attribute },
@@ -1177,8 +1327,6 @@
     for (let line_index = 0; line_index < source_lines.length; line_index++) {
       source_row_emit(line_index + 1, source_lines[line_index]);
     }
-    // with no text on this box the lines that carry cost are the whole view,
-    // line 0 (callgrind's no-line bucket) too: none of the file's cost hides
     const beyond_end_text =
       file_source == null ? "" : text_of("str_source_beyond_end");
     for (const line_key of Object.keys(lines)) {
@@ -1192,25 +1340,27 @@
           {
             label: text_of("str_column_calls"),
             numeric: true,
-            cls: "incl",
+            cls: "heat-map-source-table-calls-cell-",
           },
         ]
       : [];
     const columns = [
       counter_column(current_counter, {
-        cls: "self",
+        cls: "heat-map-source-table-self-cell-",
       }),
       {
         label: text_of("str_column_line"),
         numeric: true,
-        width: String(line_count).length + 2,
-        cls: "ln",
+        width:
+          String(line_count).length +
+          STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_CHARS,
+        cls: "heat-map-source-table-line-number-cell-",
       },
       {
         label: text_of("str_column_source"),
         width: HEAT_MAP_SOURCE_VIEW_WIDTH_CHARS,
         grow: true,
-        cls: "code",
+        cls: "heat-map-source-table-code-cell-",
       },
       ...call_column,
       ...secondary_columns(),
@@ -1218,21 +1368,25 @@
     markup += table_render("heat.src", columns, rows, {
       row_attributes: attrs,
       fill: 1,
-      cls: "src",
+      cls: "heat-map-source-table-",
       bare: true,
     });
-    markup += `<div class="srctail"></div></div>`;
+    markup += `<div class="heat-map-source-tail-"></div></div>`;
     main_panel.innerHTML = markup;
     tree_render();
 
     minimap_build();
-    report_ui.layout_activate(main_panel);
+    report_ui_.table_rows.attach(
+      main_panel.querySelector("table.heat-map-source-table-"),
+      "tr[data-line-number-]",
+    );
+    report_ui_.layout_activate(main_panel);
     tail_fit();
     if (!is_first_view) main_panel.scrollTop = kept_scroll_top;
     else if (!line) {
       const hottest = hot_lines.length ? hot_lines[0][0] : 0;
       const hottest_row = hottest
-        ? document.getElementById("L" + hottest)
+        ? document.getElementById("L" + hottest + "-")
         : null;
       if (hottest_row) row_center(hottest_row);
       else main_panel.scrollTop = 0;
@@ -1240,9 +1394,18 @@
     minimap_sync();
   }
 
+  function design_rect_of(element) {
+    const rect = element.getBoundingClientRect();
+    return {
+      bottom: report_ui_.design_px(rect.bottom),
+      height: report_ui_.design_px(rect.height),
+      top: report_ui_.design_px(rect.top),
+    };
+  }
+
   function row_is_visible(row_element) {
-    const row_rect = row_element.getBoundingClientRect();
-    const main_rect = main_panel.getBoundingClientRect();
+    const row_rect = design_rect_of(row_element);
+    const main_rect = design_rect_of(main_panel);
     return (
       row_rect.top >=
         main_rect.top + covered_height(row_element.closest("table")) &&
@@ -1251,22 +1414,22 @@
   }
 
   function covered_height(table_element) {
-    let height =
-      table_element.tHead.rows[0].cells[0].getBoundingClientRect().height;
-    for (const band of main_panel.querySelectorAll(".band")) {
-      height += band.getBoundingClientRect().height;
+    let height = design_rect_of(table_element.tHead.rows[0].cells[0]).height;
+    for (const band of main_panel.querySelectorAll(".band_")) {
+      height += design_rect_of(band).height;
     }
     return height;
   }
 
   function row_center(row_element) {
     const cover = covered_height(row_element.closest("table"));
-    const row_rect = row_element.getBoundingClientRect();
-    const main_rect = main_panel.getBoundingClientRect();
+    const row_rect = design_rect_of(row_element);
+    const main_rect = design_rect_of(main_panel);
     const detail_element = row_element.nextElementSibling;
     const block_bottom_px =
-      detail_element && detail_element.classList.contains("detail")
-        ? detail_element.getBoundingClientRect().bottom
+      detail_element &&
+      detail_element.classList.contains("heat-map-source-line-detail-row-")
+        ? design_rect_of(detail_element).bottom
         : row_rect.bottom;
     const block_height_px = block_bottom_px - row_rect.top;
     const slack = (main_panel.clientHeight - cover - block_height_px) / 2;
@@ -1274,15 +1437,16 @@
   }
 
   function tail_fit() {
-    const tail = main_panel.querySelector(".srctail");
-    const table_element = main_panel.querySelector("table.src");
+    const tail = main_panel.querySelector(".heat-map-source-tail-");
+    const table_element = main_panel.querySelector(
+      "table.heat-map-source-table-",
+    );
     if (!tail || !table_element) return;
     const rows = table_element.tBodies[0].rows,
       last = rows[rows.length - 1];
     if (!last) return;
-    const covered_px = report_ui.design_px(
-      covered_height(table_element) + last.getBoundingClientRect().height,
-    );
+    const covered_px =
+      covered_height(table_element) + design_rect_of(last).height;
     tail.style.height =
       Math.max(0, (main_panel.clientHeight - covered_px) / 2) + "px";
   }
@@ -1290,27 +1454,32 @@
   let scale_factor = 1,
     clone_height_px = 0;
   function minimap_clear() {
-    minimap_panel.classList.add("empty");
+    minimap_panel.classList.add("empty_");
     minimap_box.innerHTML = "";
     minimap_viewport.hidden = true;
   }
   function minimap_build() {
-    const table_element = main_panel.querySelector("table.src");
-    const table_body = table_element && table_element.tBodies[0];
+    main_panel.append(minimap_panel);
+    minimap_clear();
+    const table_element = main_panel.querySelector(
+      "table.heat-map-source-table-",
+    );
+    const source_top_px = design_rect_of(
+      main_panel.querySelector(".heat-map-source-"),
+    ).top;
     if (
-      !table_body ||
-      table_body.rows.length < HEAT_MAP_MINIMAP_SHOWN_ABOVE_FILE_LINES
-    ) {
-      minimap_clear();
+      design_rect_of(table_element).bottom - source_top_px <=
+      main_panel.clientHeight
+    )
       return;
-    }
 
+    const table_body = table_element.tBodies[0];
     const clone_table = document.createElement("table");
-    clone_table.className = "src";
+    clone_table.className = "heat-map-source-table-";
     const clone_body = document.createElement("tbody");
     for (const row of table_body.rows) {
-      if (row.classList.contains("detail")) continue;
-      const code = row.querySelector("td.code");
+      if (row.classList.contains("heat-map-source-line-detail-row-")) continue;
+      const code = row.querySelector("td.heat-map-source-table-code-cell-");
       if (!code) continue;
       const clone_row = document.createElement("tr");
       clone_row.className = row.className;
@@ -1318,24 +1487,24 @@
       clone_body.appendChild(clone_row);
     }
     clone_table.appendChild(clone_body);
-    minimap_box.innerHTML = "";
     minimap_box.appendChild(clone_table);
-    minimap_panel.classList.remove("empty");
+    minimap_panel.classList.remove("empty_");
     minimap_viewport.hidden = false;
     clone_height_px = clone_table.offsetHeight;
     minimap_layout();
   }
 
   function minimap_layout() {
-    if (minimap_panel.classList.contains("empty")) return;
+    if (minimap_panel.classList.contains("empty_")) return;
     const band_width_px = minimap_panel.clientWidth,
-      band_height_px = minimap_panel.clientHeight;
+      band_height_px = main_panel.clientHeight;
+    minimap_panel.style.height = band_height_px + "px";
 
-    // the font fit makes a ch the design ch, so the source's width is known
     scale_factor = Math.min(
       1,
       band_width_px /
-        (HEAT_MAP_MINIMAP_SOURCE_WIDTH_CHARS * DESIGN_FONT_CHARACTER_WIDTH_PX),
+        (HEAT_MAP_MINIMAP_SOURCE_WIDTH_CHARS *
+          STYLE_DESIGN_FONT_CHARACTER_WIDTH_PX),
       band_height_px / clone_height_px,
     );
     minimap_box.style.transform = `scale(${scale_factor})`;
@@ -1345,12 +1514,16 @@
   }
 
   function geometry_measure() {
-    const table_element = main_panel.querySelector("table.src"),
+    const table_element = main_panel.querySelector(
+        "table.heat-map-source-table-",
+      ),
       table_body = table_element.tBodies[0];
-    const main = main_panel.getBoundingClientRect();
-    const clone_body = table_body.getBoundingClientRect();
-    const detail_element = table_body.querySelector("tr.detail");
-    const detail = detail_element && detail_element.getBoundingClientRect();
+    const main = design_rect_of(main_panel);
+    const clone_body = design_rect_of(table_body);
+    const detail_element = table_body.querySelector(
+      "tr.heat-map-source-line-detail-row-",
+    );
+    const detail = detail_element && design_rect_of(detail_element);
     const rows = clone_body.height - (detail ? detail.height : 0);
     const rows_above = (y_position_px) => {
       let pixels = y_position_px - clone_body.top;
@@ -1369,13 +1542,12 @@
       body: clone_body,
       detail,
       top: main.top,
-      bottom: main.top + report_ui.screen_px(main_panel.clientHeight),
-      head: table_element.tHead.rows[0].cells[0].getBoundingClientRect()
-        .bottom,
+      bottom: main.top + main_panel.clientHeight,
+      head: design_rect_of(table_element.tHead.rows[0].cells[0]).bottom,
     };
   }
   function minimap_sync() {
-    if (minimap_panel.classList.contains("empty")) return;
+    if (minimap_panel.classList.contains("empty_")) return;
     const geometry = geometry_measure(),
       scaled_height_px = clone_height_px * scale_factor;
     const row_start = geometry.above(geometry.head),
@@ -1411,61 +1583,88 @@
       Math.min(maximum_scroll_px, y_position_px),
     );
   }
-  main_panel.addEventListener("scroll", minimap_sync);
-  minimap_panel.addEventListener("click", (click_event) => {
-    if (click_event.target.closest("#mmViewport")) return;
-    const geometry = geometry_measure(),
-      scaled_height_px = clone_height_px * scale_factor;
-    const offsetY =
-      click_event.clientY - minimap_panel.getBoundingClientRect().top;
-    const row = (offsetY / scaled_height_px) * geometry.rows;
-    scroll_to_row(row - (main_panel.clientHeight - geometry.cover) / 2);
-  });
-  minimap_viewport.addEventListener("pointerdown", (down_event) => {
-    const start_client_y = down_event.clientY,
-      start_top_px = minimap_viewport.offsetTop;
-    const scaled_height_px = clone_height_px * scale_factor;
-    minimap_viewport.classList.add("drag");
-    if (minimap_viewport.setPointerCapture) {
-      minimap_viewport.setPointerCapture(down_event.pointerId);
-    }
-    const move = (move_event) =>
-      scroll_to_row(
-        ((start_top_px + move_event.clientY - start_client_y) /
-          scaled_height_px) *
-          geometry_measure().rows,
+  main_panel.addEventListener(
+    "scroll",
+    window.catch_show_throw_(minimap_sync),
+  );
+  minimap_panel.addEventListener(
+    "click",
+    window.catch_show_throw_((click_event) => {
+      if (click_event.target.closest("#heat-map-minimap-viewport-")) return;
+      const geometry = geometry_measure(),
+        scaled_height_px = clone_height_px * scale_factor;
+      const offsetY =
+        report_ui_.design_px(click_event.clientY) -
+        design_rect_of(minimap_panel).top;
+      const row = (offsetY / scaled_height_px) * geometry.rows;
+      scroll_to_row(row - (main_panel.clientHeight - geometry.cover) / 2);
+    }),
+  );
+  minimap_viewport.addEventListener(
+    "pointerdown",
+    window.catch_show_throw_((down_event) => {
+      const start_client_y = down_event.clientY,
+        start_top_px = minimap_viewport.offsetTop;
+      const scaled_height_px = clone_height_px * scale_factor;
+      minimap_viewport.classList.add("drag_");
+      if (minimap_viewport.setPointerCapture) {
+        minimap_viewport.setPointerCapture(down_event.pointerId);
+      }
+      const move = window.catch_show_throw_((move_event) =>
+        scroll_to_row(
+          ((start_top_px +
+            report_ui_.design_px(move_event.clientY - start_client_y)) /
+            scaled_height_px) *
+            geometry_measure().rows,
+        ),
       );
-    const drag = (on) => {
-      const method = on ? "addEventListener" : "removeEventListener";
-      minimap_viewport[method]("pointermove", move);
-      minimap_viewport[method]("pointerup", release);
-      minimap_viewport[method]("pointercancel", release);
-    };
-    const release = () => {
-      minimap_viewport.classList.remove("drag");
-      drag(false);
-    };
-    drag(true);
-    down_event.preventDefault();
-    down_event.stopPropagation();
-  });
+      const drag = (on) => {
+        const method = on ? "addEventListener" : "removeEventListener";
+        minimap_viewport[method]("pointermove", move);
+        minimap_viewport[method]("pointerup", release);
+        minimap_viewport[method]("pointercancel", release);
+      };
+      const release = window.catch_show_throw_(() => {
+        minimap_viewport.classList.remove("drag_");
+        drag(false);
+      });
+      drag(true);
+      down_event.preventDefault();
+      down_event.stopPropagation();
+    }),
+  );
 
   function detail_line() {
-    const detail_row = main_panel.querySelector("tr.detail");
-    return detail_row ? +detail_row.previousElementSibling.dataset.ln : 0;
+    const detail_row = main_panel.querySelector(
+      "tr.heat-map-source-line-detail-row-",
+    );
+    if (!detail_row) return 0;
+    return +detail_row.previousElementSibling.getAttribute(
+      "data-line-number-",
+    );
   }
 
   function detail_set(line) {
     if (line === detail_line()) return;
-    for (const detail_row of main_panel.querySelectorAll("tr.detail")) {
+    for (const detail_row of main_panel.querySelectorAll(
+      "tr.heat-map-source-line-detail-row-",
+    )) {
       detail_row.remove();
     }
-    const row = line ? document.getElementById("L" + line) : null;
+    const row = line ? document.getElementById("L" + line + "-") : null;
     if (row) {
       detail_open(current_file_path, line, row);
+      report_ui_.table_rows.tab_stop_set(row, false);
       if (!row_is_visible(row)) row_center(row);
     }
     minimap_sync();
+  }
+  function detail_close(detail_row) {
+    report_ui_.table_rows.tab_stop_set(
+      detail_row.previousElementSibling,
+      true,
+    );
+    report_ui_.address.request(hash_for_line(current_file_path));
   }
   function detail_open(file_path, line_number, row) {
     const file = file_table[file_path];
@@ -1480,11 +1679,11 @@
     const line_costs = file.lines[line_number] || [[], [], 0];
     const function_column = (label) => ({
       label,
-      width: TABLE_FUNCTION_NAME_WIDTH_CHARS,
+      width: STYLE_TABLE_FUNCTION_NAME_WIDTH_CHARS,
     });
     const location_column = {
       label: text_of("str_column_defined_at"),
-      clip: TABLE_LOCATION_COLUMN_MAX_CHARS,
+      clip: STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS,
     };
     const call_cost = current_value(line_costs[1]);
     const self_cost = current_value(line_costs[0]);
@@ -1492,57 +1691,52 @@
     const self_label = text_of(
       function_index != null ? "str_column_self" : "str_line_self",
     );
-    const popup_counter_columns = [
+    const detail_counter_columns = [
       { label: text_of("str_column_counter") },
       { label: scope_share_label(), numeric: true },
       { label: text_of("str_column_count"), numeric: true },
     ];
-    const popup_counter_rows = [],
-      popup_row_attributes = [];
-    const popup_row_push = (row, row_class) => {
-      popup_counter_rows.push(row);
-      popup_row_attributes.push(row_class ? `class="${row_class}"` : "");
+    const counter_row_of = (counter) => {
+      const counter_self = counter.get(line_costs[0]);
+      return [
+        { text: counter_label(counter) },
+        secondary_share_text(
+          counter_self,
+          counter,
+          line_counter_baseline(file_path, line_number, counter),
+          line_number,
+        ),
+        counter_self ? cell_number(counter_self) : "",
+      ];
     };
-    const counter_row_class = (counter) =>
-      counter.derived ? "derived-counter" : "";
-    // an estimate never hides what it was summed from: a derived counter's
-    // recorded contributors follow its row, each with its own line cost
-    const contributing_rows_push = (counter) => {
-      for (const contributor of counter.contributing_counters) {
-        const contributor_self = contributor.get(line_costs[0]);
-        popup_row_push(
-          [
-            { text: counter_label(contributor) },
-            secondary_share_text(
-              contributor_self,
-              contributor,
-              line_counter_baseline(file_path, line_number, contributor),
-              line_number,
-            ),
-            contributor_self ? cell_number(contributor_self) : "",
-          ],
-          "contributing-counter",
-        );
-      }
-    };
-    popup_row_push(
+    const ranking_counter = counter_find(RANKING_COUNTER_NAME);
+    const listed_counters = counter_list
+      .filter(
+        (counter) =>
+          !counter.derived &&
+          counter !== current_counter &&
+          counter !== ranking_counter,
+      )
+      .sort((counter_a, counter_b) =>
+        counter_a.key.localeCompare(counter_b.key),
+      );
+    if (current_counter !== ranking_counter)
+      listed_counters.push(ranking_counter);
+    const detail_counter_rows = [
       [
-        {
-          text: `${self_label} ${counter_label(current_counter)}`,
-        },
+        { text: `${self_label} ${counter_label(current_counter)}` },
         line_share_text(self_cost, line_baseline_cost, line_number),
         cell_number(self_cost),
       ],
-      counter_row_class(current_counter),
-    );
-    contributing_rows_push(current_counter);
+      ...listed_counters.map(counter_row_of),
+    ];
     if (call_cost) {
-      popup_row_push([
+      detail_counter_rows.push([
         { text: text_of("str_column_calls") },
         line_share_text(call_cost, line_baseline_cost, line_number),
         cell_number(call_cost),
       ]);
-      popup_row_push([
+      detail_counter_rows.push([
         { text: text_of("str_column_call_count") },
         "",
         call_count_cell(line_costs[2]),
@@ -1550,25 +1744,14 @@
     }
     for (const secondary of secondary_counters) {
       const secondary_self = secondary.get(line_costs[0]);
-      // a diff's derived delta can cancel to zero while its parts moved
       const contributor_moved = secondary.contributing_counters.some(
         (contributor) => contributor.get(line_costs[0]),
       );
       if (!secondary_self && !contributor_moved) continue;
-      popup_row_push(
-        [
-          { text: counter_label(secondary) },
-          secondary_share_text(
-            secondary_self,
-            secondary,
-            line_counter_baseline(file_path, line_number, secondary),
-            line_number,
-          ),
-          secondary_self ? cell_number(secondary_self) : "",
-        ],
-        counter_row_class(secondary),
+      detail_counter_rows.push(
+        counter_row_of(secondary),
+        ...secondary.contributing_counters.map(counter_row_of),
       );
-      contributing_rows_push(secondary);
     }
     const in_function_note =
       line_function_index != null
@@ -1581,26 +1764,28 @@
       line_function_index != null
         ? text_fill("str_in_function", {
             function:
-              "<b>" + html_escape(function_name(line_function_index)) + "</b>",
+              `<span` +
+              ` class="heat-map-source-line-detail-function-name-">` +
+              `${html_escape(function_name(line_function_index))}</span>`,
           })
         : "";
-    let markup = `<div class="dbox">`;
+    let markup = `<div class="heat-map-source-line-detail-">`;
     markup +=
-      `<a href="#" class="dclose">` +
+      `<a href="#"` +
+      ` class="heat-map-source-line-detail-close-symbol-">` +
       `${html_escape(text_of("str_detail_close_symbol"))}</a>`;
     markup +=
       `<div>${html_escape(file_path)}:` +
       `${line_number}${in_function_html}</div>`;
     markup += table_render(
       "heat.detail.stats",
-      popup_counter_columns,
-      popup_counter_rows,
-      { row_attributes: popup_row_attributes },
+      detail_counter_columns,
+      detail_counter_rows,
     );
     const text_parts = [
       heading_line +
         "\n" +
-        table_markdown(popup_counter_columns, popup_counter_rows),
+        table_markdown(detail_counter_columns, detail_counter_rows),
     ];
     if (callees.length) {
       const columns = [
@@ -1629,11 +1814,12 @@
           ];
         },
       );
-      const heading = text_fill("str_popup_callees", {
+      const heading = text_fill("str_detail_callees", {
         counter: counter_label(current_counter),
       });
       markup +=
-        `<h4>${html_escape(heading)}</h4>` +
+        `<div class="heat-map-source-line-detail-heading-">` +
+        `${html_escape(heading)}</div>` +
         table_render("heat.detail.callees", columns, rows);
       text_parts.push(heading + "\n" + table_markdown(columns, rows));
     }
@@ -1647,24 +1833,26 @@
         share_of_baseline_text(
           current_value(function_entry.self),
           function_baseline_cost,
-        ) || text_of("str_share_zero");
+        ) || report_ui_.zero_percent_text();
       const function_total_text =
         share_of_baseline_text(
           current_value(function_entry.self) +
             current_value(function_entry.calls),
           function_baseline_cost,
-        ) || text_of("str_share_zero");
+        ) || report_ui_.zero_percent_text();
       const heading = HAS_CALL_GRAPH
-        ? text_fill("str_popup_function_totals", {
+        ? text_fill("str_detail_function_totals", {
             function: function_entry.name,
             self: function_self_text,
             total: function_total_text,
           })
-        : text_fill("str_popup_function_self", {
+        : text_fill("str_detail_function_self", {
             function: function_entry.name,
             self: function_self_text,
           });
-      markup += `<h4>${html_escape(heading)}</h4>`;
+      markup +=
+        `<div class="heat-map-source-line-detail-heading-">` +
+        `${html_escape(heading)}</div>`;
       if (callers.length) {
         const columns = [
           { label: text_of("str_column_call_count"), numeric: true },
@@ -1673,7 +1861,7 @@
           function_column(text_of("str_column_caller")),
           {
             label: text_of("str_column_called_at"),
-            clip: TABLE_LOCATION_COLUMN_MAX_CHARS,
+            clip: STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS,
           },
         ];
         const rows = callers.map(
@@ -1699,64 +1887,161 @@
         text_parts.push(heading + "\n" + table_markdown(columns, rows));
       } else if (HAS_CALL_GRAPH) {
         const none = text_of("str_no_caller");
-        markup += `<div class="dim">${html_escape(none)}</div>`;
+        markup += `<div class="dimmed_">${html_escape(none)}</div>`;
         text_parts.push(heading + "\n" + none);
       } else {
         text_parts.push(heading);
       }
     }
     markup +=
-      `<div class="dactions"><a href="#" class="dcopy">` +
+      `<div class="heat-map-source-line-detail-action-bar-">` +
+      `<a href="#"` +
+      ` class="heat-map-source-line-detail-action-bar-copy-link-">` +
       `${html_escape(text_of("str_detail_copy"))}</a>` +
-      `<span class="sep"> | </span><a href="#" class="dclose2">` +
+      `<span` +
+      ` class="heat-map-source-line-detail-action-bar-separator-">` +
+      ` | </span>` +
+      `<a href="#"` +
+      ` class="heat-map-source-line-detail-action-bar-close-link-">` +
       `${html_escape(text_of("str_detail_close"))}</a></div>`;
     markup += `</div>`;
     const detail_row = document.createElement("tr");
-    detail_row.className = "detail";
+    detail_row.className = "heat-map-source-line-detail-row-";
     detail_row.innerHTML =
       `<td colspan="${row.cells.length}">` + `${markup}</td>`;
     detail_row.detail_copy_text = text_parts.join("\n\n");
     row.after(detail_row);
-    report_ui.layout_activate(detail_row);
+    report_ui_.layout_activate(detail_row);
   }
 
-  main_panel.addEventListener("click", (click_event) => {
-    const chip = click_event.target.closest(".chip");
-    if (chip) {
-      location.hash = hash_for_line(current_file_path, +chip.dataset.goto);
-      return;
-    }
-    const copy = click_event.target.closest(".dcopy");
-    if (copy) {
-      click_event.preventDefault();
-      navigator.clipboard.writeText(
-        copy.closest("tr.detail").detail_copy_text,
+  main_panel.addEventListener(
+    "click",
+    window.catch_show_throw_((click_event) => {
+      if (minimap_panel.contains(click_event.target)) return;
+      const ticker_tape_entry = click_event.target.closest(
+        ".heat-map-source-ticker-tape-entry-",
       );
+      if (ticker_tape_entry) {
+        report_ui_.address.request(
+          hash_for_line(
+            current_file_path,
+            +ticker_tape_entry.getAttribute("data-goto-"),
+          ),
+        );
+        return;
+      }
+      const copy = click_event.target.closest(
+        ".heat-map-source-line-detail-action-bar-copy-link-",
+      );
+      if (copy) {
+        click_event.preventDefault();
+        const detail_row = copy.closest("tr.heat-map-source-line-detail-row-");
+        return navigator.clipboard.writeText(detail_row.detail_copy_text);
+      }
+      const close = click_event.target.closest(
+        ".heat-map-source-line-detail-close-symbol-," +
+          " .heat-map-source-line-detail-action-bar-close-link-",
+      );
+      if (close) {
+        click_event.preventDefault();
+        detail_close(close.closest("tr.heat-map-source-line-detail-row-"));
+        return;
+      }
+      if (click_event.target.closest("a")) return;
+      const link_row = click_event.target.closest("tr.row-link-");
+      if (link_row) {
+        report_ui_.address.request(link_row.getAttribute("data-href-"));
+        return;
+      }
+      const row = click_event.target.closest("tr.clickable_");
+      if (row && current_file_path) {
+        const line_number = +row.getAttribute("data-line-number-");
+        report_ui_.address.request(
+          line_number === detail_line()
+            ? hash_for_line(current_file_path)
+            : hash_for_line(current_file_path, line_number),
+        );
+      }
+    }),
+  );
+  function ticker_tape_key_take(key_event, key_name, ticker_tape_entry) {
+    if (report_ui_.widget_key.activates(key_name)) {
+      key_event.preventDefault();
+      if (!key_event.repeat) ticker_tape_entry.click();
       return;
     }
-    const close = click_event.target.closest(".dclose, .dclose2");
-    if (close) {
-      click_event.preventDefault();
-      location.hash = hash_for_line(current_file_path);
-      return;
+    const tape_entries = [
+      ...ticker_tape_entry.parentElement.querySelectorAll(
+        ".heat-map-source-ticker-tape-entry-",
+      ),
+    ];
+    const entry_index = tape_entries.indexOf(ticker_tape_entry);
+    let next_index = 0;
+    switch (key_name) {
+      case WIDGET_KEY_NAMES.down:
+      case WIDGET_KEY_NAMES.right:
+        next_index = entry_index + 1;
+        break;
+      case WIDGET_KEY_NAMES.first:
+        next_index = 0;
+        break;
+      case WIDGET_KEY_NAMES.last:
+        next_index = tape_entries.length - 1;
+        break;
+      case WIDGET_KEY_NAMES.left:
+      case WIDGET_KEY_NAMES.up:
+        next_index = entry_index - 1;
+        break;
+      default:
+        return;
     }
-    if (click_event.target.closest("a")) return;
-    const link_row = click_event.target.closest("tr.rowlink");
-    if (link_row) {
-      location.hash = link_row.dataset.href;
-      return;
-    }
-    const row = click_event.target.closest("tr.clickable");
-    if (row && current_file_path) {
-      const line_number = +row.dataset.ln;
-      location.hash =
-        line_number === detail_line()
-          ? hash_for_line(current_file_path)
-          : hash_for_line(current_file_path, line_number);
-    }
-  });
+    key_event.preventDefault();
+    const next_entry = tape_entries[next_index];
+    if (next_entry)
+      report_ui_.tab_stop_move(ticker_tape_entry, next_entry, true);
+  }
+  main_panel.addEventListener(
+    "focusin",
+    window.catch_show_throw_((focus_event) => {
+      const ticker_tape_entry = focus_event.target.closest(
+        ".heat-map-source-ticker-tape-entry-",
+      );
+      if (!ticker_tape_entry) return;
+      report_ui_.tab_stop_move(
+        ticker_tape_entry.parentElement.querySelector(
+          ':scope > [tabindex="0"]',
+        ),
+        ticker_tape_entry,
+        false,
+      );
+    }),
+  );
+  main_panel.addEventListener(
+    "keydown",
+    window.catch_show_throw_((key_event) => {
+      const key_name = report_ui_.widget_key.of(key_event);
+      if (!key_name) return;
+      const ticker_tape_entry = key_event.target.closest(
+        ".heat-map-source-ticker-tape-entry-",
+      );
+      if (ticker_tape_entry) {
+        ticker_tape_key_take(key_event, key_name, ticker_tape_entry);
+        return;
+      }
+      const detail_row = main_panel.querySelector(
+        "tr.heat-map-source-line-detail-row-",
+      );
+      if (key_name !== WIDGET_KEY_NAMES.close || !detail_row) return;
+      const is_in_detail =
+        detail_row.contains(key_event.target) ||
+        detail_row.previousElementSibling === key_event.target;
+      if (!is_in_detail) return;
+      key_event.preventDefault();
+      detail_close(detail_row);
+    }),
+  );
 
-  let current_state = { file: null, line: 0, fn: null, ev: null };
+  let rendered_line = 0;
   let rendered_key = "";
   function counter_apply(key) {
     current_counter = counter_find(key);
@@ -1772,33 +2057,93 @@
       }
     }
   }
-  function hash_canonicalize() {
-    report_ui.hash_publish(hash_of_state(current_state));
+  function scale_apply(scale_value) {
+    active_scale = SCALE_CHOICES.find((entry) => entry.value === scale_value);
+    scale_select.value = active_scale.value;
   }
-  // A bad address is shown, not thrown: a file:// page is its own opaque
-  // origin, so an exception reaches a parent frame stripped to "Script error."
-  function hash_fault_show(message) {
-    window.report_error_overlay.overlay_show(message);
+  function sort_mode_apply(shown_sort_mode) {
+    sort_mode = shown_sort_mode;
+    sort_select.value = sort_mode;
+  }
+  function stored_choice_of(select_element, storage_key, default_value) {
+    const stored_value = view_storage.value_read(storage_key);
+    const is_offered = [...select_element.options].some(
+      (offered_option) => offered_option.value === stored_value,
+    );
+    return is_offered ? stored_value : default_value;
+  }
+  function strip_preferences_apply() {
+    if (shown_test_name === null) return;
+    const stored_sort_mode = sort_mode_stored();
+    if (stored_sort_mode !== sort_mode) {
+      sort_mode_apply(stored_sort_mode);
+      tree_render();
+    }
+    const stored_scale_value = scale_value_stored(),
+      stored_counter_key = counter_key_stored();
+    if (
+      stored_scale_value === active_scale.value &&
+      stored_counter_key === current_counter.key
+    )
+      return;
+    scale_apply(stored_scale_value);
+    if (stored_counter_key !== current_counter.key)
+      counter_apply(stored_counter_key);
+    rendered_key = "";
+    route_render();
+  }
+  function pulldown_text_lists(names_key, entry_name) {
+    if (!window.report_pulldown_text_)
+      throw new Error(text_of("str_error_pulldown_text_missing"));
+    return window.report_pulldown_text_[names_key].includes(entry_name);
+  }
+  function no_samples_note_render(unsampled_name) {
+    current_file_path = null;
+    scope_totals = null;
+    const note = text_fill("str_no_samples_in_test", { name: unsampled_name });
+    main_panel.innerHTML =
+      `<div class="heat-map-source-unavailable-note-">` +
+      `${html_escape(note)}</div>`;
+    main_panel.scrollTop = 0;
+    tree_render();
+    minimap_clear();
+  }
+  function line_clamp(addressed_line) {
+    const source_rows = main_panel.querySelectorAll("tr[data-line-number-]");
+    let clamped_line = 0;
+    for (const source_row of source_rows) {
+      const row_line = +source_row.getAttribute("data-line-number-");
+      if (row_line > 0 && (row_line <= addressed_line || !clamped_line))
+        clamped_line = row_line;
+    }
+    return clamped_line;
+  }
+  function main_focus_restore(main_had_focus) {
+    if (!main_had_focus || main_panel.contains(document.activeElement)) return;
+    const addressed_row = rendered_line
+      ? document.getElementById("L" + rendered_line + "-")
+      : null;
+    if (addressed_row) report_ui_.table_rows.tab_stop_set(addressed_row, true);
+    else main_panel.focus({ preventScroll: true });
   }
   function route_render() {
-    const parsed_state = state_of_hash(location.hash);
-    // a hash naming a counter, file or function this report does not hold is
-    // a bad address: it surfaces rather than rendering something else
-    if (parsed_state.ev && !counter_find(parsed_state.ev)) {
-      hash_fault_show(
-        window.ui_strings.text_fill("str_error_hash_counter_unknown", [
-          parsed_state.ev,
+    const main_had_focus =
+      document.hasFocus() && main_panel.contains(document.activeElement);
+    const page_address = report_ui_.address.of_hash(location.hash);
+    if (page_address.view !== HEAT_MAP_VIEW_ENTRY[0])
+      throw new Error(
+        window.ui_strings_.text_fill("str_error_hash_view_mismatch", [
+          HEAT_MAP_VIEW_ENTRY[0],
         ]),
       );
+    if (page_address.test !== shown_test_name) {
+      model_load(page_address.test);
       return;
     }
-    const counter = counter_find(
-      parsed_state.ev || profile_model.heatMapTotals.defaultCounter,
-    );
-    if (counter.key !== current_counter.key) counter_apply(counter.key);
-    let file = parsed_state.file,
-      line = parsed_state.line,
-      fn = parsed_state.fn;
+    let file = page_address.file,
+      line = page_address.line === null ? 0 : page_address.line,
+      fn = page_address.function;
+    let unsampled_name = null;
     if (fn) {
       const function_entry = function_table.find(
         (candidate) => candidate.name === fn,
@@ -1810,17 +2155,28 @@
       ) {
         file = function_entry.file;
         line = function_entry.line;
+      } else if (pulldown_text_lists("functions", fn)) {
+        unsampled_name = fn;
       } else {
-        hash_fault_show(
-          window.ui_strings.text_fill("str_error_hash_function_unknown", [fn]),
+        throw new Error(
+          window.ui_strings_.text_fill("str_error_hash_function_unknown", [
+            fn,
+          ]),
         );
-        return;
       }
+    } else if (file && !file_table[file]) {
+      if (!pulldown_text_lists("files", file)) {
+        throw new Error(
+          window.ui_strings_.text_fill("str_error_hash_file_unknown", [file]),
+        );
+      }
+      unsampled_name = file;
     }
-    if (file && !file_table[file]) {
-      hash_fault_show(
-        window.ui_strings.text_fill("str_error_hash_file_unknown", [file]),
-      );
+    if (unsampled_name) {
+      rendered_key = "";
+      no_samples_note_render(unsampled_name);
+      rendered_line = line;
+      main_focus_restore(main_had_focus);
       return;
     }
 
@@ -1836,62 +2192,150 @@
       else home_render();
     }
     if (file) {
-      if (line && !document.getElementById("L" + line)) line = 0;
+      if (line) line = line_clamp(line);
       detail_set(line);
     }
-    current_state = {
-      file: file,
-      line: line,
-      fn: fn,
-      ev: addressed_counter_key(),
-    };
-    hash_canonicalize();
+    rendered_line = line;
+    main_focus_restore(main_had_focus);
   }
-  window.addEventListener("hashchange", route_render);
-  report_ui.parent_listen((message_data) => {
-    if (message_data === "report_ui:layout_reset") {
-      report_ui.layout_reset();
-    } else if (
-      typeof message_data === "string" &&
-      message_data.startsWith("report_ui:")
-    )
-      throw new Error(
-        window.ui_strings.text_fill("str_error_message_tag_unknown", [
-          message_data,
-        ]),
-      );
+  function model_load(test_name) {
+    const held_models = window[HEAT_MAP_MODEL_GLOBAL_NAME];
+    if (held_models && held_models[test_name]) {
+      model_switch(test_name, held_models[test_name]);
+      route_render();
+      return;
+    }
+    const model_script = document.createElement("script");
+    model_script.src =
+      HEAT_MAP_MODEL_DIR_NAME + "/" + encodeURIComponent(test_name) + ".js";
+    model_script.addEventListener(
+      "error",
+      window.catch_show_throw_(() => {
+        throw new Error(
+          window.ui_strings_.text_fill("str_error_hash_test_unknown", [
+            test_name,
+          ]),
+        );
+      }),
+    );
+    model_script.addEventListener(
+      "load",
+      window.catch_show_throw_(() => {
+        const loaded_models = window[HEAT_MAP_MODEL_GLOBAL_NAME];
+        if (!loaded_models || !loaded_models[test_name])
+          throw new Error(
+            window.ui_strings_.text_fill("str_error_heat_map_unfiled", [
+              test_name,
+            ]),
+          );
+        route_render();
+      }),
+    );
+    document.head.append(model_script);
+  }
+  function model_switch(test_name, test_model) {
+    if (shown_test_name === null) report_kind_set(test_model);
+    shown_test_name = test_name;
+    profile_model = test_model;
+    file_table = test_model.files;
+    function_table = test_model.functions;
+    function_baselines = test_model.functionBaseline || [];
+    file_baselines = test_model.fileBaseline || {};
+    HAS_CALL_GRAPH = function_table.some(
+      (function_entry) => function_entry.callers.length > 0,
+    );
+    per_function_calls = function_table.map((function_entry) =>
+      function_entry.callers.reduce(
+        (running_total, caller) => running_total + caller[4],
+        0,
+      ),
+    );
+    CALLS_TOTAL =
+      per_function_calls.reduce(
+        (running_total, call_count) => running_total + call_count,
+        0,
+      ) || 1;
+    entry_line_index = {};
+    function_table.forEach((function_entry, index) => {
+      if (!function_entry.line) return;
+      entry_line_index[function_entry.file] =
+        entry_line_index[function_entry.file] || {};
+      entry_line_index[function_entry.file][function_entry.line] = index;
+    });
+    counters_build();
+    expanded_directories.clear();
+    expanded_cold_groups.clear();
+    current_file_path = null;
+    scope_totals = null;
+    rendered_key = "";
+    counter_apply(counter_key_stored());
+  }
+  function address_recenter() {
+    const addressed_row = rendered_line
+      ? document.getElementById("L" + rendered_line + "-")
+      : null;
+    if (addressed_row) {
+      row_center(addressed_row);
+      return;
+    }
+    current_file_path = null;
+    rendered_key = "";
+    route_render();
+  }
+  window.addEventListener(
+    "hashchange",
+    window.catch_show_throw_(route_render),
+  );
+  report_ui_.view_activate({
+    preferences_apply: strip_preferences_apply,
+    recenter: address_recenter,
   });
 
   let resize_debounce_timer = null;
-  window.addEventListener("resize", () => {
-    clearTimeout(resize_debounce_timer);
-    resize_debounce_timer = setTimeout(() => {
-      tail_fit();
-      minimap_layout();
-    }, LAYOUT_RESIZE_SETTLE_DELAY_MS);
-  });
-  counter_select.addEventListener("change", (change_event) => {
-    location.hash = hash_of_state(
-      Object.assign({}, current_state, { ev: change_event.target.value }),
-    );
-  });
-  scale_select.addEventListener("change", (change_event) => {
-    active_scale = SCALE_CHOICES.find(
-      (entry) => entry.value === change_event.target.value,
-    );
-    view_storage.value_write("heat.scale", active_scale.value);
-    rendered_key = "";
-    route_render();
-  });
-  sort_select.addEventListener("change", (change_event) => {
-    sort_mode = change_event.target.value;
-    view_storage.value_write("heat.sort", sort_mode);
-    tree_render();
-  });
-  document.getElementById("q").addEventListener("input", (input_event) => {
-    search_query = input_event.target.value.trim().toLowerCase();
-    tree_render();
-  });
-  counter_apply(current_counter.key);
+  window.addEventListener(
+    "resize",
+    window.catch_show_throw_(() => {
+      clearTimeout(resize_debounce_timer);
+      resize_debounce_timer = setTimeout(
+        window.catch_show_throw_(() => {
+          tail_fit();
+          minimap_layout();
+        }),
+        LAYOUT_RESIZE_SETTLE_DELAY_MS,
+      );
+    }),
+  );
+  counter_select.addEventListener(
+    "change",
+    window.catch_show_throw_((change_event) => {
+      view_storage.value_write("heat.counter", change_event.target.value);
+      counter_apply(change_event.target.value);
+      route_render();
+    }),
+  );
+  scale_select.addEventListener(
+    "change",
+    window.catch_show_throw_((change_event) => {
+      view_storage.value_write("heat.scale", change_event.target.value);
+      scale_apply(change_event.target.value);
+      rendered_key = "";
+      route_render();
+    }),
+  );
+  sort_select.addEventListener(
+    "change",
+    window.catch_show_throw_((change_event) => {
+      view_storage.value_write("heat.sort", change_event.target.value);
+      sort_mode_apply(change_event.target.value);
+      if (shown_test_name !== null) tree_render();
+    }),
+  );
+  document.getElementById("heat-map-menu-search-box-").addEventListener(
+    "input",
+    window.catch_show_throw_((input_event) => {
+      search_query = input_event.target.value.trim().toLowerCase();
+      if (shown_test_name !== null) tree_render();
+    }),
+  );
   route_render();
 })();

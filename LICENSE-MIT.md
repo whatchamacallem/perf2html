@@ -1,9 +1,9 @@
-# libhatchet license
+# perf2html license
 
-libhatchet is distributed under the following unmodified [MIT
-License](https://spdx.org/licenses/MIT.html).
+perf2html is distributed under the following unmodified
+[MIT License](https://spdx.org/licenses/MIT.html).
 
-```text
+```txt
 SPDX-License-Identifier: MIT
 
 © 2017-2026 Adrian Johnston. All rights reserved.

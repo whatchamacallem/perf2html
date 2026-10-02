@@ -4,36 +4,59 @@ import json, os, re, sys
 from collections.abc import Sequence
 from typing import NoReturn, get_origin, get_type_hints
 
-# Every setting the tools have, then the reader that checks and assigns
-# them. _SETTING_NAMES is the line between the two.
 
-# What the report's one shared copy of the theme is written as: written once
-# at the report root and linked, never inlined. Each page links what it uses.
+ASSET_CALLERS_SCRIPT_NAME = "callers.js"
+ASSET_DARK_MODE_DISABLED_STYLESHEET_NAME = "light_mode.css"
 ASSET_ERROR_OVERLAY_SCRIPT_NAME = "error_overlay.js"
+ASSET_FLAME_GRAPH_SCRIPT_NAME = "flame_graph.js"
 ASSET_FRAME_SCRIPT_NAME = "frame.js"
-ASSET_HEAT_MAP_SCRIPT_NAME = "heatmap.js"
-ASSET_HEAT_MAP_STYLESHEET_NAME = "heatmap.css"
+ASSET_HEAT_MAP_SCRIPT_NAME = "heat_map.js"
+ASSET_HEAT_MAP_STYLESHEET_NAME = "heat_map.css"
 ASSET_MENU_SCRIPT_NAME = "menu.js"
+ASSET_MENU_STYLESHEET_NAME = "menu.css"
 
-# What each test's script in assets/ ends in, after the test's name: every
-# file and function its heat map opens, which the overview's pulldowns offer.
-ASSET_PULLDOWN_NAMES_SCRIPT_SUFFIX = ".pulldown_names.js"
+ASSET_PULLDOWN_TEXT_SCRIPT_NAME = "pulldown_text.js"
 
 ASSET_SETTINGS_SCRIPT_NAME = "settings.js"
 
-# The four scripts/ files a generator reads as a template, each holding the
-# markers it substitutes into. Read but never shared into a report.
-ASSET_TEMPLATE_FLAME_GRAPH_BOOTSTRAP_NAME = "flame_bootstrap.js"
 ASSET_TEMPLATE_FLAME_GRAPH_PAGE_NAME = "flame_graph.html"
-ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME = "heatmap.html"
-ASSET_TEMPLATE_SETTINGS_HANDLER_NAME = "settings_handler.js"
+ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME = "heat_map.html"
+ASSET_TEMPLATE_OVERVIEW_PAGE_NAME = "overview.html"
+ASSET_TEMPLATE_SETTINGS_HANDLER_NAME = "settings.js"
 
 ASSET_THEME_SCRIPT_NAME = "theme.js"
 ASSET_THEME_STYLESHEET_NAME = "theme.css"
 ASSET_UI_STRINGS_SCRIPT_NAME = "ui_strings.js"
+ASSET_UTILITY_SCRIPT_NAME = "utility.js"
 
-# Every counter callgrind never records, as the recorded ones it sums from
-# and each one's coefficient. Nothing stores one.
+CALLERS_PERF_LOG_SKIPPED_HEAD_LINES = 9
+
+CALLERS_TIME_SUFFIX_SECONDS: dict[str, float] = {
+    "msec": 1e-3,
+    "msecs": 1e-3,
+    "ms": 1e-3,
+    "nsec": 1e-9,
+    "nsecs": 1e-9,
+    "ns": 1e-9,
+    "sec": 1.0,
+    "secs": 1.0,
+    "s": 1.0,
+    "usec": 1e-6,
+    "usecs": 1e-6,
+    "us": 1e-6,
+}
+
+CALLERS_TOP_FUNCTION_ROWS = 50
+
+CALLERS_VIEW_KEY = "callers"
+
+DARK_MODE_ATTRIBUTE_NAME = "data-dark-mode-"
+DARK_MODE_DISABLED_VALUE = "disabled"
+DARK_MODE_ENABLED_DEFAULT = True
+DARK_MODE_ENABLED_VALUE = "enabled"
+DARK_MODE_QUERY_KEY_NAME = "screenshot-dark"
+DARK_MODE_QUERY_VALUES: dict[str, str] = {"disabled": "0", "enabled": "1"}
+
 DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {
     "D1m": {"D1mr": 1, "D1mw": 1},
     "DLm": {"DLmr": 1, "DLmw": 1},
@@ -51,80 +74,261 @@ DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {
     },
 }
 
-# The width of the coordinate space every page is designed in: every length
-# is written for this box, which report_ui.design_scale_apply() then fits.
-DESIGN_COORDINATES_WIDTH_PX = 1920
-
-# The design font, Monaco at this size, is this many px per ch. theme.js's
-# font_fit_apply() scales the box's own font to it: a ch is the design ch.
-DESIGN_FONT_CHARACTER_WIDTH_PX = 7.2
-DESIGN_FONT_SIZE_PX = 12
-
-# The CSS variable carrying the font fit, a multiplier on every font size
-# the theme sets: 1 is the design font itself. Boundary.
-DESIGN_FONT_FIT_PROPERTY = "--font-fit"
-
-# Below this window width design_scale_apply() stops shrinking the zoom
-# further, so the browser's own horizontal scrollbar appears instead.
-DESIGN_MINIMUM_WINDOW_WIDTH_PX = 1280
-
-# What the scale slider multiplies the window's own fit by: on an untouched
-# page (mid-travel whatever the ends, each half geometric), then at each end.
-DESIGN_SCALE_DEFAULT_MULTIPLE = 1
-DESIGN_SCALE_LARGEST_MULTIPLE = 2
-DESIGN_SCALE_SMALLEST_MULTIPLE = 0.5
-
-# Where along the slider's 0..1 travel the default multiple sits: the
-# middle, so the knob starts centred whatever the two ends are.
-DESIGN_SCALE_DEFAULT_TRAVEL_SHARE = 0.5
-
-# The CSS variable carrying the window's height in design pixels. A vh is
-# zoomed like any length, so a full-height rule reads this instead. Boundary.
-DESIGN_VIEWPORT_HEIGHT_PROPERTY = "--design-vh"
-
-# What callgrind_diff.py's synthesized callers diff is named, beside the
-# delta. Written by perf2html_diff.sh, read back by build_report.py.
-DIFF_CALLER_COUNTS_FILE_SUFFIX = ".callers.json"
-
-# Only a flame graph our own tool exported counts -- a stale or hand-made
-# one must fail.
 FLAME_GRAPH_EXPORTER_NAME = "dev/scripts/trace_to_speedscope.py"
 
-# The most complete calls one trace keeps, cut at the top of the current
-# TESTS_C's 79-202 range. Retune if a test's shape changes.
+FLAME_GRAPH_LOCAL_PROFILE_PATH = "profile"
+
 FLAME_GRAPH_MAX_RECORDED_CALLS = 200
 
-# All a per-test flame graph directory may hold: its page and its profile.
-# Everything else is the shared bundle at the report root.
-FLAME_GRAPH_PAGE_FILE_NAMES = ("index.html", "profile.js")
+FLAME_GRAPH_PROFILE_DIR_NAME = "profiles"
+FLAME_GRAPH_PROFILE_GLOBAL_NAME = "report_flame_graph_profiles_"
 
-# What the bootstrap plus its embedded profile gets written as.
-FLAME_GRAPH_PROFILE_SCRIPT_NAME = "profile.js"
-
-# How the flame graph page polls for speedscope, which defines its global
-# only once its script ran. The two multiply into the failure's seconds.
 FLAME_GRAPH_STARTUP_POLL_DELAY_MS = 50
 FLAME_GRAPH_STARTUP_POLL_MAX_ATTEMPTS = 200
 
-# The flame graph view a summary page links, as key, link label, page path.
-# Linked only where a trace was recorded. The key is a boundary name.
 FLAME_GRAPH_VIEW_ENTRY: tuple[str, str, str] = (
     "flame-graph",
     "flame graph",
     "flame-graph/index.html",
 )
 
-# A share at or past this is already fully lit, so the handful of diff lines
-# reading millions of percent cannot flatten the scale.
-HEAT_COLOR_FULL_SCALE_PERCENT = 100
+HEAT_MAP_COUNTER_DESCRIPTION_STRING_ID_PREFIX = "str_counter_"
 
-# Heat above which a cell's text switches to the light-on-dark class, so the
-# text stays readable once the cell behind it is bright.
-HEAT_COLOR_LIGHT_TEXT_ABOVE_SHARE = 0.45
+HEAT_MAP_HOME_LINES_LOCATION_MAX_CHARS = 28
+HEAT_MAP_HOME_LINES_SOURCE_COLUMN_MAX_CHARS = 36
+HEAT_MAP_HOME_LINES_SOURCE_SNIPPET_MAX_CHARS = 110
 
-# The 12-stop heat ramp, cold to hot, exempt from the light/dark pair rule.
-# Carried opaque by a cell, stepped across by the logo: a retune hits both.
-HEAT_COLOR_LOGO_STOPS: list[str] = [
+HEAT_MAP_HOME_TABLE_MAX_ROWS = 60
+
+HEAT_MAP_MINIMAP_SOURCE_WIDTH_CHARS = 80
+
+HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX = 8
+
+HEAT_MAP_MODEL_DIR_NAME = "data"
+HEAT_MAP_MODEL_GLOBAL_NAME = "report_heat_map_models_"
+
+HEAT_MAP_SECONDARY_COUNTER_NAMES: tuple[str, ...] = ("D1m", "DLm", "Bcm")
+
+HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE = 0.01
+HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_MAX_COUNT = 10
+
+HEAT_MAP_SOURCE_VIEW_WIDTH_CHARS = 80
+
+HEAT_MAP_TREE_ALWAYS_LISTED_DIRS = ("lib", "include", "src", "tests/perf")
+
+HEAT_MAP_TREE_AUTO_EXPAND_ABOVE_SHARE = 0.05
+
+HEAT_MAP_VIEW_ENTRY: tuple[str, str, str] = (
+    "heat-map",
+    "heat-map/index.html",
+)
+
+LAYOUT_RESIZE_SETTLE_DELAY_MS = 120
+
+MENU_BUTTON_ORDER: tuple[str, ...] = (
+    "overview",
+    "test",
+    "file",
+    "function",
+    "heat-map",
+    "callers",
+    "flame-graph",
+    "dark-mode",
+    "reset",
+    "help",
+    "scale",
+)
+
+MENU_PULLDOWN_KEY_NAMES: dict[str, str] = {
+    "close": "Escape",
+    "next": "ArrowDown",
+    "previous": "ArrowUp",
+    "select": "Enter",
+}
+
+MENU_PULLDOWN_LINE_NUMBER_PATTERN = "^(.*):([0-9]+)$"
+
+MENU_PULLDOWN_MERGED_TEST_NAME = "all"
+
+MENU_PULLDOWN_OPENING_KEY_PATTERN = "^[a-zA-Z]$"
+
+MENU_PULLDOWN_SKIPPED_KEY_NAMES: tuple[str, ...] = (" ",)
+
+MENU_SCALE_KEY_NAMES: dict[str, str] = {
+    "larger": "ArrowRight",
+    "smaller": "ArrowLeft",
+}
+
+NUMBER_FRACTION_DIGITS = 2
+
+NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES = 999.99
+
+NUMBER_SMALLEST_PRINTED_PERCENT = 0.01
+
+PAGE_SETTINGS_GLOBAL_NAME = "settings_"
+
+PANE_SPLITTER_WIDEST_WINDOW_SHARE = 0.6
+
+RANKING_COUNTER_NAME = "CEst"
+
+REPORT_SOURCES_DIR_NAME = "sources"
+
+STORAGE_OWNED_KEYS: tuple[str, ...] = (
+    "heat.counter",
+    "heat.scale",
+    "heat.sort",
+    "view.dark_mode",
+    "view.scale",
+)
+STORAGE_OWNED_PREFIXES: tuple[str, ...] = ("split.",)
+
+STORAGE_VERSION = "perf2html v5"
+STORAGE_VERSION_KEY = "perf2html.version"
+
+STYLE_COLOR_PAIR_ENTRIES: dict[str, list[str]] = {
+    "#1AB6FF": [
+        "heat-map-source-line-detail-action-bar-link-fg-",
+        "heat-map-source-table-line-number-cell-callee-marker-fg-",
+        "menu-button-fg-",
+        "menu-pulldown-entry-current-fg-",
+        "menu-pulldown-entry-highlighted-bg-",
+        "page-link-fg-",
+    ],
+    "#0097E6": [
+        "page-scrollbar-thumb-bg-dim-",
+    ],
+    "#F5F6FA": [
+        "callers-collapsed-section-title-focus-fg-",
+        "callers-heat-cell-on-dark-fg-",
+        "heat-map-heat-cell-on-dark-fg-",
+        "heat-map-menu-field-fg-",
+        "heat-map-source-file-header-statistic-share-fg-",
+        "heat-map-source-line-detail-function-name-fg-",
+        "heat-map-source-table-row-focus-fg-",
+        "heat-map-source-ticker-tape-entry-focus-fg-",
+        "heat-map-tree-node-focus-fg-",
+        "menu-button-current-bg-",
+        "menu-button-focus-bg-",
+        "menu-strip-fg-",
+        "menu-title-fg-",
+        "page-body-fg-",
+        "page-dark-mode-disabled-bg-",
+        "page-link-focus-fg-",
+        "page-table-row-focus-fg-",
+        "screenshot-label-fg-",
+    ],
+    "#DCDDE1": [
+        "callers-collapsed-section-file-name-fg-dim-",
+        "callers-collapsed-section-title-fg-dim-",
+        "callers-collapsed-section-title-marker-fg-dim-",
+        "heat-map-menu-label-fg-dim-",
+        "heat-map-menu-search-box-placeholder-fg-dim-",
+        "heat-map-source-file-header-statistic-fg-dim-",
+        "heat-map-source-line-detail-action-bar-separator-fg-dim-",
+        "heat-map-source-line-detail-close-symbol-fg-dim-",
+        "heat-map-source-line-detail-heading-fg-dim-",
+        "heat-map-source-table-counter-cell-fg-dim-",
+        "heat-map-source-table-line-number-cell-fg-dim-",
+        "heat-map-source-ticker-tape-label-fg-dim-",
+        "heat-map-source-unavailable-note-fg-dim-",
+        "heat-map-tree-node-caret-fg-dim-",
+        "heat-map-tree-node-name-cold-fg-dim-",
+        "heat-map-tree-node-name-more-fg-dim-",
+        "heat-map-tree-node-share-percent-fg-dim-",
+        "menu-pulldown-no-match-note-fg-dim-",
+        "menu-pulldown-search-box-placeholder-fg-dim-",
+        "page-heading-fg-dim-",
+        "page-table-column-title-fg-dim-",
+        "page-table-dimmed-text-fg-dim-",
+    ],
+    "#FBC531": [],
+    "#E1B12C": [],
+    "#7F8FA6": [],
+    "#718093": [],
+    "#273C75": [
+        "callers-collapsed-section-log-box-focus-bg-",
+        "callers-collapsed-section-title-focus-bg-",
+        "heat-map-main-focus-bg-",
+        "heat-map-menu-field-focus-bg-",
+        "heat-map-source-file-header-bg-",
+        "heat-map-source-table-column-title-bg-",
+        "heat-map-source-table-row-focus-bg-",
+        "heat-map-source-ticker-tape-bg-",
+        "heat-map-source-ticker-tape-entry-focus-bg-",
+        "heat-map-tree-node-focus-bg-",
+        "heat-map-tree-node-selected-bg-",
+        "heat-map-tree-resize-handle-focus-bg-",
+        "menu-button-bg-",
+        "menu-pulldown-entry-current-bg-",
+        "page-link-focus-bg-",
+        "page-table-row-focus-bg-",
+    ],
+    "#192A56": [
+        "callers-collapsed-section-log-box-bg-dim-",
+        "callers-collapsed-section-log-box-scrollbar-bg-dim-",
+        "heat-map-menu-field-bg-dim-",
+        "heat-map-menu-strip-bg-dim-",
+        "heat-map-source-line-detail-bg-dim-",
+        "menu-button-current-fg-dim-",
+        "menu-button-focus-fg-dim-",
+        "menu-pulldown-entry-highlighted-fg-dim-",
+        "menu-pulldown-entry-list-bg-dim-",
+        "page-table-column-title-bg-dim-",
+    ],
+    "#487EB0": [],
+    "#40739E": [],
+    "#353B48": [
+        "heat-map-source-ticker-tape-entry-bg-",
+        "page-table-alternate-column-bg-",
+    ],
+    "#2F3640": [
+        "callers-heat-cell-on-bright-fg-dim-",
+        "heat-map-heat-cell-on-bright-fg-dim-",
+        "heat-map-main-bg-dim-",
+        "heat-map-minimap-bg-dim-",
+        "heat-map-source-line-detail-table-bg-dim-",
+        "menu-strip-bg-dim-",
+        "menu-title-bg-dim-",
+        "overview-view-frame-bg-dim-",
+        "page-body-bg-dim-",
+        "page-dark-mode-disabled-fg-dim-",
+        "page-scrollbar-corner-bg-dim-",
+        "page-scrollbar-track-bg-dim-",
+    ],
+    "#000000": [
+        "screenshot-label-bg-",
+        "screenshot-label-border-",
+    ],
+}
+
+STYLE_DESIGN_COORDINATES_WIDTH_PX = 1920
+
+STYLE_DESIGN_FONT_CHARACTER_WIDTH_PX = 7.2
+
+STYLE_DESIGN_FONT_FIT_PROPERTY = "--design-font-fit-"
+
+STYLE_DESIGN_FONT_SIZE_PX = 12
+
+STYLE_DESIGN_MINIMUM_WINDOW_WIDTH_PX = 1280
+
+STYLE_DESIGN_SCALE_DEFAULT_MULTIPLE = 1
+
+STYLE_DESIGN_SCALE_DEFAULT_TRAVEL_SHARE = 0.5
+
+STYLE_DESIGN_SCALE_LARGEST_MULTIPLE = 2
+STYLE_DESIGN_SCALE_SMALLEST_MULTIPLE = 0.5
+
+STYLE_DESIGN_SCALE_STOP_COUNT = 21
+
+STYLE_DESIGN_SCALE_STOP_MULTIPLE_FRACTION_DIGITS = 2
+
+STYLE_DESIGN_VIEWPORT_HEIGHT_PROPERTY = "--design-viewport-height-"
+
+STYLE_HEAT_CELL_ON_BRIGHT_ABOVE_LUMINANCE_SHARE = 0.5
+
+STYLE_HEAT_COLOR_FULL_SCALE_PERCENT = 100
+
+STYLE_HEAT_COLOR_STOPS: list[str] = [
     "#3E4A89",
     "#31688E",
     "#26828E",
@@ -139,238 +343,73 @@ HEAT_COLOR_LOGO_STOPS: list[str] = [
     "#F06142",
 ]
 
-# Width a <select> adds beyond its longest option text, so the chosen option
-# is not clipped by the dropdown arrow.
-HEAT_MAP_CONTROL_DROPDOWN_EXTRA_WIDTH_CHARS = 4
+STYLE_HEAT_MAP_MENU_DROPDOWN_EXTRA_WIDTH_CHARS = 4
 
-# How the page finds a counter's description: this prefix then the name
-# lowercased, so "CEst" reads str_counter_cest out of ui_strings.js.
-HEAT_MAP_COUNTER_DESCRIPTION_STRING_ID_PREFIX = "str_counter_"
+STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_CHARS = 2
 
-# In the home page's hot-lines table: the widest the "defined at" and source
-# columns measure (each one's clip), and how much of a source line a row keeps.
-HEAT_MAP_HOME_LINES_LOCATION_MAX_CHARS = 28
-HEAT_MAP_HOME_LINES_SOURCE_COLUMN_MAX_CHARS = 36
-HEAT_MAP_HOME_LINES_SOURCE_SNIPPET_MAX_CHARS = 110
+STYLE_HEAT_MAP_TREE_INDENT_PER_LEVEL_CHARS = 2
 
-# Rows in each of the two home tables.
-HEAT_MAP_HOME_TABLE_MAX_ROWS = 60
+STYLE_HEAT_MAP_TREE_PANE_NARROWEST_PX = 120
 
-# The shortest file that gets a minimap at all. A file under this many lines
-# fits on screen, so a scaled-down copy of it beside the source adds nothing.
-HEAT_MAP_MINIMAP_SHOWN_ABOVE_FILE_LINES = 40
+STYLE_MENU_LOGO_START_FRACTION = 0.5
 
-# The minimap's fixed column scale, the same 80 the source view uses. It is
-# never widened to the file's longest line.
-HEAT_MAP_MINIMAP_SOURCE_WIDTH_CHARS = 80
+STYLE_MENU_PULLDOWN_EXTRA_WIDTH_CHARS = 2
 
-# Smallest the minimap's viewport box may be drawn, in pixels, so the box
-# marking what is on screen stays visible in a very long file.
-HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX = 8
-
-# The counters the heat map shows beside the selected one, in column order.
-# One the run cannot supply is left out, so naming an unrecorded one is free.
-HEAT_MAP_SECONDARY_COUNTER_NAMES: tuple[str, ...] = ("D1m", "DLm", "Bcm")
-
-# The share of the file a line must carry to earn a jump button above the
-# source, and how many of those buttons a file view shows at most.
-HEAT_MAP_SOURCE_HOT_LINE_BUTTON_LEAST_SHARE = 0.01
-HEAT_MAP_SOURCE_HOT_LINE_BUTTON_MAX_COUNT = 10
-
-# The standard width C source is rendered at. Not dev/'s own 79-column
-# source limit -- this is the width of the profiled file's view.
-HEAT_MAP_SOURCE_VIEW_WIDTH_CHARS = 80
-
-# Directories whose tracked .c/.h are listed even when nothing sampled them,
-# so a file with no cost is visibly cold rather than simply missing.
-HEAT_MAP_TREE_ALWAYS_LISTED_DIRS = ("lib", "include", "src", "tests/perf")
-
-# The share of the profile a directory must hold to be expanded on first
-# render, so a reader opens on the code that matters.
-HEAT_MAP_TREE_AUTO_EXPAND_ABOVE_SHARE = 0.05
-
-# How far the tree's first level is indented, and how much each level below
-# it adds, in pixels.
-HEAT_MAP_TREE_INDENT_FIRST_LEVEL_PX = 6
-HEAT_MAP_TREE_INDENT_PER_LEVEL_PX = 14
-
-# Narrowest the tree pane may be dragged, in pixels.
-HEAT_MAP_TREE_PANE_NARROWEST_PX = 120
-
-# The heat map view a summary page links, as key, link label, page path.
-# Every test has one. Spelled the same way as FLAME_GRAPH_VIEW_ENTRY.
-HEAT_MAP_VIEW_ENTRY: tuple[str, str, str] = (
-    "heat-map",
-    "heat map",
-    "heat-map/index.html",
-)
-
-# Milliseconds a window resize settles for before the page re-measures: a
-# drag fires resize continuously, and every frame is what this avoids.
-LAYOUT_RESIZE_SETTLE_DELAY_MS = 120
-
-# The multiple a rise stops printing at, becoming the ">1000x" bound. A drop
-# cannot pass -100%, so only a rise reaches it. theme.py and theme.js read it.
-NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES = 999.99
-
-# The smallest percentage a table prints as a number, under which it states
-# a bound. A notation floor only: no colour, no filter, never a denominator.
-NUMBER_SMALLEST_PRINTED_PERCENT = 0.01
-
-# The page font: Monaco first, then whatever else the box has.
-PAGE_FONT_FAMILY = (
+STYLE_PAGE_FONT_FAMILY = (
     'Monaco, Menlo, "DejaVu Sans Mono", "Liberation Mono", Consolas, monospace'
 )
 
-# The global the generated settings file assigns to, linked before every
-# script reading it. settings_script_write() fills the template's marker.
-PAGE_SETTINGS_GLOBAL_NAME = "settings"
+STYLE_PANE_SPLITTER_KEY_STEP_PX = 36
 
-# The window share a dragged pane may not pass: the wide end stops a drag
-# closing the far pane. Each pane's own floor is its caller's setting.
-PANE_SPLITTER_WIDEST_WINDOW_SHARE = 0.6
+STYLE_TABLE_COLUMN_EXTRA_WIDTH_CHARS = 2
 
-# The one counter every generator ranks, colours and divides by, recorded or
-# derived. Point it at any counter callgrind.py knows and every page follows.
-RANKING_COUNTER_NAME = "CEst"
+STYLE_TABLE_FUNCTION_NAME_WIDTH_CHARS = 20
 
-# The report-root directory holding every heat map's source text, one copy
-# of each profiled file rather than one per page that references it.
-REPORT_SOURCES_DIR_NAME = "sources"
+STYLE_TABLE_GROW_COLUMN_NARROWEST_CHARS = 20
 
-# Every localStorage key a report owns, exact keys and shared prefixes. One
-# missing from both outlives every bump. Browser keys, so boundary names.
-STORAGE_OWNED_KEYS: tuple[str, ...] = (
-    "heat.scale",
-    "heat.sort",
-    "view.scale",
-)
-STORAGE_OWNED_PREFIXES: tuple[str, ...] = ("split.",)
+STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS = 48
 
-# What a report writes under STORAGE_VERSION_KEY, a bare string, not JSON.
-# Anything but exactly it sweeps every owned key: that is how a bump rolls out.
-STORAGE_VERSION = "perf2html v2"
-STORAGE_VERSION_KEY = "perf2html.version"
-
-# The "curl.se/perf" link in every page's util block.
-STRIP_CURL_PERF_SITE_HREF = "https://curl.se/perf/index.html"
-
-# Spaces each overview pulldown's box adds beyond the longest test name, the
-# longest text a closed box reads. All three boxes are this one width.
-STRIP_PULLDOWN_EXTRA_WIDTH_CHARS = 2
-
-# The keys an open pulldown answers, and a framed summary forwards up to the
-# tests one, as KeyboardEvent.key names. "next" also opens a focused one.
-STRIP_PULLDOWN_KEY_NAMES: dict[str, str] = {
-    "close": "Escape",
-    "next": "ArrowDown",
-    "previous": "ArrowUp",
-    "select": "Enter",
+STYLE_VALUE_ENTRIES: dict[str, str] = {
+    "callers-collapsed-section-file-name-max-width-": "96ch",
+    "callers-collapsed-section-log-box-max-height-share-": "0.6",
+    "heat-map-band-z-index-": "2",
+    "heat-map-menu-column-gap-": "1ch",
+    "heat-map-menu-search-box-width-": "36ch",
+    "heat-map-minimap-width-": "110px",
+    "heat-map-source-file-header-column-gap-": "2ch",
+    "heat-map-source-table-code-cell-tab-size-": "4",
+    "heat-map-source-table-line-number-cell-callee-marker-text-": '"\\25B8 "',
+    "heat-map-source-ticker-tape-entry-padding-inline-": "1ch",
+    "heat-map-source-ticker-tape-gap-": "1ch",
+    "heat-map-tree-node-caret-width-": "2ch",
+    "heat-map-tree-node-gap-": "1ch",
+    "heat-map-tree-node-padding-right-": "1ch",
+    "heat-map-tree-node-share-percent-width-": "10ch",
+    "heat-map-tree-resize-handle-margin-left-": "-3px",
+    "heat-map-tree-resize-handle-margin-right-": "-4px",
+    "heat-map-tree-resize-handle-width-": "7px",
+    "heat-map-tree-resize-handle-z-index-": "1",
+    "heat-map-tree-width-": "280px",
+    "menu-button-margin-left-": "1ch",
+    "menu-button-padding-inline-": "1ch",
+    "menu-logo-padding-inline-": "1ch",
+    "menu-pulldown-entry-list-max-height-share-": "0.6",
+    "menu-pulldown-entry-list-z-index-": "3",
+    "menu-pulldown-entry-padding-inline-": "1ch",
+    "menu-pulldown-search-box-min-width-": "13ch",
+    "menu-title-width-": "66ch",
+    "page-body-line-height-": "1.1",
+    "page-dark-mode-disabled-border-width-": "0.125ch",
+    "page-scrollbar-thickness-": "14px",
+    "page-table-cell-padding-inline-": "1ch",
+    "page-table-column-title-z-index-": "1",
+    "screenshot-label-border-width-": "1ch",
+    "screenshot-label-font-size-": "2em",
+    "screenshot-label-z-index-": "3",
 }
 
-# The test merging every other, named as perf2html.sh names its directory.
-# The pulldowns work in it at the overview's home: data, not a UI word.
-STRIP_PULLDOWN_MERGED_TEST_NAME = "all"
+TABLE_COLUMN_SLIDE_THRESHOLD_PX = 5
 
-# Printable keys no pulldown takes as typed: outside a field they stay with
-# the page (space scrolls it), in an open box they type themselves.
-STRIP_PULLDOWN_SKIPPED_KEY_NAMES: tuple[str, ...] = (" ",)
-
-# Width of a strip's status row, its first cell: the longest "<test> /
-# <label>" is 26 today, plus margin. Too small clips mid-word.
-STRIP_STATUS_ROW_WIDTH_CHARS = 33
-
-# Where on the heat ramp the logo starts, its last letter always on the
-# hot end. Half way up reads as the ramp's warm half, not the whole of it.
-LOGO_START_FRACTION = 0.5
-
-# Valgrind's own preamble, dropped from the log a page shows.
-SUMMARY_PERF_LOG_SKIPPED_HEAD_LINES = 9
-
-# What each time suffix a perf log can print is worth in seconds.
-SUMMARY_TIME_SUFFIX_SECONDS: dict[str, float] = {
-    "msec": 1e-3,
-    "msecs": 1e-3,
-    "ms": 1e-3,
-    "nsec": 1e-9,
-    "nsecs": 1e-9,
-    "ns": 1e-9,
-    "sec": 1.0,
-    "secs": 1.0,
-    "s": 1.0,
-    "usec": 1e-6,
-    "usecs": 1e-6,
-    "us": 1e-6,
-}
-
-# How many functions the summary's top table lists.
-SUMMARY_TOP_FUNCTION_ROWS = 50
-
-# Spaces added to every table column beyond its widest cell.
-TABLE_COLUMN_EXTRA_WIDTH_CHARS = 3
-
-# Width of a table's function-name column, in characters.
-TABLE_FUNCTION_NAME_WIDTH_CHARS = 20
-
-# The fewest characters a fill table's grow column without a fixed width
-# keeps, so it never looks gone: one function name's worth.
-TABLE_GROW_COLUMN_NARROWEST_CHARS = 20
-
-# Where a table cuts a long "defined at" path.
-TABLE_LOCATION_COLUMN_MAX_CHARS = 48
-
-# Raw "User settings" THEME entries: odd index = dark member.
-THEME_COLOR_PAIR_ENTRIES: list[str] = [
-    "#1AB6FF",
-    "#0097E6",
-    "#F5F6FA",
-    "#DCDDE1",
-    "#FBC531",
-    "#E1B12C",
-    "#7F8FA6",
-    "#718093",
-    "#273C75",
-    "#192A56",
-    "#487EB0",
-    "#40739E",
-    "#353B48",
-    "#2F3640",
-]
-
-# What the seven THEME_COLOR_PAIR_ENTRIES pairs are called, in their order.
-# Each becomes --<name> and --<name>-l, so these are boundary names.
-THEME_COLOR_PAIR_NAMES: tuple[str, ...] = (
-    "blue",
-    "white",
-    "yellow",
-    "gray",
-    "navy",
-    "steel",
-    "slate",
-)
-
-# How much darker than its named colour the page background is drawn. The
-# one number moving --bg, scrollbar and minimap; a heated cell follows none.
-THEME_COLOR_ROLE_BACKGROUND_SHADE_FACTOR = 0.90
-
-# What each colour is for, as its CSS variable, then the pair and member
-# ("light"/"dark") it comes from. "bg" alone is shaded. Boundary names.
-THEME_COLOR_ROLE_SOURCES: dict[str, tuple[str, str]] = {
-    "bg": ("slate", "dark"),
-    "bg-alt": ("slate", "light"),
-    "panel": ("navy", "dark"),
-    "nav": ("navy", "dark"),
-    "sel": ("navy", "light"),
-    "fg": ("white", "light"),
-    "fg-dim": ("white", "dark"),
-    "muted": ("white", "dark"),
-    "link": ("blue", "light"),
-    "accent": ("yellow", "light"),
-    "bar": ("steel", "dark"),
-}
-
-# The units a printed duration uses, largest first, as suffix and seconds.
-# The printing ladder, not SUMMARY_TIME_SUFFIX_SECONDS, which reads a log.
 THEME_TIME_UNIT_ENTRIES: tuple[tuple[str, float], ...] = (
     ("s", 1.0),
     ("ms", 1e-3),
@@ -379,29 +418,31 @@ THEME_TIME_UNIT_ENTRIES: tuple[tuple[str, float], ...] = (
     ("ps", 1e-12),
 )
 
+WIDGET_KEY_NAMES: dict[str, str] = {
+    "activate": "Enter",
+    "click": " ",
+    "close": "Escape",
+    "down": "ArrowDown",
+    "first": "Home",
+    "last": "End",
+    "left": "ArrowLeft",
+    "right": "ArrowRight",
+    "up": "ArrowUp",
+}
 
-# The whole list of settings, taken at the line between them and the
-# reader's own constants, after the shell's are bound and before any of those.
+
 _SETTING_NAMES: frozenset[str] = frozenset()
 
 
-# Whether a module-level name is spelled the way a setting is: SCREAMING
-# snake case, with the leading underscore a private one keeps.
 def _is_setting_name(name: str) -> bool:
     bare = name.lstrip("_")
     return bool(bare) and bare[0].isupper() and bare.isupper()
 
 
-# manifest_table's line width: the dev/ 79-column source limit, unrelated to
-# any page's own width settings.
-_MANIFEST_TABLE_LINE_CHARS = 79
+_MANIFEST_TABLE_COLUMN_GAP_CHARS = 2
 
-# The scalar types the type check tests exactly. bool sits before int, being
-# an int subclass, so an int annotation must not accept True.
 _SCALAR_TYPES = (bool, int, float, str)
 
-# The types a declaration's sentinel may be written as, accepted only while
-# empty: False, "", 0, 0.0, (), [], {}. Matched by exact type, not isinstance.
 _SENTINEL_EMPTY_TYPES = (
     bool,
     bytes,
@@ -415,48 +456,27 @@ _SENTINEL_EMPTY_TYPES = (
     tuple,
 )
 
-# How the accepted sentinels are spelled, so every message naming them says
-# one list. None and Ellipsis are not on it.
 _SENTINEL_TEXT = 'False, 0, 0.0, "", (), [], {}'
 
-# The scripts/ directory, which is where this file, settings.sh and the
-# handler template all sit.
 _SETTINGS_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 
-# What settings_script_write() substitutes in the handler template. Both are
-# bare identifiers there, so node --check parses it before anything fills in.
 _SETTINGS_PAGE_DATA_MARKER = "__DATA__"
 _SETTINGS_PAGE_NAME_MARKER = "__NAME__"
 
-# The one scalar spelling settings.sh turns into an int rather than a str.
 _SHELL_INTEGER_PATTERN = re.compile(r"-?[0-9]+")
 
-# The [key]= in front of each element of a declare -A map.
-_SHELL_MAP_KEY_PATTERN = re.compile(r"\[([A-Za-z0-9_.+-]+)\]=")
+_SHELL_MAP_KEY_PATTERN = re.compile(r"\[\"?([A-Za-z0-9_.+-]+)\"?\]=")
 
-# The shell's settings file, beside this one.
 _SHELL_SETTINGS_FILE_NAME = "settings.sh"
 
-# One settings.sh statement: an optional declare -A, the name, then what
-# follows the "=", which is a scalar word or the "(" opening a container.
 _SHELL_STATEMENT_PATTERN = re.compile(
     r"(declare -A )?([A-Za-z_][A-Za-z0-9_]*)=(.*)"
 )
 
-# One settings.sh word: single-quoted, double-quoted, or bare to the
-# whitespace or ")". What it may hold is bash's question, not this reader's.
 _SHELL_WORD_PATTERN = re.compile(r"'([^']*)'|\"([^\"]*)\"|([^\s)]+)")
 
 
-# SettingsReader - the reader for the annotated settings a module declares.
 class SettingsReader:
-    # Every setting this module exports, by name.
-    def all_named(self) -> dict[str, object]:
-        scope = globals()
-        return {name: scope[name] for name in sorted(_SETTING_NAMES)}
-
-    # Whether one initializer is an empty sentinel of a type the annotation
-    # could name. A fixed-length tuple counts when every element is one.
     def is_sentinel(self, written: object) -> bool:
         if type(written) not in _SENTINEL_EMPTY_TYPES:
             return False
@@ -466,8 +486,6 @@ class SettingsReader:
             self.is_sentinel(item) for item in written
         )
 
-    # An annotation is the whole request: which setting and what type. Every
-    # SCREAMING_SNAKE name bound above this call is one being asked for.
     def load_into(self, module_name: str) -> None:
         module = sys.modules[module_name]
         scope = vars(module)
@@ -482,8 +500,6 @@ class SettingsReader:
             self.type_check(module_name, name, value, expected)
             setattr(module, name, value)
 
-    # The first check: a name bound above the call must be a setting this
-    # file holds. A file's own constant written above lands here too.
     def match_check(self, module_name: str, name: str) -> None:
         setting = name.lstrip("_")
         if setting in _SETTING_NAMES:
@@ -496,59 +512,6 @@ class SettingsReader:
             "file's own constant -- move it below the load_into() call."
         )
 
-    # The manifest as an untitled markdown table: header ["", version], each
-    # row split at its first "=", right column wrapped at the 79-col limit.
-    def manifest_table(self, lines: Sequence[str]) -> str:
-        version, rows = lines[0], [line.partition("=") for line in lines[1:]]
-        left_width = max([len(version)] + [len(label) for label, _, _ in rows])
-        right_width = _MANIFEST_TABLE_LINE_CHARS - 7 - left_width
-        out = [
-            self.manifest_table_row("", version, left_width, right_width),
-            self.manifest_table_rule(left_width, right_width),
-        ]
-        for label, _, value in rows:
-            first = True
-            while value or first:
-                out.append(
-                    self.manifest_table_row(
-                        label if first else "",
-                        value[:right_width],
-                        left_width,
-                        right_width,
-                    )
-                )
-                value = value[right_width:]
-                first = False
-        return "\n".join(out)
-
-    # One manifest_table row, its label and value cells padded to width.
-    def manifest_table_row(
-        self, label: str, value: str, left_width: int, right_width: int
-    ) -> str:
-        return f"| {label.ljust(left_width)} | {value.ljust(right_width)} |"
-
-    # One manifest_table rule row, dashes the width of each column.
-    def manifest_table_rule(self, left_width: int, right_width: int) -> str:
-        return f"|{'-' * (left_width + 2)}|{'-' * (right_width + 2)}|"
-
-    # Build assets/settings.js: every setting as one frozen JSON literal in
-    # settings_handler.js, wholesale, with no list of what a page may see.
-    def script_write(self) -> str:
-        # Plain open(), never theme.asset_text_read(): theme.py imports this
-        # module, so reaching for theme here would cycle.
-        values = self.all_named()
-        data = json.dumps(values, indent=2, sort_keys=True, ensure_ascii=False)
-        path = os.path.join(
-            _SETTINGS_DIRECTORY, ASSET_TEMPLATE_SETTINGS_HANDLER_NAME
-        )
-        with open(path, encoding="utf-8") as handle:
-            runtime = handle.read()
-        return runtime.replace(
-            _SETTINGS_PAGE_NAME_MARKER, PAGE_SETTINGS_GLOBAL_NAME
-        ).replace(_SETTINGS_PAGE_DATA_MARKER, data)
-
-    # The second check: a declaration is written with an empty sentinel of
-    # its own type. Anything else is a value meant to be read, and is lost.
     def sentinel_check(
         self,
         module_name: str,
@@ -574,8 +537,6 @@ class SettingsReader:
             "nothing else."
         )
 
-    # A settings.sh name is spelled like every other setting and bound
-    # nowhere else: a second definition is the twin this reader exists to end.
     def shell_name_check(
         self, number: int, name: str, found: dict[str, object]
     ) -> None:
@@ -594,7 +555,6 @@ class SettingsReader:
                 "definition, in one of the two files",
             )
 
-    # One scalar: exactly one word, an int when it matches -?[0-9]+.
     def shell_scalar_parse(self, number: int, text: str) -> int | str:
         pairs, closed = self.shell_words_parse(number, text, False)
         if closed or len(pairs) != 1:
@@ -606,14 +566,11 @@ class SettingsReader:
             return int(value)
         return value
 
-    # Stop the import on one settings.sh line, naming it and the fix.
     def shell_settings_fail(self, number: int, problem: str) -> NoReturn:
         raise SystemExit(
             f"error: {_SHELL_SETTINGS_FILE_NAME} line {number}: {problem}"
         )
 
-    # Every setting settings.sh holds, by name. Only what shell and Python
-    # read alike is accepted; the grammar is settings.sh's own header.
     def shell_settings_read(self) -> dict[str, object]:
         path = os.path.join(_SETTINGS_DIRECTORY, _SHELL_SETTINGS_FILE_NAME)
         with open(path, encoding="utf-8") as handle:
@@ -660,8 +617,6 @@ class SettingsReader:
             )
         return found
 
-    # One line of a container body as (key, word) pairs, the key empty in a
-    # list, and whether it closed. 'a'b is refused at the end, never joined.
     def shell_words_parse(
         self, number: int, text: str, keyed: bool
     ) -> tuple[list[tuple[str, str]], bool]:
@@ -697,14 +652,11 @@ class SettingsReader:
                 self.shell_settings_fail(
                     number, 'a word ends at whitespace or the closing ")"'
                 )
-            # Whichever of the three quoting forms matched holds the word.
             word = next(
                 group for group in word_match.groups() if group is not None
             )
             pairs.append((key, word))
 
-    # The third check: the value must be the type the annotation names.
-    # Scalars exactly, never converted; a container is not walked.
     def type_check(
         self, module_name: str, name: str, value: object, expected: object
     ) -> None:
@@ -723,14 +675,38 @@ class SettingsReader:
             "in settings.py."
         )
 
-    # The value of one setting, named as the declaring module spells it.
-    # match_check has already confirmed this file defines it.
     def value_of(self, name: str) -> object:
         return globals()[name.lstrip("_")]
 
 
-# The reader, then the cut: the shell's settings bind first, so every one
-# is bound before the list is taken.
+class SettingsWriter:
+    def all_named(self) -> dict[str, object]:
+        scope = globals()
+        return {name: scope[name] for name in sorted(_SETTING_NAMES)}
+
+    def manifest_table(self, lines: Sequence[str]) -> str:
+        rows = [("", "", lines[0])]
+        rows += [line.partition("=") for line in lines[1:]]
+        label_width = max(len(label) for label, _, _ in rows)
+        column_gap = " " * _MANIFEST_TABLE_COLUMN_GAP_CHARS
+        return "\n".join(
+            f"{label.ljust(label_width)}{column_gap}{value}"
+            for label, _, value in rows
+        )
+
+    def script_write(self) -> str:
+        values = self.all_named()
+        data = json.dumps(values, indent=2, sort_keys=True, ensure_ascii=False)
+        path = os.path.join(
+            _SETTINGS_DIRECTORY, ASSET_TEMPLATE_SETTINGS_HANDLER_NAME
+        )
+        with open(path, encoding="utf-8") as handle:
+            runtime = handle.read()
+        return runtime.replace(
+            _SETTINGS_PAGE_NAME_MARKER, PAGE_SETTINGS_GLOBAL_NAME
+        ).replace(_SETTINGS_PAGE_DATA_MARKER, data)
+
+
 _reader = SettingsReader()
 globals().update(_reader.shell_settings_read())
 _SETTING_NAMES = frozenset(
@@ -738,21 +714,16 @@ _SETTING_NAMES = frozenset(
     for name in globals()
     if not name.startswith("_") and _is_setting_name(name)
 )
+_writer = SettingsWriter()
 
 
-# Assign a module's declared settings into it, checking each one's type
-# against the annotation the module declared it with.
 def load_into(module_name: str) -> None:
     _reader.load_into(module_name)
 
 
-# The manifest as an untitled markdown table, for report_complete.js.
 def manifest_table(lines: Sequence[str]) -> str:
-    return _reader.manifest_table(lines)
+    return _writer.manifest_table(lines)
 
 
-# Build assets/settings.js: every setting this module holds, shipped to the
-# browser as one frozen object; manifest_lines is unused, kept for symmetry.
-def settings_script_write(manifest_lines: Sequence[str]) -> str:
-    del manifest_lines
-    return _reader.script_write()
+def settings_script_write() -> str:
+    return _writer.script_write()

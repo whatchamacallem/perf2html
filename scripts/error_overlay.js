@@ -1,140 +1,108 @@
-window.report_error_overlay = (function () {
+window.report_error_overlay_ = (function () {
   "use strict";
 
-  const OVERLAY_MESSAGE_NAME = "report_error";
-  const REPORT_MANIFEST_TABLE_GLOBAL_NAME = "report_manifest_table";
+  const REPORT_MANIFEST_TABLE_GLOBAL_NAME = "report_manifest_table_";
   const OVERLAY_BACKGROUND_COLOR = "#14171c";
   const OVERLAY_TEXT_COLOR = "#f2f4f6";
   const OVERLAY_LINK_COLOR = "#ff4427";
+  const OVERLAY_TITLE_TEXT = "perf2html error";
   const OVERLAY_COPY_LINK_TEXT = "copy";
   const OVERLAY_BACK_LINK_TEXT = "back";
-  const OVERLAY_NO_MANIFEST_TEXT = "Report has no manifest";
+  const OVERLAY_NO_MANIFEST_TEXT = "Report has no assets/report_complete.js";
   const DESIGN_COORDINATES_WIDTH_PX = 1920;
-  const DESIGN_FONT_SIZE_PX = 16;
-  const CALLSTACK_TABLE_LINE_CHARS = 79;
-  const CALLSTACK_TABLE_FRAME_CHARS = 7;
-  const CALLSTACK_LOCATION_COLUMN_SHARE = 1 / 3;
+  const DESIGN_FONT_SIZE_PX = 24;
+  const REPORT_ROOT_URL = new URL("..", document.currentScript.src).href;
 
   let shown = false;
+  let report_relay_ = null;
 
-  function html_escape(text) {
+  function html_escape_(text) {
     return text
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
-      .replace(/"/g, "&quot;");
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
-  function line_wrap(text, width) {
-    const lines = [];
-    for (let start = 0; start < text.length || !lines.length;) {
-      lines.push(text.slice(start, start + width));
-      start += width;
-    }
-    return lines.join("\n");
+  function error_text_of_(thrown_value) {
+    if (!(thrown_value instanceof Error)) return String(thrown_value);
+    const error_text =
+      thrown_value.stack ?? `${thrown_value.name}: ${thrown_value.message}`;
+    if (thrown_value.cause !== undefined)
+      return `${error_text}\n${error_text_of_(thrown_value.cause)}`;
+    return error_text;
   }
 
-  function callstack_row(line) {
-    const bare = line.trim().replace(/^at\s+/, "");
-    const braced = /^(.*?)\s*\((.*)\)$/.exec(bare);
-    return braced ? [braced[2], braced[1]] : [bare, ""];
+  function report_relative_(shown_text) {
+    return shown_text.replaceAll(REPORT_ROOT_URL, "");
   }
 
-  function callstack_table_row(location, function_name, widths) {
-    const cells = [location, function_name].map(function (text, column) {
-      const width = widths[column];
-      const lines = [];
-      for (let start = 0; start < text.length || !lines.length;) {
-        lines.push(text.slice(start, start + width).padEnd(width));
-        start += width;
+  function page_address_() {
+    return report_relative_(location.href.split(/[?#]/)[0] + location.hash);
+  }
+
+  function link_render_(script_text, link_text) {
+    const link_href = "javascript:" + encodeURIComponent(script_text);
+    return (
+      `<a style="color:${OVERLAY_LINK_COLOR}" ` +
+      `href="${html_escape_(link_href)}">${html_escape_(link_text)}</a>`
+    );
+  }
+
+  function catch_show_throw_(entry_function) {
+    return function (...entry_arguments) {
+      try {
+        const entry_result = entry_function.apply(this, entry_arguments);
+        if (!(entry_result instanceof Promise)) return entry_result;
+        return entry_result.catch(function (rejection_reason) {
+          err_overlay_show_(rejection_reason);
+          throw rejection_reason;
+        });
+      } catch (thrown_value) {
+        err_overlay_show_(thrown_value);
+        throw thrown_value;
       }
-      return lines;
-    });
-    const row_lines = [];
-    const line_count = Math.max(cells[0].length, cells[1].length);
-    for (let index = 0; index < line_count; index += 1) {
-      row_lines.push(
-        `| ${cells[0][index] || " ".repeat(widths[0])} | ` +
-          `${cells[1][index] || " ".repeat(widths[1])} |`,
-      );
-    }
-    return row_lines.join("\n");
+    };
   }
 
-  function callstack_table(stack_text) {
-    const rows = String(stack_text || "")
-      .split("\n")
-      .filter((line) => line.trim())
-      .map(callstack_row);
-    if (!rows.length) return "";
-    const budget = CALLSTACK_TABLE_LINE_CHARS - CALLSTACK_TABLE_FRAME_CHARS;
-    const headings = ["Location", "Function"];
-    const natural = [0, 1].map((column) =>
-      Math.max(
-        headings[column].length,
-        ...rows.map((row) => row[column].length),
-      ),
-    );
-    let widths = natural;
-    if (natural[0] + natural[1] > budget) {
-      const location_width = Math.min(
-        natural[0],
-        Math.floor(budget * CALLSTACK_LOCATION_COLUMN_SHARE),
-      );
-      widths = [location_width, budget - location_width];
-    }
-    const header = [
-      callstack_table_row("Location", "Function", widths),
-      callstack_table_row("-".repeat(widths[0]), "-".repeat(widths[1]), [
-        widths[0],
-        widths[1],
-      ]),
-    ];
-    const body = rows.map((row) =>
-      callstack_table_row(row[0], row[1], widths),
-    );
-    return header.concat(body).join("\n");
+  function err_overlay_show_(thrown_value) {
+    const error_text = report_relative_(error_text_of_(thrown_value));
+    report_render_({ page: page_address_(), text: error_text }, false);
   }
 
-  function overlay_show(reason) {
-    report_render({
-      address: location.href,
-      message: String((reason && reason.message) || reason),
-      stack: String((reason && reason.stack) || ""),
-    });
-  }
-
-  function report_render(report) {
+  function report_render_(report, is_relayed) {
     if (shown) return;
     shown = true;
-    if (window.parent !== window) {
-      window.parent.postMessage(
-        { report_ui: OVERLAY_MESSAGE_NAME, report: report },
-        "*",
-      );
-      return;
-    }
-    setTimeout(page_write, 0, report);
+    if (report_relay_ !== null && report_relay_(report)) return;
+    setTimeout(page_write_, 0, report, is_relayed);
   }
 
-  function page_write(report) {
-    const callstack_text = callstack_table(report.stack);
+  function relay_set_(relay_function) {
+    report_relay_ = relay_function;
+  }
+
+  function relayed_report_show_(report) {
+    report_render_(report, true);
+  }
+
+  function page_write_(report, is_relayed) {
     const manifest_text =
       typeof window[REPORT_MANIFEST_TABLE_GLOBAL_NAME] === "undefined"
         ? OVERLAY_NO_MANIFEST_TEXT
         : window[REPORT_MANIFEST_TABLE_GLOBAL_NAME];
-    const copy_text = `# perf2html error
-
-${report.message}
-
-${line_wrap(report.address, CALLSTACK_TABLE_LINE_CHARS)}
-
-## Callstack
-
-${callstack_text}
-
-## Manifest
-
-${manifest_text}`;
+    const place_lines = [`address  ${page_address_()}`];
+    if (is_relayed) place_lines.push(`page     ${report.page}`);
+    const copy_text = [
+      OVERLAY_TITLE_TEXT,
+      "",
+      ...place_lines,
+      "",
+      report.text,
+      "",
+      "manifest",
+      manifest_text,
+    ].join("\n");
     const font_size =
       Math.round(
         (DESIGN_FONT_SIZE_PX * window.innerWidth) /
@@ -142,42 +110,36 @@ ${manifest_text}`;
       ) + "px";
     const page_style =
       `margin:0;background:${OVERLAY_BACKGROUND_COLOR};` +
-      `color:${OVERLAY_TEXT_COLOR};font:${font_size}/1.5 Monaco, monospace;` +
+      `color:${OVERLAY_TEXT_COLOR};font:${font_size}/1.1 Monaco, monospace;` +
       `min-height:100vh;display:flex;align-items:center;` +
-      `justify-content:center`;
-    const block_style =
-      "font:inherit;white-space:pre-wrap;overflow-wrap:anywhere";
-    const link_style = "color:" + OVERLAY_LINK_COLOR;
-    const copy_call =
-      `navigator.clipboard.writeText(` + `${JSON.stringify(copy_text)})`;
-    const link = (href, text) =>
-      `<a style="${link_style}" href="javascript:${href}">${text}</a>`;
+      `justify-content:safe center`;
+    const block_style = "font:inherit;white-space:pre";
+    const copy_script =
+      "navigator.clipboard.writeText(" + JSON.stringify(copy_text) + ")";
     const links_line =
-      `${link(html_escape(copy_call), OVERLAY_COPY_LINK_TEXT)} | ` +
-      `${link("history.back()", OVERLAY_BACK_LINK_TEXT)}`;
-    const body = `${copy_text}
-
-${links_line}`;
+      `${link_render_(copy_script, OVERLAY_COPY_LINK_TEXT)} | ` +
+      `${link_render_("history.back()", OVERLAY_BACK_LINK_TEXT)}`;
     document.open();
-    // APPROVED USAGE. Error handlers are what this is for.
-    document.write(`<!doctype html>
-<title>perf2html error</title>
-<body style="${page_style}"><pre style="${block_style}">${body}</pre>`);
+    document.write(
+      "<!doctype html>\n" +
+        '<html><head><meta charset="utf-8">' +
+        `<title>${html_escape_(OVERLAY_TITLE_TEXT)}</title></head>` +
+        `<body style="${page_style}"><pre style="${block_style}">` +
+        `${html_escape_(copy_text)}\n\n${links_line}</pre></body></html>`,
+    );
     document.close();
+    const address_reload_ = () => location.reload();
+    window.addEventListener("hashchange", address_reload_);
+    window.addEventListener("popstate", address_reload_);
   }
 
   window.addEventListener("error", function (browser_event) {
-    overlay_show(browser_event.error || browser_event.message);
+    err_overlay_show_(browser_event.error || browser_event.message);
   });
   window.addEventListener("unhandledrejection", function (browser_event) {
-    overlay_show(browser_event.reason);
-  });
-  window.addEventListener("message", function (browser_event) {
-    const payload = browser_event.data;
-    if (payload && payload.report_ui === OVERLAY_MESSAGE_NAME) {
-      report_render(payload.report);
-    }
+    err_overlay_show_(browser_event.reason);
   });
 
-  return { overlay_show };
+  window.catch_show_throw_ = catch_show_throw_;
+  return { err_overlay_show_, relay_set_, relayed_report_show_ };
 })();

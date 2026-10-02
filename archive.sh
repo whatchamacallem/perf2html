@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-FileCopyrightText: © 2017-2026 Adrian Johnston.
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 
@@ -57,7 +57,7 @@ git fsck
 git reflog expire --expire=24.hours.ago --expire-unreachable=24.hours.ago --all
 git gc --prune=now --aggressive
 
-# Save everything including local config.
+# Save everything including local git config.
 tar -cJf "$_DEST_DIR_/$_ARCHIVE_" -C ".." "$_PROJECT_/$_SCRIPT_NAME_" "$_PROJECT_/.git"
 
 printf "Wrote: "

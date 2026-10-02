@@ -1,50 +1,44 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse, json, math, os, re, sys, urllib.parse
+import argparse, os, re, sys, urllib.parse
 from collections.abc import Sequence
 from typing import NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import callgrind, callgrind_to_heatmap, settings, theme
+import callgrind, callgrind_diff, settings, theme
 
-# All constants needed from settings.py have to be loaded here before anything
-# else.
+_ASSET_CALLERS_SCRIPT_NAME: str = ""
 _ASSET_FRAME_SCRIPT_NAME: str = ""
 _ASSET_MENU_SCRIPT_NAME: str = ""
+_ASSET_MENU_STYLESHEET_NAME: str = ""
+_ASSET_PULLDOWN_TEXT_SCRIPT_NAME: str = ""
+_ASSET_TEMPLATE_OVERVIEW_PAGE_NAME: str = ""
+_CALLERS_PERF_LOG_SKIPPED_HEAD_LINES: int = 0
+_CALLERS_TIME_SUFFIX_SECONDS: dict[str, float] = {}
+_CALLERS_TOP_FUNCTION_ROWS: int = 0
+_CALLERS_VIEW_KEY: str = ""
 _DIFF_CALLER_COUNTS_FILE_SUFFIX: str = ""
+_FLAME_GRAPH_LOCAL_PROFILE_PATH: str = ""
 _FLAME_GRAPH_VIEW_ENTRY: tuple[str, str, str] = ("", "", "")
 _HEAT_MAP_VIEW_ENTRY: tuple[str, str, str] = ("", "", "")
+_MENU_BUTTON_ORDER: tuple[str, ...] = ()
+_MENU_PULLDOWN_MERGED_TEST_NAME: str = ""
 _RANKING_COUNTER_NAME: str = ""
-_STRIP_CURL_PERF_SITE_HREF: str = ""
-_STRIP_PULLDOWN_EXTRA_WIDTH_CHARS: int = 0
-_STRIP_PULLDOWN_MERGED_TEST_NAME: str = ""
-_SUMMARY_PERF_LOG_SKIPPED_HEAD_LINES: int = 0
-_SUMMARY_TIME_SUFFIX_SECONDS: dict[str, float] = {}
-_SUMMARY_TOP_FUNCTION_ROWS: int = 0
-_TABLE_FUNCTION_NAME_WIDTH_CHARS: int = 0
+_STYLE_MENU_PULLDOWN_EXTRA_WIDTH_CHARS: int = 0
+_STYLE_TABLE_FUNCTION_NAME_WIDTH_CHARS: int = 0
 settings.load_into(__name__)
 
-# What this exits with when a file a page is built from will not open.
-# ENOTDIR: the closest errno has to "the tree is not what we were told".
+_CALLERS_PAGE_ASSETS_DEPTH = 1
+
 _EXIT_INPUT_UNREADABLE = 20
 
-# Valgrind's "==1234== " line prefix, stripped so the log reads as output.
 _PID_PREFIX = re.compile(r"^==\d+==\s?")
 
-# How fine the scale slider's travel is, as an HTML range step over 0..1.
-# Fine enough to feel continuous, coarse enough not to redraw per pixel.
-_STRIP_SCALE_SLIDER_STEP = 0.01
-
-# The overview page sits at the report root: its links need no "../".
 _OVERVIEW_PAGE_ASSETS_DEPTH = 0
 
-# How far a test's summary page sits below the report root: how many "../"
-# its shared-asset, logo and help links need. The layout fixes it.
-_SUMMARY_PAGE_ASSETS_DEPTH = 1
+_OVERVIEW_PAGE = theme.asset_text_read(_ASSET_TEMPLATE_OVERVIEW_PAGE_NAME)
 
-# A "Something: 1.23 ms" perf log line, the only valid speed number. Blank
-# space is [ \t]*, never \s*, which under re.M merges two paragraphs.
 _TIME_LINE = re.compile(
     r"^([ \t]*[A-Za-z][\w/ ]*:[ \t]*)"
     r"(-?\d+(?:\.\d+)?)[ \t]*"
@@ -53,141 +47,89 @@ _TIME_LINE = re.compile(
 )
 
 
-# BuildReport - Writes the overview page and every test's summary page, and
-# the strip of links that frames the views.
 class BuildReport:
-    # CallerDelta - How one caller's calls into one function changed, read back
-    # from callgrind_diff.py's synthesized callers diff.
-    class CallerDelta(NamedTuple):
-        # who does the calling
-        function: str
-        # how many more (or fewer) times it called
-        count_: int
-        # how much more (or less) those calls cost
-        cost: int
-
-    # CallersData - the call graph a delta file cannot carry, plus the
-    # baseline every share divides by.
     class CallersData(NamedTuple):
-        # per function, who called it and how that changed
-        callers: dict[str, list[BuildReport.CallerDelta]]
-        # per function, its baseline cost in the synthesized callers
-        # diff's counter
+        callers: dict[str, list[callgrind_diff.CallerDelta]]
         baseline: dict[str, int]
-        # per function, how many times the baseline called it
         baseline_calls: dict[str, int]
 
-    # FunctionCost - One function and one number, for ranking the top table.
     class FunctionCost(NamedTuple):
-        # what it is ranked on
         cost: int
-        # whose cost it is
         function: str
 
-    # ManifestBlock - A named group of those rows, e.g. "baseline".
     class ManifestBlock(NamedTuple):
-        # the heading above the group
         label: str
-        # the rows themselves
         pairs: list[BuildReport.ManifestRow]
 
-    # ManifestRow - One LABEL=VALUE row above a page's content. Not the heat
-    # map's HeatMapTotals, which is its data rather than where it came from.
     class ManifestRow(NamedTuple):
-        # the left column
         label: str
-        # the right column
         value: str
 
-    # OverviewArgs - What the overview page is built from.
-    class OverviewArgs(NamedTuple):
-        # where the page goes
-        output: str
-        # each test as "name=directory"
-        test: list[str]
-        # extra LABEL=VALUE rows
-        header: list[str]
-        # a file of the same rows
-        header_file: str
-        # grouped rows as "block:LABEL=VALUE"
-        header_block: list[str]
-        # each test's working diff profile as "name=path", for a diff
-        # overview
-        diff_profile: list[str]
-        # each test's perf log as "name=path", for a full overview
-        perf_log: list[str]
-
-    # StripLink - One link in a page's top strip.
-    class StripLink(NamedTuple):
-        # what the URL hash calls it
-        key: str
-        # what the link says
-        label: str
-        # where it points
+    class MenuLink(NamedTuple):
+        test_name: str
         href: str
-        # what the status row and the tab title read while it is shown
-        title: str
-        # load it into the frame rather than navigating
-        frame: bool = False
 
-    # TestArgs - Everything one test's summary page is built from. Each
-    # optional log renders a section only when it is given.
-    class TestArgs(NamedTuple):
-        # the callgrind file(s), merged into one profile
-        callgrind_file: list[str]
-        # where the page goes
+    class OverviewArgs(NamedTuple):
         output: str
-        # the test's name
-        test: str
-        # raw files to link, if any
-        raw_data: list[str]
-        # the valgrind log(s) to embed, if any
-        log: list[str]
-        # the perf log to embed, if any
-        perf_log: str
-        # the trace log to embed -- also what gates the flame graph link
-        trace_log: str
-        # embed no log at all
-        no_log: bool
-        # extra LABEL=VALUE rows
+        test: list[str]
         header: list[str]
-        # callgrind_diff.py's synthesized callers diff, for the call columns
+        header_file: str
+        header_block: list[str]
+        diff_profile: list[str]
+        perf_log: list[str]
+        raw_data: str
+
+    class TestArgs(NamedTuple):
+        callgrind_file: list[str]
+        output: str
+        test: str
+        log: list[str]
+        perf_log: str
+        trace_log: str
+        no_log: bool
+        header: list[str]
         callers_data: str
 
-    # TestDirectory - One test of the overview, and where its report sits.
     class TestDirectory(NamedTuple):
-        # the test's name
         name: str
-        # its directory, relative to the overview
         directory: str
 
-    # View - One of the pages a test summary can frame.
     class View(NamedTuple):
-        # what the URL hash calls it
         key: str
-        # what the strip link says
         label: str
-        # where the page sits
-        path: str
 
-    # The baseline run's total in this page's counter, from the synthesized
-    # callers diff beside the delta.
+    def address_of(
+        self, test_name: str, view_key: str, function_name: str = ""
+    ) -> str:
+        hash_text = f"#test={self.address_value_of(test_name)}&view={view_key}"
+        if function_name:
+            hash_text += f"&function={self.address_value_of(function_name)}"
+        if view_key == _FLAME_VIEW.key:
+            hash_text += f"&localProfilePath={_FLAME_GRAPH_LOCAL_PROFILE_PATH}"
+        return hash_text
+
+    def address_value_of(self, value: str) -> str:
+        return urllib.parse.quote(value, safe="/-_.!~*'()")
+
     def baseline_total_load(self, path: str) -> int:
-        with open(path, encoding="utf-8") as handle:
-            doc = json.load(handle)
-        counters: list[str] = doc["counters"]
-        costs: list[int] = doc["baselineTotal"]
-        self.counters_check(counters, path)
-        return callgrind.counter_value(counters, costs, _RANKING_COUNTER_NAME)
+        doc = callgrind_diff.callers_doc_load(path)
+        counters = doc["counters"]
+        callgrind.ranking_counter_check(counters, path)
+        return callgrind.counter_value(
+            counters, doc["baselineTotal"], _RANKING_COUNTER_NAME
+        )
 
-    # The "callers" cell of a diff row: each caller and how its calls moved.
+    def blank_line_render(self) -> str:
+        return "<br />"
+
     def caller_delta_cell(
         self,
-        profile: callgrind.Profile,
-        deltas: Sequence[BuildReport.CallerDelta],
+        test_name: str,
+        profile: callgrind.LineProfile,
+        deltas: Sequence[callgrind_diff.CallerDelta],
     ) -> theme.Cell:
         if not deltas:
-            return theme.Cell("(no recorded caller change)", cls="dim")
+            return theme.Cell("(no recorded caller change)", cls="dimmed_")
         parts: list[str] = []
         html_parts: list[str] = []
         for delta in deltas:
@@ -200,7 +142,7 @@ class BuildReport:
                 f"{theme.num_signed(delta.cost)} {delta.function}{count_text}"
             )
             parts.append(text)
-            href = self.entry_link(profile, delta.function)
+            href = self.entry_link(test_name, profile, delta.function)
             label = (
                 f"{theme.num_signed(delta.cost)}"
                 f" {theme.html_escape(delta.function)}"
@@ -212,41 +154,29 @@ class BuildReport:
         joined = ", ".join(parts)
         return theme.Cell(joined, html=", ".join(html_parts))
 
-    # One caller of a non-diff row, with its share of that function's calls.
     def caller_link(
         self,
-        profile: callgrind.Profile,
+        test_name: str,
+        profile: callgrind.LineProfile,
         caller_name: str,
         count: int,
         call_count: int,
     ) -> str:
-        href = self.entry_link(profile, caller_name)
-        share = theme.num_pct(100.0 * count / call_count)
+        href = self.entry_link(test_name, profile, caller_name)
+        share = theme.html_escape(theme.num_pct(100.0 * count / call_count))
         label = f"{theme.html_escape(caller_name)} ({share})"
         return f'<a href="{href}">{label}</a>' if href else label
 
-    # Read the synthesized callers diff back. Its vectors carry only the
-    # recorded counters, so a derived one is added up from them here.
     def callers_data_load(self, path: str) -> BuildReport.CallersData:
         if not path:
             sys.exit(
                 "error: --diff needs --callers-data, the callgrind_diff.py"
             )
-        try:
-            with open(path, encoding="utf-8") as handle:
-                doc = json.load(handle)
-        except OSError as error:
-            sys.exit(f"error: {path}: {error}: the callgrind_diff.py")
-        counters: list[str] = doc["counters"]
-        self.counters_check(counters, path)
+        doc = callgrind_diff.callers_doc_load(path)
+        counters = doc["counters"]
+        callgrind.ranking_counter_check(counters, path)
         return BuildReport.CallersData(
-            callers={
-                callee: [
-                    BuildReport.CallerDelta(function, count, cost)
-                    for function, count, cost in deltas
-                ]
-                for callee, deltas in doc["callers"].items()
-            },
+            callers=doc["callers"],
             baseline={
                 name: callgrind.counter_value(
                     counters, costs, _RANKING_COUNTER_NAME
@@ -257,29 +187,17 @@ class BuildReport:
             baseline_calls=doc["baselineCalls"],
         )
 
-    # Refuse a profile whose counters cannot add up to the ranking counter,
-    # rather than a bare KeyError from Profile.value further in.
-    def counters_check(self, counters: Sequence[str], path: str) -> None:
-        if _RANKING_COUNTER_NAME in callgrind.counter_names(counters):
-            return
-        sys.exit(
-            f"error: {path} cannot supply {_RANKING_COUNTER_NAME}, the"
-            f" counter every diff share is counted in: it records"
-            f" {' '.join(counters)}"
-        )
-
-    # One collapsed section of a summary page: a heading and its markup.
-    # Every section, core and diff alike, is this same shape.
     def details_section(self, title: str, body: str) -> str:
         return (
-            f'<details class="sec"><summary><h2>'
-            f"{theme.html_escape(title)}</h2></summary>{body}</details>"
+            '<details class="callers-collapsed-section-">'
+            '<summary class="callers-collapsed-section-title-">'
+            f"{theme.html_escape(title)}</summary>{body}</details>"
         )
 
-    # The diff summary's top table, ranked by |change| in self cost.
     def diff_functions_table(
         self,
-        profile: callgrind.Profile,
+        test_name: str,
+        profile: callgrind.LineProfile,
         callers_data: BuildReport.CallersData,
     ) -> str:
         ranked = sorted(
@@ -291,9 +209,9 @@ class BuildReport:
                 if profile.value(costs, _RANKING_COUNTER_NAME) != 0
             ),
             key=lambda t: (-abs(t.cost), t.function),
-        )[:_SUMMARY_TOP_FUNCTION_ROWS]
+        )[:_CALLERS_TOP_FUNCTION_ROWS]
         shares = [
-            self.diff_share(
+            theme.diff_share_of(
                 cost.cost, callers_data.baseline.get(cost.function)
             )
             for cost in ranked
@@ -303,7 +221,7 @@ class BuildReport:
             for callee, deltas in callers_data.callers.items()
         }
         call_shares = {
-            callee: self.diff_share(
+            callee: theme.diff_share_of(
                 count, callers_data.baseline_calls.get(callee)
             )
             for callee, count in call_counts.items()
@@ -314,45 +232,40 @@ class BuildReport:
             share = shares[rank - 1]
             deltas = callers_data.callers.get(ranked_function.function, [])
             call_count = call_counts.get(ranked_function.function, 0)
-            call_share = call_shares.get(ranked_function.function)
             rows.append(
                 [
                     str(rank),
                     theme.Cell(
-                        theme.num_signed_pct(share)
-                        if share is not None
-                        else "",
+                        theme.num_signed_pct(share),
                         style=theme.heat_style(
                             theme.heat_of_share(share), signed=True
-                        )
-                        if share is not None
-                        else "",
+                        ),
                     ),
-                    self.function_link_cell(profile, ranked_function.function),
+                    self.function_link_cell(
+                        test_name, profile, ranked_function.function
+                    ),
                     theme.num_signed(ranked_function.cost),
                     theme.Cell(
                         theme.num_signed(call_count),
                         style=theme.heat_style(
-                            theme.heat_of_share(call_share),
+                            theme.heat_of_share(
+                                call_shares[ranked_function.function]
+                            ),
                             signed=True,
-                        )
-                        if call_share is not None
-                        else "",
+                        ),
                     )
                     if call_count
                     else "",
-                    self.caller_delta_cell(profile, deltas),
+                    self.caller_delta_cell(test_name, profile, deltas),
                 ]
             )
         return theme.table_render("report.functions", columns, rows, fill=True)
 
-    # Write the diff report's overview page.
     def diff_overview(self, args: BuildReport.OverviewArgs) -> None:
         tests = self.overview_tests(args)
         columns, rows = self.diff_overview_rows(tests, args.diff_profile)
-        self.overview_page(args, tests, columns, rows)
+        self.overview_page(args, tests, columns, rows, False)
 
-    # One overview row per test, read from its working subtracted profile.
     def diff_overview_rows(
         self,
         tests: Sequence[BuildReport.TestDirectory],
@@ -362,65 +275,59 @@ class BuildReport:
             theme.Column("one report per test"),
             theme.Column(_RANKING_COUNTER_NAME, numeric=True),
             theme.Column("% of change", numeric=True),
-            theme.Column("functions changed", numeric=True),
+            theme.Column(
+                f"functions changed in {_RANKING_COUNTER_NAME}", numeric=True
+            ),
         ]
         profile_of = self.named_paths_of(diff_profiles, "--diff-profile")
         rows: list[list[theme.CellOrText]] = []
         for test in tests:
-            # every test the diff paired has its delta and its callers file
-            # beside it: one without is a broken run, never an empty row
             profile_path = profile_of[test.name]
             callers = profile_path + _DIFF_CALLER_COUNTS_FILE_SUFFIX
             link = self.test_link_cell(test.name)
             profile = callgrind.profile_load([profile_path])
-            self.counters_check(profile.counters, profile_path)
+            callgrind.ranking_counter_check(profile.counters, profile_path)
             delta = profile.value(profile.totals(), _RANKING_COUNTER_NAME)
             changed = sum(
                 1
                 for costs in profile.function_self.values()
                 if profile.value(costs, _RANKING_COUNTER_NAME) != 0
             )
-            share = self.diff_share(delta, self.baseline_total_load(callers))
+            share = theme.diff_share_of(
+                delta, self.baseline_total_load(callers)
+            )
             rows.append(
                 [
                     link,
                     theme.num_signed(delta),
-                    theme.num_signed_pct(share) if share is not None else "",
+                    theme.num_signed_pct(share),
                     theme.num_human(changed),
                 ]
             )
         return columns, rows
 
-    # A delta as a percentage of that same thing's own baseline. What the
-    # baseline never had is infinite; None when there is no change at all.
-    def diff_share(self, delta: int, baseline: int | None) -> float | None:
-        if not baseline:
-            return math.copysign(math.inf, delta) if delta else None
-        return 100.0 * delta / abs(baseline)
-
-    # Write one test's diff summary page.
     def diff_test(self, args: BuildReport.TestArgs) -> None:
         profile = callgrind.profile_load(args.callgrind_file)
-        self.counters_check(profile.counters, " ".join(args.callgrind_file))
+        callgrind.ranking_counter_check(
+            profile.counters, " ".join(args.callgrind_file)
+        )
         callers_data = self.callers_data_load(args.callers_data)
         self.report_page(
             args,
-            [_HEAT_VIEW],
-            f"top {_SUMMARY_TOP_FUNCTION_ROWS} functions by change in self",
-            self.diff_functions_table(profile, callers_data),
+            f"top {_CALLERS_TOP_FUNCTION_ROWS} functions by change in self",
+            self.diff_functions_table(args.test, profile, callers_data),
         )
 
-    # The heat map href for a function, or "" when it has no entry line.
-    def entry_link(self, profile: callgrind.Profile, function: str) -> str:
+    def entry_link(
+        self, test_name: str, profile: callgrind.LineProfile, function: str
+    ) -> str:
         entry = profile.function_entry.get(function)
         if entry is None or not entry.line:
             return ""
-        return "heat-map/index.html#fn=" + theme.html_escape(
-            urllib.parse.quote(function, safe="/-_.!~*'()")
+        return theme.html_escape(
+            self.address_of(test_name, _HEAT_VIEW.key, function)
         )
 
-    # Read a file the page is built from; one that will not open stops the
-    # run, so no manifest is written and no page carries an absolute path.
     def file_read(self, path: str) -> str:
         try:
             with open(path, encoding="utf-8", errors="replace") as handle:
@@ -433,29 +340,29 @@ class BuildReport:
             )
             sys.exit(_EXIT_INPUT_UNREADABLE)
 
-    # The scripts a framed page runs after the theme: the frame, then the
-    # menu, which activates the frame once both have loaded.
-    def framed_page_script_names(self) -> tuple[str, str]:
-        return (_ASSET_FRAME_SCRIPT_NAME, _ASSET_MENU_SCRIPT_NAME)
+    def flame_graph_link_render(self, test_name: str) -> str:
+        href = self.address_of(test_name, _FLAME_VIEW.key)
+        return (
+            f'<div><a href="{theme.html_escape(href)}">'
+            f"{theme.html_escape(_FLAME_VIEW.label)}</a></div>"
+        )
 
-    # The columns of a summary's top table. A core report and a diff rank
-    # differently but say the same thing, so both are laid out the same.
     def function_columns(self) -> list[theme.Column]:
         return [
             theme.Column("#", numeric=True),
             theme.Column("% self", numeric=True),
-            theme.Column("symbol", width=_TABLE_FUNCTION_NAME_WIDTH_CHARS),
+            theme.Column(
+                "symbol", width=_STYLE_TABLE_FUNCTION_NAME_WIDTH_CHARS
+            ),
             theme.Column(_RANKING_COUNTER_NAME, numeric=True),
             theme.Column("calls", numeric=True),
             theme.Column("callers", grow=True),
         ]
 
-    # The "symbol" cell: the function's name, linked into the heat map when
-    # it has an entry line to open there and bare text when it has not.
     def function_link_cell(
-        self, profile: callgrind.Profile, function: str
+        self, test_name: str, profile: callgrind.LineProfile, function: str
     ) -> theme.Cell:
-        href = self.entry_link(profile, function)
+        href = self.entry_link(test_name, profile, function)
         return theme.Cell(
             function,
             html=f'<a href="{href}">{theme.html_escape(function)}</a>'
@@ -463,8 +370,9 @@ class BuildReport:
             else None,
         )
 
-    # The summary's top table, ranked by self cost in the ranking counter.
-    def functions_table(self, profile: callgrind.Profile) -> str:
+    def functions_table(
+        self, test_name: str, profile: callgrind.Profile
+    ) -> str:
         total = profile.value(profile.totals(), _RANKING_COUNTER_NAME) or 1
         ranked = sorted(
             (
@@ -475,7 +383,7 @@ class BuildReport:
                 if profile.value(costs, _RANKING_COUNTER_NAME) > 0
             ),
             key=lambda t: (-t.cost, t.function),
-        )[:_SUMMARY_TOP_FUNCTION_ROWS]
+        )[:_CALLERS_TOP_FUNCTION_ROWS]
         function_calls = {
             function: sum(tally.count for tally in callers.values())
             for function, callers in profile.callers.items()
@@ -501,7 +409,9 @@ class BuildReport:
                 for caller_name, count in by_caller_sorted
             )
             who_html = ", ".join(
-                self.caller_link(profile, caller_name, count, call_count)
+                self.caller_link(
+                    test_name, profile, caller_name, count, call_count
+                )
                 for caller_name, count in by_caller_sorted
             )
             rows.append(
@@ -511,7 +421,9 @@ class BuildReport:
                         theme.num_pct(share),
                         style=theme.heat_style(theme.heat_of_share(share)),
                     ),
-                    self.function_link_cell(profile, ranked_function.function),
+                    self.function_link_cell(
+                        test_name, profile, ranked_function.function
+                    ),
                     theme.num_human(ranked_function.cost),
                     theme.Cell(
                         theme.num_human(call_count),
@@ -525,55 +437,56 @@ class BuildReport:
                     else "",
                     theme.Cell(who, html=who_html)
                     if who
-                    else theme.Cell("(no recorded caller)", cls="dim"),
+                    else theme.Cell("(no recorded caller)", cls="dimmed_"),
                 ]
             )
         return theme.table_render("report.functions", columns, rows, fill=True)
 
-    # One log file as a preformatted block, with valgrind's pid prefix gone.
+    def heading_render(self, text: str) -> str:
+        return f'<div class="page-heading-">{theme.html_escape(text)}</div>'
+
     def log_block(self, path: str) -> str:
         lines = (
             self.file_read(path)
             .rstrip()
-            .split("\n")[_SUMMARY_PERF_LOG_SKIPPED_HEAD_LINES:]
+            .split("\n")[_CALLERS_PERF_LOG_SKIPPED_HEAD_LINES:]
         )
         text = "\n".join(_PID_PREFIX.sub("", line) for line in lines)
-        return self.logbox_render(text)
+        return self.log_box_render(text)
 
-    # The collapsed "valgrind log" section, empty when no log was given.
     def log_section(self, paths: Sequence[str]) -> str:
         if not paths:
             return ""
         body = ""
         for path in paths:
             if len(paths) > 1:
-                body += f"<p>{theme.html_escape(os.path.basename(path))}</p>"
+                body += (
+                    '<div class="callers-collapsed-section-file-name-">'
+                    f"{theme.html_escape(os.path.basename(path))}</div>"
+                )
             body += self.log_block(path)
         return self.details_section("valgrind log", body)
 
-    # Captured output as one preformatted block, escaped for the page.
-    def logbox_render(self, text: str) -> str:
+    def log_box_render(self, text: str) -> str:
         return (
-            f'<div class="tbl"><pre class="logbox">{theme.html_escape(text)}'
+            '<div class="table-box-">'
+            '<pre class="callers-collapsed-section-log-box-">'
+            f"{theme.html_escape(text)}"
             "</pre></div>"
         )
 
-    # Every non-empty block as a heading plus its own LABEL=VALUE table.
     def manifest_blocks_render(
         self,
         key: str,
         blocks: Sequence[BuildReport.ManifestBlock],
     ) -> str:
-        body = ""
-        for index, block in enumerate(blocks):
-            if not block.pairs:
-                continue
-            body += (
-                f"<h2>{theme.html_escape(block.label)}</h2>"
-            ) + self.manifest_table(f"{key}.{index}", block.pairs)
-        return body
+        return self.blank_line_render().join(
+            self.heading_render(block.label)
+            + self.manifest_table(f"{key}.{index}", block.pairs)
+            for index, block in enumerate(blocks)
+            if block.pairs
+        )
 
-    # Parse --header-block LABEL=FILE arguments into blocks of rows.
     def manifest_parse_blocks(
         self, items: Sequence[str]
     ) -> list[BuildReport.ManifestBlock]:
@@ -591,7 +504,6 @@ class BuildReport:
             )
         return out
 
-    # Parse LABEL=VALUE arguments into rows.
     def manifest_parse_rows(
         self, items: Sequence[str]
     ) -> list[BuildReport.ManifestRow]:
@@ -603,7 +515,6 @@ class BuildReport:
             out.append(BuildReport.ManifestRow(label.strip(), value))
         return out
 
-    # Read LABEL=VALUE rows from a file, skipping every other line.
     def manifest_read_file(self, path: str) -> list[BuildReport.ManifestRow]:
         lines = [
             line
@@ -612,7 +523,6 @@ class BuildReport:
         ]
         return self.manifest_parse_rows(lines)
 
-    # The untitled two-column table those rows are rendered as.
     def manifest_table(
         self,
         key: str,
@@ -621,7 +531,8 @@ class BuildReport:
         if not pairs:
             return ""
         rows: list[list[theme.CellOrText]] = [
-            [theme.Cell(pair.label, cls="dim"), pair.value] for pair in pairs
+            [theme.Cell(pair.label, cls="dimmed_"), pair.value]
+            for pair in pairs
         ]
         return theme.table_render(
             key,
@@ -631,8 +542,91 @@ class BuildReport:
             column_titles=False,
         )
 
-    # The NAME=FILE arguments of one repeatable flag as a name to path map;
-    # an entry without the "=" is a broken command line, stopped here.
+    def menu_button_link_render(
+        self, name: str, href: str, new_tab: bool = False
+    ) -> str:
+        target_attribute = ' target="_blank"' if new_tab else ""
+        return (
+            f'<a class="menu-button-" id="menu-{name}-button-"'
+            f' href="{theme.html_escape(href)}"{target_attribute}></a>'
+        )
+
+    def menu_button_render(self, name: str) -> str:
+        return (
+            f'<button class="menu-button-" id="menu-{name}-button-"'
+            ' type="button"></button>'
+        )
+
+    def menu_link_render(self, link: BuildReport.MenuLink) -> str:
+        test_name = theme.html_escape(link.test_name)
+        return (
+            f'<a href="{theme.html_escape(link.href)}"'
+            f' data-test-name-="{test_name}" tabindex=-1>{test_name}</a>'
+        )
+
+    def menu_pulldowns_render(
+        self, test_entries: Sequence[BuildReport.MenuLink]
+    ) -> dict[str, str]:
+        names = [entry.test_name for entry in test_entries]
+        if _MENU_PULLDOWN_MERGED_TEST_NAME not in names:
+            sys.exit(
+                "error: the overview's pulldowns start in"
+                f" {_MENU_PULLDOWN_MERGED_TEST_NAME!r}, the merged test,"
+                f" which is not one of its tests: {' '.join(names)}"
+            )
+        width = (
+            max(len(name) for name in names)
+            + _STYLE_MENU_PULLDOWN_EXTRA_WIDTH_CHARS
+        )
+        test_links = "".join(
+            self.menu_link_render(entry) for entry in test_entries
+        )
+        return {
+            "test": self.pulldown_render("test", width, test_links),
+            "file": self.pulldown_render("file", width, ""),
+            "function": self.pulldown_render("function", width, ""),
+        }
+
+    def menu_render(
+        self,
+        test_entries: Sequence[BuildReport.MenuLink],
+        has_flame_graph: bool,
+    ) -> str:
+        root_href = theme.shared_href(
+            _OVERVIEW_PAGE_ASSETS_DEPTH, "index.html"
+        )
+        help_href = theme.shared_href(_OVERVIEW_PAGE_ASSETS_DEPTH, "README.md")
+        button_markups = {
+            "overview": self.menu_button_link_render("overview", "#"),
+            **self.menu_pulldowns_render(test_entries),
+            _HEAT_VIEW.key: self.menu_button_link_render(_HEAT_VIEW.key, "#"),
+            _CALLERS_VIEW_KEY: self.menu_button_link_render(
+                _CALLERS_VIEW_KEY, "#"
+            ),
+            _FLAME_VIEW.key: self.menu_button_link_render(
+                _FLAME_VIEW.key, "#"
+            ),
+            "dark-mode": self.menu_button_render("dark-mode"),
+            "reset": self.menu_button_render("reset"),
+            "help": self.menu_button_link_render(
+                "help", help_href, new_tab=True
+            ),
+            "scale": self.menu_button_render("scale"),
+        }
+        ordered_buttons = [
+            button_markups[name]
+            for name in _MENU_BUTTON_ORDER
+            if has_flame_graph or name != _FLAME_VIEW.key
+        ]
+        parts = [
+            '<a class="menu-logo-" id="menu-logo-"'
+            f' href="{theme.html_escape(root_href)}"></a>',
+            *ordered_buttons,
+            '<div class="menu-title-" id="menu-title-"></div>',
+        ]
+        menu_items = "".join(parts)
+        return f'<nav id="menu-" class="menu-strip-">{menu_items}</nav>'
+
     def named_paths_of(
         self, entries: Sequence[str], flag: str
     ) -> dict[str, str]:
@@ -644,14 +638,12 @@ class BuildReport:
             path_of[name] = path
         return path_of
 
-    # A collapsed section holding a captured log, with its times humanized.
     def output_section(self, title: str, path: str) -> str:
         if not path:
             return ""
         output = self.time_humanize(self.file_read(path).rstrip())
-        return self.details_section(title, self.logbox_render(output))
+        return self.details_section(title, self.log_box_render(output))
 
-    # Write the full report's overview page, from each test's perf log.
     def overview(self, args: BuildReport.OverviewArgs) -> None:
         tests = self.overview_tests(args)
         perf_log_of = self.named_paths_of(args.perf_log, "--perf-log")
@@ -659,8 +651,6 @@ class BuildReport:
         numbers: dict[str, dict[str, str]] = {}
         for test in tests:
             values: dict[str, str] = {}
-            # every test named has its perf log named too: one without is a
-            # broken run, never an empty row
             for line in self.file_read(perf_log_of[test.name]).splitlines():
                 match = re.match(r"^([A-Za-z][^:]{0,30}):\s+(.+?)\s*$", line)
                 if match:
@@ -678,70 +668,58 @@ class BuildReport:
             + [numbers[test.name].get(key, "") for key in keys]
             for test in tests
         ]
-        self.overview_page(args, tests, columns, rows)
+        self.overview_page(args, tests, columns, rows, True)
 
-    # Assemble and write an overview page around an already built table.
     def overview_page(
         self,
         args: BuildReport.OverviewArgs,
         tests: Sequence[BuildReport.TestDirectory],
         columns: Sequence[theme.Column],
         rows: Sequence[Sequence[theme.CellOrText]],
+        has_flame_graph: bool,
     ) -> None:
-        links = [BuildReport.StripLink("", "overview", "#", "overview")]
         test_entries = [
-            BuildReport.StripLink(
-                test.name,
-                test.name,
-                f"{test.name}/index.html",
-                test.name,
-                frame=True,
+            BuildReport.MenuLink(
+                test.name, self.address_of(test.name, _HEAT_VIEW.key)
             )
             for test in tests
         ]
-        body = self.strip_render(
-            "overview",
-            links,
-            depth=_OVERVIEW_PAGE_ASSETS_DEPTH,
-            pulldowns=self.strip_pulldowns_render(test_entries),
-        )
+        body = self.menu_render(test_entries, has_flame_graph)
+        out_dir = os.path.dirname(os.path.abspath(args.output))
         pairs = self.manifest_parse_rows(args.header) + (
             self.manifest_read_file(args.header_file)
             if args.header_file
             else []
         )
-        body = (
-            body
-            + self.page_main_open()
-            + self.manifest_table("overview.header", pairs)
+        manifest_blocks = [BuildReport.ManifestBlock("manifest", pairs)]
+        manifest_blocks += self.manifest_parse_blocks(args.header_block)
+        raw_data_markup = self.raw_data_render(args.raw_data, out_dir)
+        tests_markup = theme.table_render("overview.tests", columns, rows)
+        manifest_markup = self.manifest_blocks_render(
+            "overview.block", manifest_blocks
         )
-        body += self.manifest_blocks_render(
-            "overview.block", self.manifest_parse_blocks(args.header_block)
+        page_content = (
+            _OVERVIEW_PAGE.replace("__RAW_DATA__", raw_data_markup)
+            .replace("__TESTS__", tests_markup)
+            .replace("__MANIFEST__", manifest_markup)
         )
-        body += "<h2>tests</h2>" + theme.table_render(
-            "overview.tests", columns, rows
-        )
-        body += self.page_main_close()
-        # each test's names script goes first: menu.js lists its files and
-        # functions pulldowns from them
-        names_scripts = tuple(
-            callgrind_to_heatmap.CallgrindToHeatmap.pulldown_names_script_name(
-                test.name
-            )
-            for test in tests
-        )
+        body += self.page_main_open() + page_content + self.page_main_close()
         self.page_write(
             args.output,
             theme.page_document(
                 "overview",
                 body,
-                extra_js=names_scripts + self.framed_page_script_names(),
-                body_class="frame",
+                extra_js=(
+                    _ASSET_PULLDOWN_TEXT_SCRIPT_NAME,
+                    _ASSET_FRAME_SCRIPT_NAME,
+                    _ASSET_MENU_SCRIPT_NAME,
+                ),
+                body_class="frame_",
                 depth=_OVERVIEW_PAGE_ASSETS_DEPTH,
+                extra_css=(_ASSET_MENU_STYLESHEET_NAME,),
             ),
         )
 
-    # The named tests and their directories, sorted for a stable page.
     def overview_tests(
         self, args: BuildReport.OverviewArgs
     ) -> list[BuildReport.TestDirectory]:
@@ -753,20 +731,15 @@ class BuildReport:
         tests.sort()
         return tests
 
-    # What closes the content of a framed page: the frame every view loads
-    # into follows it, empty until a strip link fills it.
     def page_main_close(self) -> str:
         return (
-            '</div></main><iframe id="view" hidden'
+            '</div></main><iframe id="overview-view-frame-" hidden'
             ' title="report page"></iframe>'
         )
 
-    # What opens the content of a framed page. Both the overview and a test
-    # summary are a page inside the one frame host, so both start here.
     def page_main_open(self) -> str:
-        return '<main id="home"><div class="page">'
+        return '<main id="overview-home-"><div class="page_">'
 
-    # Write a page, making its directory, and report its size.
     def page_write(self, path: str, page: str) -> None:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
@@ -776,213 +749,102 @@ class BuildReport:
             file=sys.stderr,
         )
 
-    # One strip pulldown: its label, the caret pointing at its box, the box
-    # reading closed_text, and the list of entries dropping below the box.
-    def pulldown_render(
-        self, key: str, width: int, closed_text: str, entries: str
-    ) -> str:
+    def pulldown_render(self, key: str, width: int, entries: str) -> str:
         return (
-            f'<span class="pulldown" id="{key}-pulldown">'
-            '<span class="pulldown-label"></span>'
-            '<button class="pulldown-caret" type="button" tabindex=-1>'
-            "</button>"
-            '<input class="pulldown-search" type="text"'
+            f'<span class="menu-pulldown-" id="menu-{key}-pulldown-">'
+            '<button class="menu-button- menu-pulldown-button-"'
+            f' id="menu-{key}-button-" type="button"></button>'
+            '<input class="menu-pulldown-search-box-" type="text"'
             f' style="width:{width}ch"'
-            f' value="{theme.html_escape(closed_text)}"'
-            ' readonly autocomplete="off" spellcheck="false">'
-            f'<span class="pulldown-list" hidden>{entries}'
-            '<span class="pulldown-no-match" hidden></span></span></span>'
+            ' hidden autocomplete="off" spellcheck="false">'
+            f'<span class="menu-pulldown-entry-list-" hidden>{entries}'
+            '<span class="menu-pulldown-no-match-note-" hidden></span>'
+            "</span></span>"
         )
 
-    # The collapsed "raw data" section linking this test's archives.
-    def rawdata_section(self, paths: Sequence[str], out_dir: str) -> str:
-        if not paths:
+    def raw_data_render(self, path: str, out_dir: str) -> str:
+        if not path:
             return ""
-        items = "".join(
-            "<li><a href="
-            f'"{theme.html_escape(os.path.relpath(path, out_dir))}"'
-            ' target="_blank">'
-            f"{theme.html_escape(os.path.basename(path))}</a></li>"
-            for path in paths
+        archive_name = os.path.basename(path)
+        line_label = "raw data: "
+        archive_link = (
+            f'<a href="{theme.html_escape(os.path.relpath(path, out_dir))}"'
+            f' target="_blank">{theme.html_escape(archive_name)}</a>'
         )
-        return self.details_section(
-            "raw data", f'<ul class="rawdata">{items}</ul>'
+        raw_data_cell = theme.Cell(
+            line_label + archive_name, html=line_label + archive_link
+        )
+        return self.blank_line_render() + theme.table_render(
+            "overview.raw_data",
+            [theme.Column("raw data")],
+            [[raw_data_cell]],
+            column_titles=False,
         )
 
-    # Assemble and write one test's summary page around its top table.
     def report_page(
         self,
         args: BuildReport.TestArgs,
-        views: Sequence[BuildReport.View],
         heading: str,
         table: str,
     ) -> None:
-        links = [BuildReport.StripLink("", "summary", "#", args.test)] + [
-            BuildReport.StripLink(
-                view.key, view.label, view.path, f"{args.test} / {view.label}"
-            )
-            for view in views
-        ]
-        body = self.strip_render(
-            args.test, links, depth=_SUMMARY_PAGE_ASSETS_DEPTH
-        )
-        out_dir = os.path.dirname(os.path.abspath(args.output))
-        body += self.page_main_open() + self.manifest_table(
+        body = self.manifest_table(
             "report.header", self.manifest_parse_rows(args.header)
         )
+        if args.trace_log:
+            body += self.flame_graph_link_render(args.test)
         body += self.output_section("perf log", args.perf_log)
         body += self.output_section("trace log", args.trace_log)
         if not args.no_log:
             body += self.log_section(args.log)
-        body += self.rawdata_section(args.raw_data, out_dir)
-        body += f"<h2>{heading}</h2>" + table
-        body += self.page_main_close()
+        body += self.heading_render(heading) + table
         self.page_write(
             args.output,
             theme.page_document(
                 args.test,
-                body,
-                extra_js=self.framed_page_script_names(),
-                body_class="frame",
-                depth=_SUMMARY_PAGE_ASSETS_DEPTH,
+                self.view_main_render(body),
+                extra_js=(_ASSET_CALLERS_SCRIPT_NAME,),
+                body_class="frame_",
+                depth=_CALLERS_PAGE_ASSETS_DEPTH,
             ),
         )
 
-    # One link of a strip. A tests pulldown entry is the same link, kept out
-    # of the tab order: the pulldown's search box moves between its entries.
-    def strip_link_render(
-        self, link: BuildReport.StripLink, in_tab_order: bool = True
-    ) -> str:
-        return (
-            f'<a href="{theme.html_escape(link.href)}"'
-            f' data-view="{theme.html_escape(link.key)}"'
-            f' data-title="{theme.html_escape(link.title)}"'
-            f"{' data-frame=1' if link.frame else ''}"
-            f"{'' if in_tab_order else ' tabindex=-1'}>"
-            f"{theme.html_escape(link.label)}</a>"
-        )
-
-    # The overview's pulldowns: its tests, each linking that test's summary,
-    # then the files and functions menu.js lists for the active test.
-    def strip_pulldowns_render(
-        self, test_entries: Sequence[BuildReport.StripLink]
-    ) -> list[str]:
-        names = [entry.label for entry in test_entries]
-        if _STRIP_PULLDOWN_MERGED_TEST_NAME not in names:
-            sys.exit(
-                "error: the overview's pulldowns start in"
-                f" {_STRIP_PULLDOWN_MERGED_TEST_NAME!r}, the merged test,"
-                f" which is not one of its tests: {' '.join(names)}"
-            )
-        width = (
-            max(len(name) for name in names)
-            + _STRIP_PULLDOWN_EXTRA_WIDTH_CHARS
-        )
-        test_links = "".join(
-            self.strip_link_render(entry, in_tab_order=False)
-            for entry in test_entries
-        )
-        return [
-            self.pulldown_render(
-                "tests", width, _STRIP_PULLDOWN_MERGED_TEST_NAME, test_links
-            ),
-            self.pulldown_render("files", width, "", ""),
-            self.pulldown_render("functions", width, "", ""),
-        ]
-
-    # The top strip: the title cell, which as the logo leads to the report
-    # root, the view links, the pulldowns, and the utility links on the right.
-    def strip_render(
-        self,
-        title: str,
-        links: Sequence[BuildReport.StripLink],
-        depth: int,
-        pulldowns: Sequence[str] = (),
-    ) -> str:
-        separator = '<span class="sep">|</span>'
-        root_href = theme.shared_href(depth, "index.html")
-        help_href = theme.shared_href(depth, "README.md")
-        parts = [
-            '<b class="title" id="title"'
-            f' data-root-href="{theme.html_escape(root_href)}">'
-            f"{theme.html_escape(title)}</b>"
-        ]
-        for index, link in enumerate(links):
-            if index:
-                parts.append(separator)
-            parts.append(self.strip_link_render(link))
-        for pulldown in pulldowns:
-            parts.append(separator)
-            parts.append(pulldown)
-        parts.append('<span class="sp"></span>')
-        parts.append(
-            '<label class="scale" id="scale-label" for="scale-slider">'
-            '<span id="scale-text"></span>'
-            '<input type="range" id="scale-slider" min="0" max="1"'
-            f' step="{_STRIP_SCALE_SLIDER_STEP}">'
-            "</label>"
-        )
-        parts.append('<span class="util" id="util">')
-        parts.append(separator)
-        parts.append('<a href="#" id="layout-reset">reset</a>')
-        parts.append(separator)
-        parts.append(
-            f'<a href="{theme.html_escape(help_href)}"'
-            ' target="_blank">help</a>'
-        )
-        parts.append(separator)
-        parts.append(
-            f'<a href="{_STRIP_CURL_PERF_SITE_HREF}" target="_blank"'
-            ' rel="noopener">'
-            "curl.se/perf</a>"
-        )
-        parts.append("</span>")
-        return f'<nav id="bar" class="strip">{"".join(parts)}</nav>'
-
-    # Write one test's summary page.
     def test(self, args: BuildReport.TestArgs) -> None:
         profile = callgrind.profile_load(args.callgrind_file)
-        self.counters_check(profile.counters, " ".join(args.callgrind_file))
-        views = [_FLAME_VIEW, _HEAT_VIEW] if args.trace_log else [_HEAT_VIEW]
+        callgrind.ranking_counter_check(
+            profile.counters, " ".join(args.callgrind_file)
+        )
         self.report_page(
             args,
-            views,
-            f"top {_SUMMARY_TOP_FUNCTION_ROWS} functions by self",
-            self.functions_table(profile),
+            f"top {_CALLERS_TOP_FUNCTION_ROWS} functions by self",
+            self.functions_table(args.test, profile),
         )
 
-    # An overview row's first cell: the test's name, linking the summary
-    # page in its own directory beside the overview.
     def test_link_cell(self, name: str) -> theme.Cell:
-        escaped = theme.html_escape(name)
+        href = theme.html_escape(self.address_of(name, _HEAT_VIEW.key))
         return theme.Cell(
-            name, html=f'<a href="{escaped}/index.html">{escaped}</a>'
+            name, html=f'<a href="{href}">{theme.html_escape(name)}</a>'
         )
 
-    # Rewrite every "Something: 1.23 ms" line in the theme's time notation.
     def time_humanize(self, text: str) -> str:
         return _TIME_LINE.sub(self.time_line_rewrite, text)
 
-    # One matched "Something: 1.23 ms" line, rewritten in the theme's time
-    # notation. _TIME_LINE matches exactly the suffixes the setting scales.
     def time_line_rewrite(self, match: re.Match[str]) -> str:
-        scale = _SUMMARY_TIME_SUFFIX_SECONDS[match.group(3).lower()]
+        scale = _CALLERS_TIME_SUFFIX_SECONDS[match.group(3).lower()]
         return match.group(1) + theme.num_time(float(match.group(2)) * scale)
 
-    # The same rewrite for one already split label and value.
     def value_humanize(self, label: str, value: str) -> str:
         line = self.time_humanize(f"{label}: {value}")
         return line.split(": ", 1)[1] if line != f"{label}: {value}" else value
 
-
-# The flame graph view, linked only where a trace was actually recorded.
-_FLAME_VIEW = BuildReport.View(*_FLAME_GRAPH_VIEW_ENTRY)
-
-# The heat map view, which every test has.
-_HEAT_VIEW = BuildReport.View(*_HEAT_MAP_VIEW_ENTRY)
+    def view_main_render(self, view_content: str) -> str:
+        return f'<main><div class="page_">{view_content}</div></main>'
 
 
-# main - The test, assets and overview subcommands.
+_FLAME_VIEW = BuildReport.View(*_FLAME_GRAPH_VIEW_ENTRY[:2])
+
+_HEAT_VIEW = BuildReport.View(*_HEAT_MAP_VIEW_ENTRY[:2])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="cmd", required=True)
@@ -997,13 +859,6 @@ def main() -> None:
     )
     test_parser.add_argument("-o", "--output", required=True)
     test_parser.add_argument("--test", required=True, help="the page's title")
-    test_parser.add_argument(
-        "--raw-data",
-        action="append",
-        default=[],
-        metavar="FILE",
-        help="raw data file to link (repeatable). listed relative to -o",
-    )
     test_parser.add_argument(
         "--log",
         action="append",
@@ -1056,12 +911,6 @@ def main() -> None:
         required=True,
         help="the directory to write the shared stylesheets and scripts to",
     )
-    assets_parser.add_argument(
-        "manifest_line",
-        nargs="+",
-        help="line 1 of MANIFEST.txt, then its LABEL=VALUE rows, checksum"
-        " left out",
-    )
 
     overview_parser = subparsers.add_parser(
         "overview", help="the page over several tests"
@@ -1093,6 +942,13 @@ def main() -> None:
         " to read its row from. repeatable, one per --test",
     )
     overview_parser.add_argument(
+        "--raw-data",
+        default="",
+        metavar="FILE",
+        help="without --diff, the timer artifacts archive, linked as the"
+        " overview's raw data relative to -o",
+    )
+    overview_parser.add_argument(
         "--header", action="append", metavar="LABEL=VALUE", default=[]
     )
     overview_parser.add_argument(
@@ -1122,13 +978,12 @@ def main() -> None:
     namespace = parser.parse_args()
     report = BuildReport()
     if namespace.cmd == "assets":
-        theme.theme_assets_write(namespace.output, namespace.manifest_line)
+        theme.theme_assets_write(namespace.output)
     elif namespace.cmd == "test":
         test_args = BuildReport.TestArgs(
             callgrind_file=namespace.callgrind_file,
             output=namespace.output,
             test=namespace.test,
-            raw_data=namespace.raw_data,
             log=namespace.log,
             perf_log=namespace.perf_log,
             trace_log=namespace.trace_log,
@@ -1146,6 +1001,7 @@ def main() -> None:
             header_block=namespace.header_block,
             diff_profile=namespace.diff_profile,
             perf_log=namespace.perf_log,
+            raw_data=namespace.raw_data,
         )
         (report.diff_overview if namespace.diff else report.overview)(
             overview_args
