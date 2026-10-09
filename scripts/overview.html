@@ -1,7 +1,24 @@
-<div class="page-heading-">overview</div>
-__RAW_DATA__
-<br />
-__MANIFEST__
-<br />
-<div class="page-heading-">tests</div>
-__TESTS__
+<!-- SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+     SPDX-License-Identifier: MIT
+     This file is licensed under the terms of the LICENSE-MIT.md file. -->
+
+<div id="overview-page-scroll-box-">
+  <div id="overview-page-">
+    __MENU__
+    <div id="overview-home-">
+      <main class="page-text-scroll-box-">
+        <div class="page-">
+          __OVERVIEW_HEADING__ __RAW_DATA__
+          <br />
+          __MANIFEST__
+          <br />
+          __TESTS_HEADING__ __TESTS__ __PERF_LOG__ __TRACE_LOG__
+          __VALGRIND_LOG__
+        </div>
+      </main>
+      <div class="page-text-scrollbar- vertical-" aria-hidden="true"></div>
+    </div>
+    <iframe id="overview-view-frame-" hidden></iframe>
+  </div>
+</div>
+<div class="page-text-scrollbar- horizontal-" aria-hidden="true"></div>

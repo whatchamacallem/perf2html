@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE-MIT.md file.
+#
 # This comment intentionally blank. No documentation goes here.
 
 usage_show() {
@@ -31,14 +34,14 @@ set -euo pipefail
 
 TIMESTAMP="$(date +%s)"
 INVOKED_FROM="$PWD"
-_SCRIPT="$(readlink -f "$0")"
+_SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 PERF2HTML_DIR_="$(dirname "$_SCRIPT")"
 cd "$PERF2HTML_DIR_"
 
 . ./scripts/settings.sh
 . ./scripts/utility.sh
 
-_REPO="$(dirname "$PERF2HTML_DIR_")"
+_REPO="$(dirname "$(dirname "$PERF2HTML_DIR_")")"
 
 step_run() {
   local _number="$1" _name="$2"
@@ -75,7 +78,7 @@ header_table_print() {
 }
 
 args_parse() {
-  shared_options_parse "$@"
+  options_parse "$@"
   local _remaining_argument
   for _remaining_argument in "${REMAINING_ARGUMENTS[@]}"; do
     case "$_remaining_argument" in
@@ -87,7 +90,9 @@ args_parse() {
   done
   _CMAKE_FLAGS=("${REMAINING_ARGUMENTS[@]}")
   [ "${#_CMAKE_FLAGS[@]}" -gt 0 ] || _CMAKE_FLAGS=("${DEFAULT_FLAGS[@]}")
-  artifacts_dir_resolve "$TARGET_DIR"
+  if [ "$KEEP_ARTIFACTS" = 1 ] || [ -n "$ARTIFACTS_DIR" ]; then
+    artifacts_dir_resolve "$TARGET_DIR"
+  fi
   _BASE_DIR="$(report_path_of "$REPORT_BASELINE_DIR_NAME")"
   _MOD_DIR="$(report_path_of "$REPORT_MODIFIED_DIR_NAME")"
   _DIFF_DIR="$(report_path_of "$REPORT_DIFF_DIR_NAME")"
@@ -100,10 +105,12 @@ main() {
   header_table_print
 
   local _dir _cache
-  path_overlap_check "$ARTIFACTS_DIR" "artifacts dir" \
-    "$_BASE_DIR" "baseline report" \
-    "$_MOD_DIR" "modified report" \
-    "$_DIFF_DIR" "diff report"
+  if [ -n "$ARTIFACTS_DIR" ]; then
+    path_overlap_check "$ARTIFACTS_DIR" "artifacts dir" \
+      "$_BASE_DIR" "baseline report" \
+      "$_MOD_DIR" "modified report" \
+      "$_DIFF_DIR" "diff report"
+  fi
   if [ "$REGENERATE" = 1 ]; then
     for _dir in "$_BASE_DIR" "$_MOD_DIR" "$_DIFF_DIR"; do
       _cache="$ARTIFACTS_DIR/$(basename "$_dir")"
@@ -111,13 +118,15 @@ main() {
         "error: --regenerate: no recordings at $_cache"
     done
   fi
-  local _child_args=("--target-dir=$TARGET_DIR" "--artifacts=$ARTIFACTS_DIR")
-  if [ "$REGENERATE" = 1 ]; then
-    _child_args+=(--regenerate)
-  else
-    _child_args+=(--keep-artifacts)
-  fi
+  local _child_args=("--target-dir=$TARGET_DIR")
   [ "$WRITE_REPORT_ARCHIVE" = 0 ] || _child_args+=(--txz)
+  local _artifact_flags=()
+  [ -z "$ARTIFACTS_DIR" ] || _artifact_flags+=("--artifacts=$ARTIFACTS_DIR")
+  if [ "$REGENERATE" = 1 ]; then
+    _artifact_flags+=(--regenerate)
+  elif [ "$KEEP_ARTIFACTS" = 1 ]; then
+    _artifact_flags+=(--keep-artifacts)
+  fi
   local _verbose_args=()
   mapfile -t _verbose_args < <(verbose_flags_of)
   log_verbose "[$(elapsed_format)s] $_SCRIPT $TIMESTAMP: modified build" \
@@ -130,20 +139,17 @@ main() {
 
   _STEP_NAMES=()
   _STEP_SECONDS=()
-  step_run 1 baseline ./perf2html.sh "${_verbose_args[@]}" "${_child_args[@]}"
+  step_run 1 baseline ./perf2html.sh "${_verbose_args[@]}" \
+    "${_child_args[@]}" "${_artifact_flags[@]}"
   step_run 2 modified ./perf2html.sh "${_verbose_args[@]}" \
-    "${_child_args[@]}" "${_CMAKE_FLAGS[@]}"
+    "${_child_args[@]}" "${_artifact_flags[@]}" "${_CMAKE_FLAGS[@]}"
   step_run 3 diff ./perf2html_diff.sh "${_verbose_args[@]}" \
-    "${_child_args[@]}"
+    "${_child_args[@]}" "${_artifact_flags[@]}"
 
   heading_print "$_SCRIPT, after the three steps"
   table_print "${#_STEP_NAMES[@]}" "${_STEP_NAMES[@]}" "${_STEP_SECONDS[@]}"
 
-  if [ "$KEEP_ARTIFACTS" = 0 ]; then
-    log_verbose "[$(elapsed_format)s] removing $ARTIFACTS_DIR/"
-    rm -rf "$ARTIFACTS_DIR" \
-      || error_exit 1 "error: could not remove $ARTIFACTS_DIR/"
-  else
+  if [ "$KEEP_ARTIFACTS" = 1 ]; then
     log_verbose "[$(elapsed_format)s] keeping $ARTIFACTS_DIR/"
   fi
   log_verbose "[$(elapsed_format)s] $_DIFF_DIR/index.html"

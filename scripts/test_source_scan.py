@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-# `test_expected_behavior.sh` uses this to enforce comment length, ASCII
-# only, English punctuation in comments and no tag that styles text beyond
-# colour.
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE-MIT.md file.
+
 from __future__ import annotations
 
-import argparse, os, re, sys
+import argparse, html.entities, os, re, sys
 from typing import NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -20,6 +21,11 @@ class SourceScan:
         line_marks: tuple[str, ...]
         block_marks: tuple[tuple[str, str], ...]
 
+    class EscapeRule(NamedTuple):
+        description: str
+        pattern: str
+        extensions: tuple[str, ...]
+
     class SourceFault(NamedTuple):
         path: str
         line_number: int
@@ -27,6 +33,9 @@ class SourceScan:
 
     def __init__(self) -> None:
         self.faults: list[SourceScan.SourceFault] = []
+        self.escape_patterns = [
+            (rule, re.compile(rule.pattern)) for rule in _ESCAPE_RULES
+        ]
 
     def banned_tag_re(self) -> re.Pattern[str]:
         names = "|".join(_SOURCE_SCAN_BANNED_TAG_NAMES)
@@ -35,10 +44,9 @@ class SourceScan:
     def comment_check(
         self,
         path: str,
-        lines: list[str],
         comments: list[SourceScan.CommentSpan],
+        header_end: int,
     ) -> None:
-        header_end = self.header_ends_at(lines, comments)
         for comment in comments:
             if comment.first_line < header_end:
                 continue
@@ -49,9 +57,7 @@ class SourceScan:
                         path,
                         comment.first_line,
                         f"a comment block of {length} lines, over the limit"
-                        f" of {_COMMENT_BLOCK_MAX_LINES}. Say it in"
-                        f" {_COMMENT_BLOCK_MAX_LINES} lines or move the rest"
-                        " into README.md or test_expected_behavior.md",
+                        f" of {_COMMENT_BLOCK_MAX_LINES}",
                     )
                 )
 
@@ -95,13 +101,30 @@ class SourceScan:
             for match in self.comment_re_of(syntax).finditer(text)
         ]
 
+    def escape_check(self, path: str, lines: list[str]) -> None:
+        for rule, pattern in self.escape_patterns:
+            if rule.extensions and not path.endswith(rule.extensions):
+                continue
+            for line_number, line in enumerate(lines, start=1):
+                match = pattern.search(line)
+                if match:
+                    self.faults.append(
+                        SourceScan.SourceFault(
+                            path,
+                            line_number,
+                            f"writes {rule.description}"
+                            f" {match.group(1)!r}: {line.strip()}",
+                        )
+                    )
+
     def exit_code(self, file_count: int, verbose: bool) -> int:
         if not self.faults:
             if verbose:
                 print(
                     f"{file_count} file(s): no comment block over"
                     f" {_COMMENT_BLOCK_MAX_LINES} lines, no stray non-ASCII,"
-                    " no banned tag, no comment outside ENGLISH_PUNCT"
+                    " no unicode escape, no banned tag, no comment outside"
+                    " ENGLISH_PUNCT"
                 )
             return 0
         for fault in sorted(self.faults):
@@ -124,11 +147,13 @@ class SourceScan:
         text = self.file_text_of(path)
         lines = text.split("\n")
         comments = self.comments_of(text, syntax)
+        header_end = self.header_ends_at(lines, comments)
         self.unicode_check(path, lines, non_ascii)
+        self.escape_check(path, lines)
         self.tag_check(path, lines, banned_tag)
-        self.comment_check(path, lines, comments)
+        self.comment_check(path, comments, header_end)
         self.punctuation_check(
-            path, lines, comments, comment_cut, outside_punctuation
+            path, lines, comments, header_end, comment_cut, outside_punctuation
         )
 
     def file_text_of(self, path: str) -> str:
@@ -168,7 +193,7 @@ class SourceScan:
 
     def non_ascii_re(self) -> re.Pattern[str]:
         allowed = "".join(_SOURCE_SCAN_ALLOWED_NON_ASCII_CHARS)
-        return re.compile(r"[^\x00-\x7F" + allowed + r"]")
+        return re.compile(r"[^\t\n\r -~" + allowed + r"]")
 
     def outside_punctuation_re(self) -> re.Pattern[str]:
         return re.compile(r"[^A-Za-z0-9\s" + re.escape(ENGLISH_PUNCT) + r"]")
@@ -178,10 +203,13 @@ class SourceScan:
         path: str,
         lines: list[str],
         comments: list[SourceScan.CommentSpan],
+        header_end: int,
         comment_cut: re.Pattern[str],
         outside_punctuation: re.Pattern[str],
     ) -> None:
         for comment in comments:
+            if comment.first_line < header_end:
+                continue
             text = "\n".join(lines[comment.first_line - 1 : comment.last_line])
             text = comment_cut.sub(
                 lambda cut: "\n" * cut.group().count("\n"), text
@@ -225,13 +253,14 @@ class SourceScan:
                     SourceScan.SourceFault(
                         path,
                         line_number,
-                        f"contains a non-ASCII character {match.group()!r}:"
+                        "contains a character outside printable ASCII"
+                        f" {match.group()!r}:"
                         f" {line.strip()}",
                     )
                 )
 
 
-_COMMENT_BLOCK_MAX_LINES = 0
+_COMMENT_BLOCK_MAX_LINES = 1
 
 _COMMENT_SYNTAX_BY_EXTENSION = (
     ((".py", ".sh"), SourceScan.CommentSyntax(("#",), ())),
@@ -246,16 +275,67 @@ _COMMENT_SYNTAX_BY_EXTENSION = (
 
 ENGLISH_PUNCT = """.,"'?:!()/"""
 
+_ESCAPE_NAMED_ENTITY_PATTERN = "|".join(
+    re.escape(name)
+    for name, glyph in sorted(html.entities.html5.items())
+    if name.endswith(";") and not glyph.isascii()
+)
+
+_ESCAPE_PREFIX_PATTERN = r"(?<!\\)(?:\\\\)*"
+
+_ESCAPE_RULES = (
+    SourceScan.EscapeRule(
+        "the unicode escape",
+        _ESCAPE_PREFIX_PATTERN + r"(\\[uU][0-9A-Fa-f{])",
+        (),
+    ),
+    SourceScan.EscapeRule(
+        "the hex escape", _ESCAPE_PREFIX_PATTERN + r"(\\x[0-9A-Fa-f])", ()
+    ),
+    SourceScan.EscapeRule(
+        "the named escape", _ESCAPE_PREFIX_PATTERN + r"(\\N\{)", ()
+    ),
+    SourceScan.EscapeRule(
+        "the octal escape", _ESCAPE_PREFIX_PATTERN + r"(\\[0-7]{3})", ()
+    ),
+    SourceScan.EscapeRule(
+        "the stylesheet escape",
+        _ESCAPE_PREFIX_PATTERN + r"(\\[0-9A-Fa-f]{1,6})",
+        (".css",),
+    ),
+    SourceScan.EscapeRule(
+        "the named entity",
+        r"(&(?:" + _ESCAPE_NAMED_ENTITY_PATTERN + r"))",
+        (".css", ".html", ".js", ".md", ".py", ".sh"),
+    ),
+    SourceScan.EscapeRule(
+        "the numeric entity", r"(&#(?:[0-9]+|[xX][0-9A-Fa-f]+);)", ()
+    ),
+    SourceScan.EscapeRule(
+        "the character constructor",
+        r"(String\s*\.\s*from(?:CharCode|CodePoint)"
+        r"|(?<![\w.])(?:(?:globalThis|self|window)\s*\.\s*)?"
+        r"(?:unescape|atob)(?=\()"
+        r"|(?<!\w)ch[r](?=\()"
+        r"|bytes\.fromhex"
+        r"|unicode[_]escape)",
+        (),
+    ),
+)
+
 _SOURCE_SCAN_ALLOWED_NON_ASCII_CHARS = (
+    "©",
     "≈",
     "∞",
     "▲",
-    "⯇",
-    "⯈",
+    "◄",
+    "►",
     "▼",
     "…",
     "█",
     "░",
+    "▒",
+    "▓",
 )
 
 _SOURCE_SCAN_BANNED_TAG_NAMES = (

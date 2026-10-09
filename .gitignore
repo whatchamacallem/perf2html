@@ -1,7 +1,5 @@
-build/
 __pycache__/
-tmp/
-test_expected_behavior.md
+build/
 perf2html_baseline_report/
 perf2html_baseline_report.txz
 perf2html_diff_report/
@@ -10,3 +8,8 @@ perf2html_modified_report/
 perf2html_modified_report.txz
 perf2html_temporary_artifacts/
 screenshots/
+screenshots-diff/
+screenshots-gold/
+tmp/
+test_index.html
+test_verbose.md

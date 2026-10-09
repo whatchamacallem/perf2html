@@ -1,46 +1,240 @@
-:root[data-dark-mode-="disabled"] button,
-:root[data-dark-mode-="disabled"] input,
-:root[data-dark-mode-="disabled"] select,
-:root[data-dark-mode-="disabled"] .menu-button- {
-  border: var(--page-dark-mode-disabled-border-width-) solid
-    var(--page-dark-mode-disabled-fg-dim-);
+/* SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+ * SPDX-License-Identifier: MIT
+ * This file is licensed under the terms of the LICENSE-MIT.md file. */
+
+.overview-collapsed-section-test-name- {
+  color: var(--light-mode-page-fg-);
+}
+pre.overview-collapsed-section-log-box- {
+  background: var(--light-mode-page-bg-);
+}
+pre.overview-collapsed-section-log-box-:focus-visible {
+  background: var(--light-mode-menu-focus-bg-);
+  color: var(--light-mode-menu-focus-fg-);
+}
+a {
+  color: var(--light-mode-page-fg-);
+}
+a:focus-visible {
+  background: var(--light-mode-menu-focus-bg-);
+  color: var(--light-mode-menu-focus-fg-);
+}
+table.columns- th {
+  color: var(--light-mode-page-fg-);
+  background: var(--light-mode-page-bg-);
+}
+table.columns- > tbody > tr:focus-visible > td,
+table.columns- > tbody > tr:focus-visible .menu-button- {
+  background: var(--light-mode-menu-focus-bg-) !important;
+  color: var(--light-mode-menu-focus-fg-) !important;
 }
 
-:root[data-dark-mode-="disabled"] .columns_:not(.heat-map-source-table-) {
+.menu-button- a {
+  color: inherit;
+}
+.menu-status-bar- a:not(:focus-visible) {
+  color: inherit;
+}
+
+#heat-map-minimap- {
+  background: var(--light-mode-page-bg-);
+}
+.heat-map-source-information-box- {
+  background: var(--light-mode-page-bg-);
+}
+.heat-map-source-information-box-action-bar-separator- {
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-source-information-box-function-name- {
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-source-information-box-heading- {
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-source-information-box-note- {
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-source-information-box- .table-box- {
+  background: var(--light-mode-page-bg-);
+}
+table.heat-map-source-table- > thead > tr > th {
+  background: var(--light-mode-page-bg-);
+  color: var(--light-mode-page-fg-);
+}
+td.heat-map-source-table-self-cell-,
+td.heat-map-source-table-calls-cell-,
+td.heat-map-source-table-secondary-counter-cell- {
+  color: var(--light-mode-page-fg-);
+}
+table.heat-map-source-table- td.heat-map-source-table-line-number-cell- {
+  color: var(--light-mode-page-fg-);
+}
+tr.has-callee- td.heat-map-source-table-line-number-cell-::before {
+  color: var(--light-mode-page-fg-);
+}
+table.heat-map-source-table- > tbody > tr:focus-visible > td {
+  background: var(--light-mode-menu-focus-bg-) !important;
+  color: var(--light-mode-menu-focus-fg-) !important;
+}
+.heat-map-source-ticker-tape- {
+  background: var(--light-mode-page-bg-);
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-source-ticker-tape-entry-:focus-visible {
+  background: var(--light-mode-menu-focus-bg-) !important;
+  color: var(--light-mode-menu-focus-fg-) !important;
+}
+.heat-map-source-ticker-tape- .heat-map-source-ticker-tape-label- {
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-source-unavailable-note- {
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-tree-node-.selected- {
+  background: var(--light-mode-page-bg-);
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-tree-node-:focus-visible {
+  background: var(--light-mode-menu-focus-bg-) !important;
+  color: var(--light-mode-menu-focus-fg-) !important;
+}
+.heat-map-tree-node- .heat-map-tree-node-caret- {
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-tree-node-.cold- .heat-map-tree-node-name- {
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-tree-node-.more- .heat-map-tree-node-name- {
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-tree-node- .heat-map-tree-node-share-percent- {
+  color: var(--light-mode-page-fg-);
+}
+.heat-map-tree-node-.heat- .heat-map-tree-node-share-percent-,
+.heat-map-tree-node-.heat- .heat-map-tree-node-caret- {
+  color: inherit;
+}
+
+body {
+  background: var(--light-mode-page-bg-);
+  color: var(--light-mode-page-fg-);
+}
+#overview-view-frame- {
+  background: var(--light-mode-page-bg-);
+}
+.page-emphasis- {
+  background: var(--light-mode-page-emphasis-bg-);
+  color: var(--light-mode-page-emphasis-fg-);
+}
+
+.menu-button-:not([data-entry-name-="str_report_name"], .columns- td > *) {
+  border: var(--page-line-width-) solid;
+  border-color: var(--light-mode-menu-normal-outline-);
+}
+td.page-table-link-cell- > .menu-button- {
+  outline: var(--page-line-width-) solid;
+  outline-color: var(--light-mode-menu-normal-outline-);
+}
+
+.columns-:not(.heat-map-source-table-) {
   border-collapse: collapse;
+  border: var(--page-line-width-) solid var(--light-mode-page-fg-);
 }
-:root[data-dark-mode-="disabled"] .columns_:not(.heat-map-source-table-),
-:root[data-dark-mode-="disabled"] .columns_:not(.heat-map-source-table-) th,
-:root[data-dark-mode-="disabled"] .columns_:not(.heat-map-source-table-) td {
-  border: var(--page-dark-mode-disabled-border-width-) solid
-    var(--page-dark-mode-disabled-fg-dim-);
+.columns-:not(.heat-map-source-table-) th,
+.columns-:not(.heat-map-source-table-) td {
+  border-inline: var(--page-line-width-) solid var(--light-mode-page-fg-);
 }
-:root[data-dark-mode-="disabled"] .columns_:not(.heat-map-source-table-) th,
-:root[data-dark-mode-="disabled"] .columns_:not(.heat-map-source-table-) td {
+.columns-:not(.heat-map-source-table-) th,
+.columns-:not(.heat-map-source-table-) td,
+td.page-table-link-cell- > .menu-button- {
   padding-inline: calc(
     var(--page-table-cell-padding-inline-) -
-      max(
-        var(--page-dark-mode-disabled-border-width-),
-        var(--design-device-pixel-widest-px-)
-      ) / 2
+      max(var(--page-line-width-), var(--design-device-pixel-widest-px-)) / 2
   );
 }
-
-:root[data-dark-mode-="disabled"] .menu-strip- {
-  padding-top: calc(var(--page-dark-mode-disabled-border-width-) / 2);
+.columns-:not(.heat-map-source-table-) td.page-table-link-cell- {
+  padding-inline: 0;
+}
+table.columns- col:nth-child(odd) {
+  background: var(--light-mode-table-panel-odd-bg-);
+}
+table.columns- col:nth-child(even) {
+  background: var(--light-mode-table-panel-even-bg-);
 }
 
-:root[data-dark-mode-="disabled"]::-webkit-scrollbar-track,
-:root[data-dark-mode-="disabled"]::-webkit-scrollbar-corner,
-:root[data-dark-mode-="disabled"] ::-webkit-scrollbar-track,
-:root[data-dark-mode-="disabled"] ::-webkit-scrollbar-corner {
-  background: var(--page-dark-mode-disabled-fg-dim-);
+.menu-strip-,
+.page-heading-:has(> .menu-strip-table-) {
+  background: var(--light-mode-page-bg-);
+  color: var(--light-mode-page-fg-);
+  padding-top: calc(var(--page-line-width-) / 2);
 }
-:root[data-dark-mode-="disabled"]::-webkit-scrollbar-thumb,
-:root[data-dark-mode-="disabled"] ::-webkit-scrollbar-thumb {
-  background: var(--page-dark-mode-disabled-bg-);
+.menu-button-,
+.menu-pulldown-entry-box- {
+  background: var(--light-mode-menu-normal-bg-);
+  color: var(--light-mode-menu-normal-fg-);
 }
-:root[data-dark-mode-="disabled"]::-webkit-scrollbar-track:disabled,
-:root[data-dark-mode-="disabled"] ::-webkit-scrollbar-track:disabled {
-  background: var(--page-dark-mode-disabled-bg-);
+[data-entry-name-="str_report_name"] {
+  background: var(--light-mode-page-bg-);
+  color: var(--light-mode-page-fg-);
+}
+.menu-status-bar- {
+  background: var(--light-mode-status-bar-bg-);
+  color: var(--light-mode-status-bar-fg-);
+}
+.menu-button-:focus-visible,
+.menu-button-.flash-,
+.menu-button-.open-,
+.menu-pulldown-entry-list- > .highlighted-entry- {
+  background: var(--light-mode-menu-focus-bg-);
+  color: var(--light-mode-menu-focus-fg-);
+}
+
+#heat-map-main- {
+  background: var(--light-mode-page-bg-);
+}
+#heat-map-main-:focus-visible {
+  background: var(--light-mode-page-bg-);
+}
+#heat-map-minimap-viewport- {
+  border: var(--page-line-width-) solid;
+  border-color: var(--light-mode-menu-normal-outline-);
+}
+.heat-map-source-information-line- {
+  background: var(--light-mode-page-emphasis-bg-);
+  color: var(--light-mode-page-emphasis-fg-);
+}
+tr.heat-map-source-information-box-synthetic-row- > td {
+  background: var(--light-mode-status-bar-bg-);
+  color: var(--light-mode-status-bar-fg-);
+}
+.heat-map-tree-node-.selected- {
+  outline: var(--page-line-width-) solid;
+  outline-color: var(--light-mode-menu-normal-outline-);
+}
+
+.page-text-scrollbar- {
+  background: var(--light-mode-menu-normal-bg-);
+  color: var(--light-mode-menu-normal-fg-);
+}
+#heat-map-tree-scrollbar-:focus-visible,
+.page-text-scrollbar-.drag- {
+  background: var(--light-mode-menu-focus-bg-);
+  color: var(--light-mode-menu-focus-fg-);
+}
+
+.debug-tip- {
+  background: var(--light-mode-debug-tip-bg-);
+  color: var(--light-mode-debug-tip-fg-);
+  border-color: var(--light-mode-debug-tip-border-);
+}
+
+.screenshot-label- {
+  background: var(--light-mode-screenshot-label-bg-);
+  color: var(--light-mode-screenshot-label-fg-);
+  border-color: var(--light-mode-screenshot-label-border-);
+}
+
+.settings-value-box- {
+  background: var(--light-mode-page-bg-);
+  color: var(--light-mode-page-fg-);
 }

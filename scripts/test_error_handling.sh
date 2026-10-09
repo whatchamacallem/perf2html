@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE-MIT.md file.
+#
 # This comment intentionally blank. No documentation goes here.
 
 usage_show() {
@@ -18,29 +21,28 @@ set -euo pipefail
 [ $# = 0 ] || { [[ $* =~ ^(-h|--help)$ ]] && usage_show && exit 0; } \
   || { echo "error: unknown option: $*" && usage_show && exit 2; } >&2
 
-_SCRIPT="$(readlink -f "$0")"
+_SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 _SCRIPTS="$(dirname "$_SCRIPT")"
-_DEV="$(dirname "$_SCRIPTS")"
-_REPO="$(dirname "$_DEV")"
+_DIR_PERF2HTML="$(dirname "$_SCRIPTS")"
+_REPO="$(dirname "$(dirname "$_DIR_PERF2HTML")")"
 _TEST_EXPECTED_BEHAVIOR="$_SCRIPTS/test_expected_behavior.sh"
 
 . "$_SCRIPTS/utility.sh"
 . "$_SCRIPTS/test_utility.sh"
 
-_TEST_EXPECTED_BEHAVIOR_DOCUMENT="$_DEV/test_expected_behavior.md"
+_TEST_VERBOSE_DOCUMENT="$_DIR_PERF2HTML/test_verbose.md"
 
 _TEST_ERROR_MARKDOWN_FORMATTER=prettier
 _PRETTIER_CONFIG="$_SCRIPTS/.prettierrc.json"
 _TEST_ERROR_MARKDOWN_FORMATTER_INSTALL="npm install -g prettier"
 
-_TEST_ERROR_BASELINE_REPORT="$_DEV/perf2html_baseline_report"
-_TEST_ERROR_MODIFIED_REPORT="$_DEV/perf2html_modified_report"
-_TEST_ERROR_DIFF_REPORT="$_DEV/perf2html_diff_report"
+_TEST_ERROR_BASELINE_REPORT="$_DIR_PERF2HTML/perf2html_baseline_report"
+_TEST_ERROR_MODIFIED_REPORT="$_DIR_PERF2HTML/perf2html_modified_report"
+_TEST_ERROR_DIFF_REPORT="$_DIR_PERF2HTML/perf2html_diff_report"
 
-_TEST_ERROR_ARTIFACTS="$_DEV/perf2html_temporary_artifacts"
+_TEST_ERROR_ARTIFACTS="$_DIR_PERF2HTML/perf2html_temporary_artifacts"
 
 _TEST_ERROR_ARCHIVE_SUFFIX=.txz
-_TEST_ERROR_CALLGRIND_LOOPS=200
 _TEST_ERROR_TRUNCATED_BYTES=1024
 _TEST_ERROR_TIMER_ARTIFACTS_PREFIX=timer-artifacts-
 _TEST_ERROR_TIMING_FILE_PREFIX=perf-stat
@@ -49,7 +51,7 @@ _TEST_ERROR_MANIFEST_CHECKSUM_LABEL=checksum
 
 _TEST_ERROR_MANIFEST_VERSION_DIFF='curl/perf2html_diff.sh v1'
 
-_TEST_ERROR_SCRATCH="$_DEV/build/test_error_handling_scratch"
+_TEST_ERROR_SCRATCH="$_DIR_PERF2HTML/build/test_error_handling_scratch"
 
 test_error_path_without_tool() {
   local _tool="$1" _bin="$_TEST_ERROR_SCRATCH/bin_without_$1" _dirs=() _dir
@@ -113,7 +115,7 @@ test_error_markdown_formatter_check() {
   _PRETTIER="$(tool_find "$_TEST_ERROR_MARKDOWN_FORMATTER")" && return 0
   {
     echo "error: 1 tool(s) missing, so" \
-      "$(path_shown "$_TEST_EXPECTED_BEHAVIOR_DOCUMENT") is not checked:" \
+      "$(path_shown "$_TEST_VERBOSE_DOCUMENT") is not checked:" \
       "$_TEST_ERROR_MARKDOWN_FORMATTER"
     echo "  $_TEST_ERROR_MARKDOWN_FORMATTER_INSTALL"
   } >&2
@@ -123,11 +125,11 @@ test_error_markdown_formatter_check() {
 test_error_markdown_check_run() {
   local _code=0
   "$_PRETTIER" --config "$_PRETTIER_CONFIG" \
-    --log-level warn --check "$_TEST_EXPECTED_BEHAVIOR_DOCUMENT" || _code=$?
+    --log-level warn --check "$_TEST_VERBOSE_DOCUMENT" || _code=$?
   if [ "$_code" != 0 ]; then
     printf 'FAILED: %s --check exited %s on %s\n' \
       "$_TEST_ERROR_MARKDOWN_FORMATTER" "$_code" \
-      "$(path_shown "$_TEST_EXPECTED_BEHAVIOR_DOCUMENT")" >&2
+      "$(path_shown "$_TEST_VERBOSE_DOCUMENT")" >&2
     exit "$_code"
   fi
   echo "ok test_error_markdown_check"
@@ -136,10 +138,10 @@ test_error_markdown_check_run() {
 test_error_expected_behavior_run() {
   local _code=0 _start=$SECONDS
   "$_TEST_EXPECTED_BEHAVIOR" --keep-artifacts --verbose \
-    2>"$_TEST_EXPECTED_BEHAVIOR_DOCUMENT" </dev/null || _code=$?
+    2>"$_TEST_VERBOSE_DOCUMENT" </dev/null || _code=$?
   if [ "$_code" != 0 ]; then
     printf 'FAILED: test_expected_behavior.sh exited %s, see %s\n' "$_code" \
-      "$(path_shown "$_TEST_EXPECTED_BEHAVIOR_DOCUMENT")" >&2
+      "$(path_shown "$_TEST_VERBOSE_DOCUMENT")" >&2
     exit "$_code"
   fi
   printf 'test_expected_behavior.sh --keep-artifacts: %ss\n' \
@@ -153,7 +155,6 @@ test_error_makefile_test_names() {
 
 test_error_cache_populated_check() {
   local _tests=() _report _name _rows _recorded _test _file
-  local _loops="$_TEST_ERROR_CALLGRIND_LOOPS"
   local _prefix="$_TEST_ERROR_TIMING_FILE_PREFIX"
   mapfile -t _tests < <(test_error_makefile_test_names)
   [ "${#_tests[@]}" -gt 0 ] || test_fail cache_populated \
@@ -169,12 +170,12 @@ test_error_cache_populated_check() {
       || test_fail cache_populated "no recorded= row in $_rows"
     for _test in "${_tests[@]}"; do
       for _file in \
-        "callgrind.out.$_test.$_loops.$_recorded" \
-        "valgrind.$_test.$_loops.$_recorded.log" \
+        "callgrind.out.$_test.$_recorded" \
+        "valgrind.$_test.$_recorded.log" \
         "$_prefix.$_test.$_recorded.csv" \
         "$_prefix.$_test.$_recorded.txt" \
-        "trace.$_test.$_loops.$_recorded.log" \
-        "trace.$_test.$_loops.$_recorded.speedscope.json"; do
+        "trace.$_test.$_recorded.log" \
+        "trace.$_test.$_recorded.speedscope.json"; do
         [ -f "$_TEST_ERROR_ARTIFACTS/$_name/$_file" ] \
           || test_fail cache_populated \
             "no recording $_TEST_ERROR_ARTIFACTS/$_name/$_file"
@@ -191,8 +192,8 @@ test_error_cache_snapshot_of() {
 test_error_regenerate_cache_check() {
   local _before _after _gone _new _line _path _name _start=$SECONDS _code=0
   _before="$(test_error_cache_snapshot_of)"
-  "$_DEV/perf2html_batch.sh" --regenerate "--target-dir=$_DEV" </dev/null \
-    || _code=$?
+  "$_DIR_PERF2HTML/perf2html_batch.sh" --regenerate \
+    "--target-dir=$_DIR_PERF2HTML" </dev/null || _code=$?
   [ "$_code" = 0 ] || test_fail regenerate_from_cache \
     "perf2html_batch.sh --regenerate exited $_code"
   printf 'perf2html_batch.sh --regenerate: %ss\n' "$((SECONDS - _start))"
@@ -225,14 +226,14 @@ test_error_unknown_option_tests() {
   test_failure_expect test_error_handling_unknown_option 2 -- \
     "$_SCRIPT" --bogus-option
 
-  grep -q 'unknown option' "$_DEV/clean.sh" \
+  grep -q 'unknown option' "$_DIR_PERF2HTML/clean.sh" \
     || test_fail clean_unknown_option \
       "clean.sh holds no 'unknown option'"
   test_failure_expect clean_unknown_option 2 -- \
-    "$_DEV/clean.sh" --bogus-option
+    "$_DIR_PERF2HTML/clean.sh" --bogus-option
 
   test_failure_expect diff_unknown_option 2 -- \
-    "$_DEV/perf2html_diff.sh" \
+    "$_DIR_PERF2HTML/perf2html_diff.sh" \
     "--artifacts=$_TEST_ERROR_SCRATCH/artifacts_unknown" --bogus-option
 }
 
@@ -241,7 +242,7 @@ test_error_diff_uncached_test() {
   local _diff_report="$_TEST_ERROR_SCRATCH/out_uncached"
   local _checksum_label="$_TEST_ERROR_MANIFEST_CHECKSUM_LABEL"
   test_failure_expect diff_uncached 0 -- \
-    "$_DEV/perf2html_diff.sh" \
+    "$_DIR_PERF2HTML/perf2html_diff.sh" \
     "--artifacts=$_TEST_ERROR_SCRATCH/artifacts_uncached" \
     "$_baseline" "$_modified" "$_diff_report"
   _manifest_fault="$(REPORT_MANIFEST_CHECKSUM_LABEL="$_checksum_label" \
@@ -259,7 +260,7 @@ test_error_diff_uncached_test() {
 test_error_diff_tests() {
   local _baseline="$1" _modified="$2" _diff="$3" _copy _archive
   local _second_archive
-  local _tool="$_DEV/perf2html_diff.sh"
+  local _tool="$_DIR_PERF2HTML/perf2html_diff.sh"
   local _scratch="$_TEST_ERROR_SCRATCH"
 
   test_failure_expect diff_of_a_diff 2 -- \
@@ -341,7 +342,7 @@ test_error_diff_tests() {
 
 test_error_txz_tests() {
   local _baseline="$1" _wrong _kept _whole _truncated
-  local _tool="$_DEV/perf2html_diff.sh"
+  local _tool="$_DIR_PERF2HTML/perf2html_diff.sh"
   local _scratch="$_TEST_ERROR_SCRATCH"
 
   test_failure_expect txz_input_missing 2 -- \
@@ -398,7 +399,7 @@ test_error_txz_tests() {
 
 test_error_batch_tests() {
   test_failure_expect batch_regenerate_no_recordings 2 -- \
-    "$_DEV/perf2html_batch.sh" --regenerate "--target-dir=$1" \
+    "$_DIR_PERF2HTML/perf2html_batch.sh" --regenerate "--target-dir=$1" \
     "--artifacts=$_TEST_ERROR_SCRATCH/artifacts_batch_none"
 }
 
@@ -406,14 +407,14 @@ test_error_toolchain_tests() {
   local _bin
   _bin="$(test_error_path_without_tool valgrind)"
   test_failure_expect toolchain_missing_tool 1 -- \
-    env PATH="$_bin" "$_DEV/perf2html.sh" \
+    env PATH="$_bin" "$_DIR_PERF2HTML/perf2html.sh" \
     "--report=$_TEST_ERROR_SCRATCH/report_no_valgrind" \
     "--artifacts=$_TEST_ERROR_SCRATCH/artifacts_no_valgrind"
 }
 
 test_error_report_dir_tests() {
-  local _baseline="$1" _tool="$_DEV/perf2html.sh" _populated _file _empty
-  local _scratch="$_TEST_ERROR_SCRATCH"
+  local _baseline="$1" _tool="$_DIR_PERF2HTML/perf2html.sh" _populated _file
+  local _scratch="$_TEST_ERROR_SCRATCH" _empty
 
   _populated="$_scratch/populated_no_manifest"
   mkdir "$_populated"

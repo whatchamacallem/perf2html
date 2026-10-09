@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE-MIT.md file.
+#
 # This comment intentionally blank. No documentation goes here.
 
 usage_show() {
@@ -33,17 +36,17 @@ set -euo pipefail
 
 TIMESTAMP="$(date +%s)"
 INVOKED_FROM="$PWD"
-_SCRIPT="$(readlink -f "$0")"
+_SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 PERF2HTML_DIR_="$(dirname "$_SCRIPT")"
 cd "$PERF2HTML_DIR_"
 
 . ./scripts/settings.sh
 . ./scripts/utility.sh
 
-_REPO="$(dirname "$PERF2HTML_DIR_")"
+_REPO="$(dirname "$(dirname "$PERF2HTML_DIR_")")"
 
 args_parse() {
-  shared_options_parse "$@"
+  options_parse "$@"
   local _remaining_argument
   _OUT_DIR=""
   _CMAKE_FLAGS=()
@@ -63,6 +66,7 @@ args_parse() {
   _OUT_DIR="$(report_path_of "$_OUT_DIR")"
   artifacts_dir_resolve "$(dirname "$_OUT_DIR")"
   ARTIFACTS_DIR="$ARTIFACTS_DIR/$(basename "$_OUT_DIR")"
+  [ "$KEEP_ARTIFACTS" = 1 ] || trap artifacts_clean EXIT
   _HEADER_FILE="$(artifact_path_of header-rows "$(basename "$_OUT_DIR")")"
   local _index _seen=0 _split=0 _flag
   for _index in "${!_CMAKE_FLAGS[@]}"; do
@@ -191,14 +195,15 @@ build_compile() {
   done
   mkdir -p "$_TRACE_TREE"
   command_run cc -O2 -fcf-protection=none \
+    -DTEST_SAMPLES_SIZE="$TEST_SAMPLES_SIZE" \
     -c "$PERF2HTML_DIR_/src/cyg_callback.c" -o "$_TRACE_TREE/cyg_callback.o"
   rm -f "$_TRACE_BIN"
   local _hook="$_TRACE_TREE/cyg_callback.o"
   tree_build "$_TRACE_TREE" "${_trace_flags[@]}" \
     "-DCMAKE_EXE_LINKER_FLAGS=$_hook -Wl,--export-dynamic"
   log_verbose "$_line | $(duration_format "$_start")"
-  _BUILD_DESC="$(path_display "$_BUILD_TREE" "$_REPO"), ${_CMAKE_FLAGS[*]},"
-  _BUILD_DESC="$_BUILD_DESC $(cc --version | head -1)"
+  _BUILD_DESC="${_CMAKE_FLAGS[*]}"
+  _BUILD_DESC="$_BUILD_DESC $(cc -dumpfullversion)"
 }
 
 trace_record() {
@@ -274,10 +279,12 @@ trace_render() {
   _tree_display="$(path_display "$_TRACE_TREE" "$_REPO")"
   {
     echo "# $_tree_display = this report's build flags +"
-    echo "# -finstrument-functions, linked with dev/src/cyg_callback.c, which"
-    echo "# reads rdtsc at every function enter and exit. Run 1 counts events,"
-    echo "# run 2 keeps the ones right after the run's midpoint"
-    echo "# (CYG_CALLBACKS_MAX_REC in dev/src/cyg_callback.c)."
+    echo "# -finstrument-functions, linked with"
+    echo "# tests/perf2html/src/cyg_callback.c, which reads rdtsc at every"
+    echo "# function enter and exit. Run 1 counts events, run 2 keeps up to"
+    echo "# $TEST_SAMPLES_SIZE samples, an enter and exit pair each, right"
+    echo "# after the run's midpoint (TEST_SAMPLES_SIZE in"
+    echo "# tests/perf2html/scripts/settings.sh)."
   } >"$_TRACE_LOG"
   trace_run "$_test" "$_loops" "$_trace_file" "$TRACE_SKIP_ALL" "$_TRACE_LOG"
   _seen="$(python3 "$PERF2HTML_DIR_/scripts/trace_to_speedscope.py" --seen \
@@ -293,48 +300,44 @@ trace_render() {
 }
 
 report_render() {
-  local _name="$1" _out="$2" _perf_log="$3" _trace_log="$4"
-  local _log_args=() _perf_log_args=() _log_file
+  local _name="$1"
 
   heading_print "python3 callgrind_to_heatmap.py data $_name"
   command_run python3 "$PERF2HTML_DIR_/scripts/callgrind_to_heatmap.py" data \
     "${_CALLGRIND_FILES[@]}" --report-dir "$_OUT_DIR" --test "$_name"
 
   heading_print "python3 build_report.py test $_name"
-  for _log_file in "${_LOG_FILES[@]}"; do _log_args+=(--log "$_log_file"); done
-  if [ "$_name" = all ]; then
-    _log_args+=(--no-log)
-  else
-    _perf_log_args=(--perf-log "$_perf_log" --trace-log "$_trace_log")
-  fi
   command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" test \
-    "${_CALLGRIND_FILES[@]}" -o "$_out/index.html" --test "$_name" \
-    "${_perf_log_args[@]}" "${_log_args[@]}"
+    "${_CALLGRIND_FILES[@]}" -o "$_OUT_DIR" --test "$_name"
 }
 
 timing_record() {
+  local _counter_value _counter_unit _counter_name _remaining_fields
   perf stat -x, -o "$2" -e cycles:u,instructions:u \
-    taskset -c "$PROFILE_PINNED_CPU" "$_BIN" "$1" "$TIMING_LOOPS" \
-    && awk -F, '
-      $3 ~ /cycles/ { printf "Cycles:    %s\n", $1 }
-      $3 ~ /instructions/ { printf "Instructions: %s\n", $1 }' "$2"
+    taskset -c "$PROFILE_PINNED_CPU" "$_BIN" "$1" "$TEST_LOOPS" \
+    && while IFS=, read -r _counter_value _counter_unit _counter_name \
+      _remaining_fields; do
+      case "$_counter_name" in
+        *cycles*) printf 'Cycles:    %s\n' "$_counter_value" ;;
+        *instructions*) printf 'Instructions: %s\n' "$_counter_value" ;;
+      esac
+    done <"$2"
 }
 
 run_one() {
-  local _test="$1" _out="$2"
-  local _loops _cg_file _log _start _line _timing _shown
+  local _test="$1"
+  local _loops _cg_file _log _start _line _timing _shown _page_words
   local _stat_file _page
   _stat_file="$(artifact_path_of timing-csv "$_test")"
   _page="$(artifact_path_of timing-page "$_test")"
-  _loops=$CALLGRIND_LOOPS
+  _loops=$TEST_LOOPS
   _cg_file="$(artifact_path_of callgrind "$_test")"
   _log="$(artifact_path_of valgrind-log "$_test")"
 
   if [ "$REGENERATE" = 1 ]; then
     trace_render "$_test" "$_loops"
     _CALLGRIND_FILES=("$_cg_file")
-    _LOG_FILES=("$_log")
-    report_render "$_test" "$_out" "$_page" "$_TRACE_LOG"
+    report_render "$_test"
     log_verbose "$(printf '%-13sloops=%s | reused' "$_test" "$_loops")"
     return
   fi
@@ -343,37 +346,40 @@ run_one() {
   _line="$(printf '%-13sloops=%s' "$_test" "$_loops")"
   _start="$(clock_microseconds)"
   command_run taskset -c "$PROFILE_PINNED_CPU" valgrind --tool=callgrind \
-    --cache-sim=yes --branch-sim=yes \
+    --cache-sim=yes --branch-sim=yes --trace-redir=yes \
+    --LL="$CALLGRIND_LAST_LEVEL_CACHE" \
     --callgrind-out-file="$_cg_file" --log-file="$_log" \
     "$_BIN" "$_test" "$_loops"
   _line="$_line | $(duration_format "$_start")"
 
+  heading_print "python3 callgrind_symbols.py $_test"
+  command_run python3 "$PERF2HTML_DIR_/scripts/callgrind_symbols.py" \
+    --valgrind-log "$_log" --callgrind-file "$_cg_file"
+
   heading_print "perf stat -e cycles:u,instructions:u perf $_test" \
-    "$TIMING_LOOPS"
+    "$TEST_LOOPS"
   echo "\$ perf stat -e cycles:u,instructions:u taskset -c" \
-    "$PROFILE_PINNED_CPU $_BIN_REL $_test $TIMING_LOOPS" >"$_page"
+    "$PROFILE_PINNED_CPU $_BIN_REL $_test $TEST_LOOPS" >"$_page"
   _shown="perf stat -x, -o $_stat_file -e cycles:u,instructions:u taskset"
   page_command_run "$_page" \
-    "$_shown -c $PROFILE_PINNED_CPU $_BIN $_test $TIMING_LOOPS" \
+    "$_shown -c $PROFILE_PINNED_CPU $_BIN $_test $TEST_LOOPS" \
     timing_record "$_test" "$_stat_file"
-  _timing="$(awk '
-    /^Time\/[A-Za-z]+:/ {
-      unit = $1
-      sub(/^Time\//, "", unit)
-      sub(/:$/, "", unit)
-      t = $2 " " $3
-      sub(/ /, "", t)
-      s = t "/" unit
-    }
-    /^Errors:/ { $1 = $1; s = s (s ? ", " : "") $0 }
-    END { print s }' "$_page")"
+  _timing=""
+  while read -r -a _page_words; do
+    case "${_page_words[0]-}" in
+      Time/*:)
+        _timing="${_page_words[1]-}${_page_words[2]-}"
+        _timing+="/${_page_words[0]:5:-1}"
+        ;;
+      Errors:*) _timing+="${_timing:+, }${_page_words[*]}" ;;
+    esac
+  done <"$_page"
   [ -n "$_timing" ] || error_exit 1 "error: no Time/<unit>: line in $_page"
   log_verbose "$_line | $_timing"
 
   trace_render "$_test" "$_loops"
   _CALLGRIND_FILES=("$_cg_file")
-  _LOG_FILES=("$_log")
-  report_render "$_test" "$_out" "$_page" "$_TRACE_LOG"
+  report_render "$_test"
 }
 
 timer_artifacts_write() {
@@ -401,58 +407,71 @@ timer_artifacts_write() {
 }
 
 run_all() {
-  local _out="$1"
-  local _test_name _usecs _total=0 _rows="" _args _timing_lines=()
-  local _page _test_page _perf_log_args=() _recording
-  _page="$(artifact_path_of timing-page all)"
+  local _test_name _time_label _time_value _time_suffix _suite_suffix
+  local _remaining_fields _total=0 _row _rows="" _page _test_page _recording
+  local _log_args=() _args _timing_lines=()
+  _page="$(artifact_path_of timing-page "$REPORT_TEST_SUITE_NAME")"
   _CALLGRIND_FILES=()
-  _LOG_FILES=()
   for _test_name in "${_TESTS[@]}"; do
     _recording="$(artifact_path_of callgrind "$_test_name")"
     _CALLGRIND_FILES+=("$_recording")
     _recording="$(artifact_path_of valgrind-log "$_test_name")"
-    _LOG_FILES+=("$_recording")
+    _log_args+=(--valgrind-log "$_test_name=$_recording")
+    _recording="$(artifact_path_of trace-log "$_test_name")"
+    _log_args+=(--trace-log "$_test_name=$_recording")
   done
 
   heading_print "taskset -c $PROFILE_PINNED_CPU perf <test>"
   for _test_name in "${_TESTS[@]}"; do
     _test_page="$(artifact_path_of timing-page "$_test_name")"
-    _usecs="$(awk '/^Time:/ { print $2; exit }' "$_test_page")"
-    [ -n "$_usecs" ] || error_exit 1 "error: no Time: line in $_test_page"
-    _rows+="$(printf '  %-14s %12s usecs' "$_test_name:" "$_usecs")"$'\n'
-    _timing_lines+=("$_test_name: $_usecs usecs")
-    _total=$((_total + _usecs))
-    _perf_log_args+=(--perf-log "$_test_name=$_test_page")
+    while read -r _time_label _time_value _time_suffix _remaining_fields; do
+      [ "$_time_label" != Time: ] || break
+    done <"$_test_page"
+    [ "$_time_label" = Time: ] && [ -n "$_time_suffix" ] || error_exit 1 \
+      "error: no Time: <value> <suffix> line in $_test_page"
+    if [ "$_test_name" = "${_TESTS[0]}" ]; then
+      _suite_suffix="$_time_suffix"
+    fi
+    [ "$_time_suffix" = "$_suite_suffix" ] || error_exit 1 \
+      "error: $_test_page Time: suffix $_time_suffix, expected $_suite_suffix"
+    printf -v _row '  %-14s %12s %s\n' "$_test_name:" "$_time_value" \
+      "$_suite_suffix"
+    _rows+="$_row"
+    _timing_lines+=("$_test_name: $_time_value $_suite_suffix")
+    _total=$((_total + _time_value))
+    _log_args+=(--perf-log "$_test_name=$_test_page")
   done
   {
     echo "\$ taskset -c $PROFILE_PINNED_CPU $_BIN_REL <test>"
     echo "#   for every test, one after the other"
-    echo "#   (each test's page has its full output)"
+    echo "#   (the perf log of each test follows)"
     printf '%s' "$_rows"
-    echo "Time:     $_total usecs"
+    echo "Time:     $_total $_suite_suffix"
   } >"$_page"
   command_item_print "taskset -c $PROFILE_PINNED_CPU $_BIN <test>"
-  item_output_print "${_timing_lines[@]}" "Time: $_total usecs"
-  _perf_log_args+=(--perf-log "all=$_page")
+  item_output_print "${_timing_lines[@]}" "Time: $_total $_suite_suffix"
+  _log_args+=(--perf-log "$REPORT_TEST_SUITE_NAME=$_page")
 
-  report_render all "$_out" "" ""
+  report_render "$REPORT_TEST_SUITE_NAME"
 
   heading_print "python3 build_report.py overview"
   _HEADER_ROWS=(
     "revision=$_REVISION"
     "cpu=$_CPU_MODEL"
     "build=$_BUILD_DESC"
-    "executable=$_BIN_REL <test>  (native, pinned to CPU $PROFILE_PINNED_CPU)"
+    "executable=$_BIN_REL"
     "$(manifest_recorded_row)"
   )
   printf '%s\n' "${_HEADER_ROWS[@]}" >"$_HEADER_FILE"
   _args=(-o "$_OUT_DIR/index.html" --header-file "$_HEADER_FILE"
-    --raw-data "$_TIMER_ARTIFACTS_ARCHIVE" "${_perf_log_args[@]}")
-  for _test_name in "${_TESTS[@]}" all; do _args+=(--test "$_test_name"); done
+    --raw-data "$_TIMER_ARTIFACTS_ARCHIVE" "${_log_args[@]}")
+  for _test_name in "${_TESTS[@]}" "$REPORT_TEST_SUITE_NAME"; do
+    _args+=(--test "$_test_name")
+  done
   command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" overview \
     "${_args[@]}"
-  log_verbose "$(printf '%-13s%d profiles merged: %s' all \
-    "${#_TESTS[@]}" "$_OUT_DIR/index.html")"
+  log_verbose "$(printf '%-13s%d profiles merged: %s' \
+    "$REPORT_TEST_SUITE_NAME" "${#_TESTS[@]}" "$_OUT_DIR/index.html")"
 }
 
 main() {
@@ -472,7 +491,7 @@ main() {
   fi
   _log_file="$(artifact_path_of "$_log_kind" "")"
   report_begin "$_OUT_DIR" "$_log_file" \
-    "dev/perf2html.sh $TIMESTAMP: ${_CMAKE_FLAGS[*]}: $_OUT_DIR"
+    "tests/perf2html/perf2html.sh $TIMESTAMP: ${_CMAKE_FLAGS[*]}: $_OUT_DIR"
   source_cache_fill
   build_compile
   flame_app_install "$_OUT_DIR"
@@ -480,17 +499,16 @@ main() {
 
   local _test_name
   for _test_name in "${_TESTS[@]}"; do
-    run_one "$_test_name" "$_OUT_DIR/$_test_name"
+    run_one "$_test_name"
   done
   timer_artifacts_write
-  run_all "$_OUT_DIR/all"
+  run_all
   heading_print "python3 callgrind_to_heatmap.py page"
   command_run python3 "$PERF2HTML_DIR_/scripts/callgrind_to_heatmap.py" page \
     --report-dir "$_OUT_DIR"
 
   report_finish "$_OUT_DIR" "$REPORT_MANIFEST_VERSION_FULL" \
     "${_HEADER_ROWS[@]}"
-  if [ "$KEEP_ARTIFACTS" != 1 ]; then artifacts_clean; fi
 }
 
 main "$@"

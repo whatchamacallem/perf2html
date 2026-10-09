@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+// SPDX-License-Identifier: MIT
+// This file is licensed under the terms of the LICENSE-MIT.md file.
+
 window.report_error_overlay_ = (function () {
   "use strict";
 
@@ -8,21 +12,20 @@ window.report_error_overlay_ = (function () {
   const OVERLAY_TITLE_TEXT = "perf2html error";
   const OVERLAY_COPY_LINK_TEXT = "copy";
   const OVERLAY_BACK_LINK_TEXT = "back";
-  const OVERLAY_NO_MANIFEST_TEXT = "Report has no assets/report_complete.js";
+  const OVERLAY_NO_MANIFEST_TEXT = "Report has no assets/debug.js";
   const DESIGN_COORDINATES_WIDTH_PX = 1920;
   const DESIGN_FONT_SIZE_PX = 24;
   const REPORT_ROOT_URL = new URL("..", document.currentScript.src).href;
 
   let shown = false;
-  let report_relay_ = null;
+  let report_relay = null;
 
   function html_escape_(text) {
     return text
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
+      .replace(/"/g, "&quot;");
   }
 
   function error_text_of_(thrown_value) {
@@ -50,7 +53,7 @@ window.report_error_overlay_ = (function () {
     );
   }
 
-  function catch_show_throw_(entry_function) {
+  function try_catch_handler_(entry_function) {
     return function (...entry_arguments) {
       try {
         const entry_result = entry_function.apply(this, entry_arguments);
@@ -66,6 +69,23 @@ window.report_error_overlay_ = (function () {
     };
   }
 
+  // Throws the filled UI string or its id, a trailing Error value its cause.
+  function throw_exception_(string_id, ...fill_values) {
+    const error_options =
+      fill_values.at(-1) instanceof Error
+        ? { cause: fill_values.pop() }
+        : undefined;
+    if (window.ui_strings_ === undefined)
+      throw new Error(
+        "error (and missing ui string): " + string_id,
+        error_options,
+      );
+    throw new Error(
+      window.ui_strings_.text_fill(string_id, fill_values),
+      error_options,
+    );
+  }
+
   function err_overlay_show_(thrown_value) {
     const error_text = report_relative_(error_text_of_(thrown_value));
     report_render_({ page: page_address_(), text: error_text }, false);
@@ -74,12 +94,12 @@ window.report_error_overlay_ = (function () {
   function report_render_(report, is_relayed) {
     if (shown) return;
     shown = true;
-    if (report_relay_ !== null && report_relay_(report)) return;
+    if (report_relay !== null && report_relay(report)) return;
     setTimeout(page_write_, 0, report, is_relayed);
   }
 
   function relay_set_(relay_function) {
-    report_relay_ = relay_function;
+    report_relay = relay_function;
   }
 
   function relayed_report_show_(report) {
@@ -100,7 +120,6 @@ window.report_error_overlay_ = (function () {
       "",
       report.text,
       "",
-      "manifest",
       manifest_text,
     ].join("\n");
     const font_size =
@@ -140,6 +159,7 @@ window.report_error_overlay_ = (function () {
     err_overlay_show_(browser_event.reason);
   });
 
-  window.catch_show_throw_ = catch_show_throw_;
+  window.throw_exception_ = throw_exception_;
+  window.try_catch_handler_ = try_catch_handler_;
   return { err_overlay_show_, relay_set_, relayed_report_show_ };
 })();

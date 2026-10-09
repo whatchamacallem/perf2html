@@ -10,7 +10,7 @@ is labelled with. Tab also moves focus forward through interactive elements
 (links, buttons, inputs), and Shift+Tab moves backward. This is the primary
 navigation system for keyboard-only users, including screen reader users and
 switch device users. Enter or Space activates the focused element, and arrow
-keys control widgets
+keys control widgets.
 
 The HTML will open straight from disk, with no server. Start by opening the top
 level `index.html` in the report and then bookmarks will work.
@@ -31,8 +31,8 @@ generators.
   `perf2html.sh` reports.
 - `perf2html_batch.sh` : Generate 3 reports, a baseline version, a modified
   version, and a diff.
-- `clean.sh` : Delete every generated file under `dev/` and the ccache entries
-  the builds made.
+- `clean.sh` : Delete every generated file under `tests/perf2html/` and the
+  ccache entries the builds made.
 
 Each script's `--help` prints the following.
 
@@ -46,7 +46,7 @@ perf2html.sh [debug-flags] [--report=DIR] [cmake-flags...]
     --target-dir=DIR  Default directory for reports (default $PWD).
     --txz             Create .txz archives of all reports generated.
                       .txz files may also be used as inputs.
-    cmake-flags       Everything else, e.g. -D CMAKE_C_FLAGS=-Os.
+    cmake-flags       Everything else is passed directly to cmake.
 ```
 
 ```txt
@@ -67,8 +67,8 @@ perf2html_batch.sh [debug-flags] [--target-dir=DIR] [cmake-flags...]
                       batch cannot rename them.
     --txz             Create .txz archives of all reports generated.
                       .txz files may also be used as inputs.
-    cmake-flags:      Every argument not one of its own options, applied to the
-                      modified build (default -D CMAKE_C_FLAGS=-Os).
+    cmake-flags       Everything else is passed directly to cmake in the
+                      modified build (default is -D CMAKE_C_FLAGS=-Os).
 ```
 
 These are shared developer flags for the iterative development of `perf2html`
@@ -117,7 +117,7 @@ the heat map, under these same names.
 
 `CEst` weights a miss by roughly what it costs and is used by default.
 
-See the [callgrind](https://valgrind.org/tmp/manual/cl-manual.html) tmp. GPL
+See the [callgrind](https://valgrind.org/docs/manual/cl-manual.html) docs. GPL
 Version 3, 29 June 2007.
 
 ## Reading A Diff Report
@@ -127,17 +127,19 @@ Version 3, 29 June 2007.
 A regular report contains a suite of tests that can be explored using a menu.
 There is heat map data, call graph data, and a flame graph.
 
-A regular report shows you the selected counter, a total for that counter and
-a percentage of that total. places it is a percentage of a global total cycle
-count, however in the source view it may also be a percentage of a file or
+A regular report shows you the selected counter, a total for that counter and a
+percentage of that total. In most places it is a percentage of the global
+total, however in the source view it may also be a percentage of a file or
 function if selected.
 
+```txt
 | example     |       % |
 | ----------- | ------: |
 | 1 / 50000   |  ≈0.00% |
 | 1 / 5000    |   0.02% |
 | 500 / 5000  |  10.00% |
 | 5000 / 5000 | 100.00% |
+```
 
 ### Diff Report
 
@@ -148,28 +150,30 @@ baseline count. So a share says how much this line moved against what it used
 to cost, not what part of the report it is. Half as long is `▼-50.00%`, twice
 as long is `▲100.00%`, and smaller is better.
 
-| example            |         % |
-| ------------------ | --------: |
-| 0 -> 1000          | ▲      ∞% |
-| 1000 -> 1000       |           |
-| 1000 -> 1000000    | ▲ 999.00x |
-| 1000 -> 1001000    | ▲     ≈∞% |
-| 1000 -> 101000     | ▲ 100.00x |
-| 1000 -> 2000       | ▲ 100.00% |
-| 1000 -> 2010       | ▲   1.01x |
-| 1000 -> 900        | ▼ -10.00% |
-| 5000 -> 0          | ▼-100.00% |
-| 5000000 -> 4999999 | ▼  ≈0.00% |
-| 5000000 -> 5000001 | ▲  ≈0.00% |
-| 90 -> 100          | ▲  11.11% |
+```txt
+| delta              |           % |
+| ------------------ | ----------: |
+| 0 -> 1000          |   ▲      ∞% |
+| 1000 -> 1000       |             |
+| 1000 -> 1000000    |   ▲ 999.00x |
+| 1000 -> 1001000    |   ▲     ≈∞% |
+| 1000 -> 101000     |   ▲ 100.00x |
+| 1000 -> 2000       |   ▲ 100.00% |
+| 1000 -> 2010       |   ▲   1.01x |
+| 1000 -> 900        |   ▼ -10.00% |
+| 5000 -> 0          |   ▼-100.00% |
+| 5000000 -> 4999999 |   ▼  ≈0.00% |
+| 5000000 -> 5000001 |   ▲  ≈0.00% |
+| 90 -> 100          |   ▲  11.11% |
+```
 
 ## Flame Graph (speedscope)
 
 The flame graph is a recording, not a model: every box is one call that
 happened, as wide as it took. The test runs in a build with
-`-finstrument-functions`, where a hook (`dev/src/cyg_callback.c`) reads the
-CPU's time stamp counter at every function entry and exit. "Time Order" is the
-order the calls were made in.
+`-finstrument-functions`, where a hook (`tests/perf2html/src/cyg_callback.c`)
+reads the CPU's time stamp counter at every function entry and exit. "Time
+Order" is the order the calls were made in.
 
 It shows up to 200 top-level calls in a row, taken from the middle of the run,
 when caches are warm. Times are nanoseconds since the start of the run. Both
@@ -177,9 +181,8 @@ hooks cost time too and that time is in the boxes, so a function of a few
 instructions looks slower than it is, and the traced run is slower than the
 perf log's native one. Use the perf log for speed and the flame graph for
 shape: what calls what, in which order, and which call was the slow one. The
-callers page's "trace log" has the commands and the traced run's own output,
-and the overview's "raw data" archive holds the same profile as a speedscope
-JSON file.
+overview's "trace log" has the commands and the traced run's own output, and
+its "raw data" archive holds the same profile as a speedscope JSON file.
 
 The merged "all" report and a diff have no flame graph: a trace neither adds up
 nor subtracts.

@@ -1,8 +1,10 @@
-# dev/scripts/settings.sh
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE-MIT.md file.
 
 ARTIFACTS_NAME=perf2html_temporary_artifacts
 
-ASSET_REPORT_COMPLETE_SCRIPT_NAME=report_complete.js
+ASSET_DEBUG_SCRIPT_NAME=debug.js
 
 BUILD_CCACHE_NAMESPACE=perf2html
 
@@ -14,7 +16,7 @@ CACHE_EXTERNAL_PACKAGE=libc6
 
 CACHE_ROOT_DIR=~/.cache/perf2html
 
-CALLGRIND_LOOPS=200
+CALLGRIND_LAST_LEVEL_CACHE=16777216,16,64
 
 CALLGRIND_OUTPUT_FILE_PREFIX=callgrind.out
 
@@ -37,6 +39,8 @@ DEFAULT_FLAGS=(-D CMAKE_C_FLAGS=-Os)
 DIFF_CALLER_COUNTS_FILE_SUFFIX=.callers.json
 
 DIFF_DELTA_FILE_PREFIX=callgrind.diff
+
+DIFF_EXTRACTED_ROOT_DISPLAY_NAME='$tmp'
 
 DIFF_HEADER_BLOCK_FILE_PREFIX=header
 
@@ -70,14 +74,19 @@ REPORT_MANIFEST_CHECKSUM_LABEL=checksum
 
 REPORT_MANIFEST_VERSION_DIFF='curl/perf2html_diff.sh v1'
 REPORT_MANIFEST_VERSION_FULL='curl/perf2html.sh v1'
+REPORT_MANIFEST_VERSION_LABEL=manifest
 
 REPORT_MODIFIED_DIR_NAME=perf2html_modified_report
 
 REPORT_RAW_ARCHIVE_SUFFIX=.txz
 
-TIMER_ARTIFACTS_NAME_PREFIX=timer-artifacts-
+REPORT_TEST_SUITE_NAME=all
 
-TIMING_LOOPS=10000
+TEST_LOOPS=100
+
+TEST_SAMPLES_SIZE=$((TEST_LOOPS * 4 * 1024))
+
+TIMER_ARTIFACTS_NAME_PREFIX=timer-artifacts-
 
 TRACE_BUILD_DIR=build-instr
 

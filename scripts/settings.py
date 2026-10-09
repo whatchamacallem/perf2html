@@ -1,61 +1,52 @@
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE-MIT.md file.
+
 from __future__ import annotations
 
-import json, os, re, sys
+import json, math, os, re, sys
 from collections.abc import Sequence
 from typing import NoReturn, get_origin, get_type_hints
 
 
 ASSET_CALLERS_SCRIPT_NAME = "callers.js"
-ASSET_DARK_MODE_DISABLED_STYLESHEET_NAME = "light_mode.css"
+ASSET_DARK_MODE_STYLESHEET_NAME = "dark_mode.css"
 ASSET_ERROR_OVERLAY_SCRIPT_NAME = "error_overlay.js"
 ASSET_FLAME_GRAPH_SCRIPT_NAME = "flame_graph.js"
 ASSET_FRAME_SCRIPT_NAME = "frame.js"
 ASSET_HEAT_MAP_SCRIPT_NAME = "heat_map.js"
 ASSET_HEAT_MAP_STYLESHEET_NAME = "heat_map.css"
+ASSET_LIGHT_MODE_STYLESHEET_NAME = "light_mode.css"
 ASSET_MENU_SCRIPT_NAME = "menu.js"
 ASSET_MENU_STYLESHEET_NAME = "menu.css"
-
+ASSET_OVERVIEW_SCRIPT_NAME = "overview.js"
 ASSET_PULLDOWN_TEXT_SCRIPT_NAME = "pulldown_text.js"
-
+ASSET_SETTINGS_PAGE_SCRIPT_NAME = "settings_page.js"
 ASSET_SETTINGS_SCRIPT_NAME = "settings.js"
-
+ASSET_TEMPLATE_CALLERS_PAGE_NAME = "callers.html"
 ASSET_TEMPLATE_FLAME_GRAPH_PAGE_NAME = "flame_graph.html"
+ASSET_TEMPLATE_HEAT_MAP_MAIN_NAME = "heat_map_main.html"
 ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME = "heat_map.html"
 ASSET_TEMPLATE_OVERVIEW_PAGE_NAME = "overview.html"
-ASSET_TEMPLATE_SETTINGS_HANDLER_NAME = "settings.js"
-
+ASSET_TEMPLATE_SETTINGS_PAGE_NAME = "settings_page.html"
 ASSET_THEME_SCRIPT_NAME = "theme.js"
 ASSET_THEME_STYLESHEET_NAME = "theme.css"
 ASSET_UI_STRINGS_SCRIPT_NAME = "ui_strings.js"
 ASSET_UTILITY_SCRIPT_NAME = "utility.js"
 
-CALLERS_PERF_LOG_SKIPPED_HEAD_LINES = 9
-
-CALLERS_TIME_SUFFIX_SECONDS: dict[str, float] = {
-    "msec": 1e-3,
-    "msecs": 1e-3,
-    "ms": 1e-3,
-    "nsec": 1e-9,
-    "nsecs": 1e-9,
-    "ns": 1e-9,
-    "sec": 1.0,
-    "secs": 1.0,
-    "s": 1.0,
-    "usec": 1e-6,
-    "usecs": 1e-6,
-    "us": 1e-6,
-}
-
+CALLERS_PAGE_DIR_NAME = "callers"
+CALLERS_TIME_SUFFIX_SECONDS: dict[str, float] = {"ns": 1e-9, "usecs": 1e-6}
 CALLERS_TOP_FUNCTION_ROWS = 50
-
 CALLERS_VIEW_KEY = "callers"
 
 DARK_MODE_ATTRIBUTE_NAME = "data-dark-mode-"
 DARK_MODE_DISABLED_VALUE = "disabled"
 DARK_MODE_ENABLED_DEFAULT = True
 DARK_MODE_ENABLED_VALUE = "enabled"
-DARK_MODE_QUERY_KEY_NAME = "screenshot-dark"
+DARK_MODE_QUERY_KEY_NAME = "screenshot-mode"
 DARK_MODE_QUERY_VALUES: dict[str, str] = {"disabled": "0", "enabled": "1"}
+
+DEBUG_TIP_IDLE_DELAY_MS = 2000
 
 DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {
     "D1m": {"D1mr": 1, "D1mw": 1},
@@ -74,260 +65,183 @@ DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {
     },
 }
 
-FLAME_GRAPH_EXPORTER_NAME = "dev/scripts/trace_to_speedscope.py"
+DRAG_DIRECTION_THRESHOLD_PX = 5
 
+FLAME_GRAPH_COLOR_SCHEME_KEY_NAME = "speedscope-color-scheme"
+FLAME_GRAPH_COLOR_SCHEME_VALUES: dict[str, str] = {
+    "disabled": "LIGHT",
+    "enabled": "DARK",
+}
+FLAME_GRAPH_EXPORTER_NAME = "tests/perf2html/scripts/trace_to_speedscope.py"
 FLAME_GRAPH_LOCAL_PROFILE_PATH = "profile"
-
+FLAME_GRAPH_LOCAL_PROFILE_URL_PREFIX = "file:///"
 FLAME_GRAPH_MAX_RECORDED_CALLS = 200
-
 FLAME_GRAPH_PROFILE_DIR_NAME = "profiles"
 FLAME_GRAPH_PROFILE_GLOBAL_NAME = "report_flame_graph_profiles_"
-
 FLAME_GRAPH_STARTUP_POLL_DELAY_MS = 50
 FLAME_GRAPH_STARTUP_POLL_MAX_ATTEMPTS = 200
-
-FLAME_GRAPH_VIEW_ENTRY: tuple[str, str, str] = (
+FLAME_GRAPH_VIEW_ENTRY: tuple[str, str] = (
     "flame-graph",
-    "flame graph",
     "flame-graph/index.html",
 )
 
 HEAT_MAP_COUNTER_DESCRIPTION_STRING_ID_PREFIX = "str_counter_"
-
 HEAT_MAP_HOME_LINES_LOCATION_MAX_CHARS = 28
 HEAT_MAP_HOME_LINES_SOURCE_COLUMN_MAX_CHARS = 36
 HEAT_MAP_HOME_LINES_SOURCE_SNIPPET_MAX_CHARS = 110
-
-HEAT_MAP_HOME_TABLE_MAX_ROWS = 60
-
-HEAT_MAP_MINIMAP_SOURCE_WIDTH_CHARS = 80
-
+HEAT_MAP_HOME_TABLE_DEFAULT_ROWS = 20
 HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX = 8
-
 HEAT_MAP_MODEL_DIR_NAME = "data"
 HEAT_MAP_MODEL_GLOBAL_NAME = "report_heat_map_models_"
-
+HEAT_MAP_SCALE_DEFAULT_VALUE = "log/global"
+HEAT_MAP_SCALE_DIFF_DEFAULT_VALUE = "log/line"
 HEAT_MAP_SECONDARY_COUNTER_NAMES: tuple[str, ...] = ("D1m", "DLm", "Bcm")
-
+HEAT_MAP_SORT_DEFAULT_MODE = "heat"
 HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE = 0.01
 HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_MAX_COUNT = 10
-
 HEAT_MAP_SOURCE_VIEW_WIDTH_CHARS = 80
-
 HEAT_MAP_TREE_ALWAYS_LISTED_DIRS = ("lib", "include", "src", "tests/perf")
-
 HEAT_MAP_TREE_AUTO_EXPAND_ABOVE_SHARE = 0.05
-
-HEAT_MAP_VIEW_ENTRY: tuple[str, str, str] = (
+HEAT_MAP_VIEW_ENTRY: tuple[str, str] = (
     "heat-map",
     "heat-map/index.html",
 )
 
-LAYOUT_RESIZE_SETTLE_DELAY_MS = 120
-
-MENU_BUTTON_ORDER: tuple[str, ...] = (
-    "overview",
-    "test",
-    "file",
-    "function",
-    "heat-map",
-    "callers",
-    "flame-graph",
-    "dark-mode",
-    "reset",
-    "help",
-    "scale",
-)
-
+MENU_DIGIT_KEY_COUNT = 10
+MENU_FLASH_DURATION_MS = 500
 MENU_PULLDOWN_KEY_NAMES: dict[str, str] = {
     "close": "Escape",
+    "erase": "Backspace",
     "next": "ArrowDown",
     "previous": "ArrowUp",
     "select": "Enter",
 }
-
 MENU_PULLDOWN_LINE_NUMBER_PATTERN = "^(.*):([0-9]+)$"
-
-MENU_PULLDOWN_MERGED_TEST_NAME = "all"
-
 MENU_PULLDOWN_OPENING_KEY_PATTERN = "^[a-zA-Z]$"
-
 MENU_PULLDOWN_SKIPPED_KEY_NAMES: tuple[str, ...] = (" ",)
-
-MENU_SCALE_KEY_NAMES: dict[str, str] = {
-    "larger": "ArrowRight",
-    "smaller": "ArrowLeft",
-}
+MENU_SCALE_KEY_STEPS: dict[str, int] = {"+": 1, "=": 1, "-": -1}
 
 NUMBER_FRACTION_DIGITS = 2
-
 NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES = 999.99
 
-NUMBER_SMALLEST_PRINTED_PERCENT = 0.01
-
-PAGE_SETTINGS_GLOBAL_NAME = "settings_"
-
-PANE_SPLITTER_WIDEST_WINDOW_SHARE = 0.6
+OVERVIEW_VALGRIND_LOG_FIRST_LINE_PATTERN = "^Events *:"
 
 RANKING_COUNTER_NAME = "CEst"
 
 REPORT_SOURCES_DIR_NAME = "sources"
 
-STORAGE_OWNED_KEYS: tuple[str, ...] = (
-    "heat.counter",
-    "heat.scale",
-    "heat.sort",
-    "view.dark_mode",
-    "view.scale",
-)
-STORAGE_OWNED_PREFIXES: tuple[str, ...] = ("split.",)
+SCREENSHOT_MENU_KEY_NUMBER = "screenshot-menu"
 
-STORAGE_VERSION = "perf2html v5"
+SETTINGS_DEBUG_ENABLED = False
+SETTINGS_DEBUG_HASH_KEY_NAME = "setting-values"
+SETTINGS_DEBUG_JSON_INDENT_CHARS = 2
+SETTINGS_DEBUG_JSON_MAX_LENGTH_CHARS = 79
+SETTINGS_DEBUG_JSON_SPACING_PATTERN = r'("(?:[^\\"]|\\.)*")|[:,]'
+SETTINGS_DEBUG_QUERY_ENABLED_VALUE = "1"
+SETTINGS_DEBUG_QUERY_KEY_NAME = "debug"
+SETTINGS_VIEW_ENTRY: tuple[str, str] = ("settings", "settings/index.html")
+
+STORAGE_KEY_CALLERS_ROWS = "callers.rows"
+STORAGE_KEY_HEAT_COUNTER = "heat.counter"
+STORAGE_KEY_HEAT_ROWS = "heat.rows"
+STORAGE_KEY_HEAT_SCALE = "heat.scale"
+STORAGE_KEY_HEAT_SORT = "heat.sort"
+STORAGE_KEY_VIEW_DARK_MODE = "view.dark_mode"
+STORAGE_KEY_VIEW_SCALE = "view.scale"
+STORAGE_OWNED_KEYS: tuple[str, ...] = (
+    STORAGE_KEY_CALLERS_ROWS,
+    STORAGE_KEY_HEAT_COUNTER,
+    STORAGE_KEY_HEAT_ROWS,
+    STORAGE_KEY_HEAT_SCALE,
+    STORAGE_KEY_HEAT_SORT,
+    STORAGE_KEY_VIEW_DARK_MODE,
+    STORAGE_KEY_VIEW_SCALE,
+)
+STORAGE_VERSION = "perf2html v1"
 STORAGE_VERSION_KEY = "perf2html.version"
 
-STYLE_COLOR_PAIR_ENTRIES: dict[str, list[str]] = {
+STYLE_COLOR_DARK_MODE: dict[str, list[str]] = {
     "#1AB6FF": [
-        "heat-map-source-line-detail-action-bar-link-fg-",
-        "heat-map-source-table-line-number-cell-callee-marker-fg-",
-        "menu-button-fg-",
-        "menu-pulldown-entry-current-fg-",
-        "menu-pulldown-entry-highlighted-bg-",
-        "page-link-fg-",
+        "dark-mode-menu-normal-fg-",
+        "dark-mode-menu-normal-outline-",
+        "dark-mode-page-link-fg-",
     ],
-    "#0097E6": [
-        "page-scrollbar-thumb-bg-dim-",
-    ],
+    "#0E4F6E": ["dark-mode-menu-normal-bg-"],
     "#F5F6FA": [
-        "callers-collapsed-section-title-focus-fg-",
-        "callers-heat-cell-on-dark-fg-",
-        "heat-map-heat-cell-on-dark-fg-",
-        "heat-map-menu-field-fg-",
-        "heat-map-source-file-header-statistic-share-fg-",
-        "heat-map-source-line-detail-function-name-fg-",
-        "heat-map-source-table-row-focus-fg-",
-        "heat-map-source-ticker-tape-entry-focus-fg-",
-        "heat-map-tree-node-focus-fg-",
-        "menu-button-current-bg-",
-        "menu-button-focus-bg-",
-        "menu-strip-fg-",
-        "menu-title-fg-",
-        "page-body-fg-",
-        "page-dark-mode-disabled-bg-",
-        "page-link-focus-fg-",
-        "page-table-row-focus-fg-",
-        "screenshot-label-fg-",
+        "dark-mode-menu-focus-bg-",
+        "dark-mode-page-emphasis-fg-",
+        "dark-mode-page-fg-",
+        "dark-mode-status-bar-fg-",
     ],
-    "#DCDDE1": [
-        "callers-collapsed-section-file-name-fg-dim-",
-        "callers-collapsed-section-title-fg-dim-",
-        "callers-collapsed-section-title-marker-fg-dim-",
-        "heat-map-menu-label-fg-dim-",
-        "heat-map-menu-search-box-placeholder-fg-dim-",
-        "heat-map-source-file-header-statistic-fg-dim-",
-        "heat-map-source-line-detail-action-bar-separator-fg-dim-",
-        "heat-map-source-line-detail-close-symbol-fg-dim-",
-        "heat-map-source-line-detail-heading-fg-dim-",
-        "heat-map-source-table-counter-cell-fg-dim-",
-        "heat-map-source-table-line-number-cell-fg-dim-",
-        "heat-map-source-ticker-tape-label-fg-dim-",
-        "heat-map-source-unavailable-note-fg-dim-",
-        "heat-map-tree-node-caret-fg-dim-",
-        "heat-map-tree-node-name-cold-fg-dim-",
-        "heat-map-tree-node-name-more-fg-dim-",
-        "heat-map-tree-node-share-percent-fg-dim-",
-        "menu-pulldown-no-match-note-fg-dim-",
-        "menu-pulldown-search-box-placeholder-fg-dim-",
-        "page-heading-fg-dim-",
-        "page-table-column-title-fg-dim-",
-        "page-table-dimmed-text-fg-dim-",
-    ],
-    "#FBC531": [],
-    "#E1B12C": [],
-    "#7F8FA6": [],
-    "#718093": [],
-    "#273C75": [
-        "callers-collapsed-section-log-box-focus-bg-",
-        "callers-collapsed-section-title-focus-bg-",
-        "heat-map-main-focus-bg-",
-        "heat-map-menu-field-focus-bg-",
-        "heat-map-source-file-header-bg-",
-        "heat-map-source-table-column-title-bg-",
-        "heat-map-source-table-row-focus-bg-",
-        "heat-map-source-ticker-tape-bg-",
-        "heat-map-source-ticker-tape-entry-focus-bg-",
-        "heat-map-tree-node-focus-bg-",
-        "heat-map-tree-node-selected-bg-",
-        "heat-map-tree-resize-handle-focus-bg-",
-        "menu-button-bg-",
-        "menu-pulldown-entry-current-bg-",
-        "page-link-focus-bg-",
-        "page-table-row-focus-bg-",
-    ],
-    "#192A56": [
-        "callers-collapsed-section-log-box-bg-dim-",
-        "callers-collapsed-section-log-box-scrollbar-bg-dim-",
-        "heat-map-menu-field-bg-dim-",
-        "heat-map-menu-strip-bg-dim-",
-        "heat-map-source-line-detail-bg-dim-",
-        "menu-button-current-fg-dim-",
-        "menu-button-focus-fg-dim-",
-        "menu-pulldown-entry-highlighted-fg-dim-",
-        "menu-pulldown-entry-list-bg-dim-",
-        "page-table-column-title-bg-dim-",
-    ],
-    "#487EB0": [],
-    "#40739E": [],
-    "#353B48": [
-        "heat-map-source-ticker-tape-entry-bg-",
-        "page-table-alternate-column-bg-",
-    ],
+    "#DCDDE1": ["dark-mode-page-dim-fg-"],
+    "#273C75": ["dark-mode-page-emphasis-bg-"],
+    "#192A56": ["dark-mode-menu-focus-fg-", "dark-mode-panel-bg-"],
+    "#353B48": ["dark-mode-table-panel-even-bg-"],
     "#2F3640": [
-        "callers-heat-cell-on-bright-fg-dim-",
-        "heat-map-heat-cell-on-bright-fg-dim-",
-        "heat-map-main-bg-dim-",
-        "heat-map-minimap-bg-dim-",
-        "heat-map-source-line-detail-table-bg-dim-",
-        "menu-strip-bg-dim-",
-        "menu-title-bg-dim-",
-        "overview-view-frame-bg-dim-",
-        "page-body-bg-dim-",
-        "page-dark-mode-disabled-fg-dim-",
-        "page-scrollbar-corner-bg-dim-",
-        "page-scrollbar-track-bg-dim-",
+        "dark-mode-page-bg-",
+        "dark-mode-status-bar-bg-",
+        "dark-mode-table-panel-odd-bg-",
     ],
+    "#FFFFFF": ["dark-mode-debug-tip-fg-", "dark-mode-screenshot-label-fg-"],
     "#000000": [
-        "screenshot-label-bg-",
-        "screenshot-label-border-",
+        "dark-mode-debug-tip-bg-",
+        "dark-mode-debug-tip-border-",
+        "dark-mode-screenshot-label-bg-",
+        "dark-mode-screenshot-label-border-",
     ],
 }
+STYLE_COLOR_DARK_MODE_ROLE_PREFIX = "dark-mode-"
 
+STYLE_COLOR_LIGHT_MODE: dict[str, list[str]] = {
+    "#000000": [
+        "light-mode-debug-tip-bg-",
+        "light-mode-debug-tip-border-",
+        "light-mode-menu-focus-bg-",
+        "light-mode-menu-normal-fg-",
+        "light-mode-menu-normal-outline-",
+        "light-mode-page-emphasis-bg-",
+        "light-mode-page-fg-",
+        "light-mode-screenshot-label-bg-",
+        "light-mode-screenshot-label-border-",
+    ],
+    "#FFFFFF": [
+        "light-mode-debug-tip-fg-",
+        "light-mode-menu-focus-fg-",
+        "light-mode-page-emphasis-fg-",
+        "light-mode-page-bg-",
+        "light-mode-screenshot-label-fg-",
+        "light-mode-status-bar-fg-",
+        "light-mode-table-panel-even-bg-",
+        "light-mode-table-panel-odd-bg-",
+    ],
+    "#AAAAAA": [
+        "light-mode-menu-normal-bg-",
+    ],
+    "#00AAAA": [
+        "light-mode-status-bar-bg-",
+    ],
+}
+STYLE_COLOR_LIGHT_MODE_ROLE_PREFIX = "light-mode-"
 STYLE_DESIGN_COORDINATES_WIDTH_PX = 1920
-
+STYLE_DESIGN_DEVICE_PIXEL_WIDEST_PROPERTY = "--design-device-pixel-widest-px-"
 STYLE_DESIGN_FONT_CHARACTER_WIDTH_PX = 7.2
-
 STYLE_DESIGN_FONT_FIT_PROPERTY = "--design-font-fit-"
-
+STYLE_DESIGN_FONT_FIT_START_MULTIPLE = 1
+STYLE_DESIGN_FONT_SIZE_PROPERTY = "--design-font-size-px-"
 STYLE_DESIGN_FONT_SIZE_PX = 12
-
 STYLE_DESIGN_MINIMUM_WINDOW_WIDTH_PX = 1280
-
 STYLE_DESIGN_SCALE_DEFAULT_MULTIPLE = 1
-
-STYLE_DESIGN_SCALE_DEFAULT_TRAVEL_SHARE = 0.5
-
+STYLE_DESIGN_SCALE_DEFAULT_STOP = 6
 STYLE_DESIGN_SCALE_LARGEST_MULTIPLE = 2
 STYLE_DESIGN_SCALE_SMALLEST_MULTIPLE = 0.5
-
-STYLE_DESIGN_SCALE_STOP_COUNT = 21
-
+STYLE_DESIGN_SCALE_STOP_COUNT = 11
 STYLE_DESIGN_SCALE_STOP_MULTIPLE_FRACTION_DIGITS = 2
-
 STYLE_DESIGN_VIEWPORT_HEIGHT_PROPERTY = "--design-viewport-height-"
-
+STYLE_DESIGN_VIEWPORT_HEIGHT_START_PERCENT = 100
 STYLE_HEAT_CELL_ON_BRIGHT_ABOVE_LUMINANCE_SHARE = 0.5
-
+STYLE_HEAT_CELL_ON_BRIGHT_ROLE = "dark-mode-page-bg-"
+STYLE_HEAT_CELL_ON_DARK_ROLE = "dark-mode-page-fg-"
 STYLE_HEAT_COLOR_FULL_SCALE_PERCENT = 100
-
 STYLE_HEAT_COLOR_STOPS: list[str] = [
     "#3E4A89",
     "#31688E",
@@ -342,73 +256,76 @@ STYLE_HEAT_COLOR_STOPS: list[str] = [
     "#FF7F21",
     "#F06142",
 ]
-
-STYLE_HEAT_MAP_MENU_DROPDOWN_EXTRA_WIDTH_CHARS = 4
-
 STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_CHARS = 2
-
+STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_PROPERTY = (
+    "--heat-map-source-table-line-number-cell-callee-marker-width-"
+)
 STYLE_HEAT_MAP_TREE_INDENT_PER_LEVEL_CHARS = 2
-
-STYLE_HEAT_MAP_TREE_PANE_NARROWEST_PX = 120
-
-STYLE_MENU_LOGO_START_FRACTION = 0.5
-
+STYLE_HEAT_MAP_TREE_PANE_NARROWEST_CHARS = 17
+STYLE_HEAT_MAP_TREE_PANE_WIDEST_CHARS = 40
+STYLE_MENU_LOGO_START_SHARE = 0.5
 STYLE_MENU_PULLDOWN_EXTRA_WIDTH_CHARS = 2
-
 STYLE_PAGE_FONT_FAMILY = (
     'Monaco, Menlo, "DejaVu Sans Mono", "Liberation Mono", Consolas, monospace'
 )
-
-STYLE_PANE_SPLITTER_KEY_STEP_PX = 36
-
+STYLE_PAGE_FONT_FAMILY_PROPERTY = "--page-font-family-"
+STYLE_PANE_SPLITTER_KEY_STEP_CHARS = 5
 STYLE_TABLE_COLUMN_EXTRA_WIDTH_CHARS = 2
-
 STYLE_TABLE_FUNCTION_NAME_WIDTH_CHARS = 20
-
 STYLE_TABLE_GROW_COLUMN_NARROWEST_CHARS = 20
-
 STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS = 48
-
+STYLE_TEXT_SCROLLBAR_THUMB_SHORTEST_CHARS = 4
 STYLE_VALUE_ENTRIES: dict[str, str] = {
-    "callers-collapsed-section-file-name-max-width-": "96ch",
-    "callers-collapsed-section-log-box-max-height-share-": "0.6",
+    "debug-tip-border-width-": "1ch",
+    "debug-tip-font-size-": "1.5em",
+    "debug-tip-z-index-": "2147483647",
     "heat-map-band-z-index-": "2",
-    "heat-map-menu-column-gap-": "1ch",
-    "heat-map-menu-search-box-width-": "36ch",
+    "heat-map-menu-padding-bottom-": "1lh",
     "heat-map-minimap-width-": "110px",
-    "heat-map-source-file-header-column-gap-": "2ch",
+    "heat-map-overview-home-border-block-": "1lh",
+    "heat-map-overview-home-border-inline-": "2ch",
     "heat-map-source-table-code-cell-tab-size-": "4",
-    "heat-map-source-table-line-number-cell-callee-marker-text-": '"\\25B8 "',
-    "heat-map-source-ticker-tape-entry-padding-inline-": "1ch",
+    "heat-map-source-table-line-number-cell-callee-marker-text-": '"►"',
     "heat-map-source-ticker-tape-gap-": "1ch",
     "heat-map-tree-node-caret-width-": "2ch",
     "heat-map-tree-node-gap-": "1ch",
     "heat-map-tree-node-padding-right-": "1ch",
     "heat-map-tree-node-share-percent-width-": "10ch",
-    "heat-map-tree-resize-handle-margin-left-": "-3px",
-    "heat-map-tree-resize-handle-margin-right-": "-4px",
-    "heat-map-tree-resize-handle-width-": "7px",
-    "heat-map-tree-resize-handle-z-index-": "1",
-    "heat-map-tree-width-": "280px",
-    "menu-button-margin-left-": "1ch",
+    "heat-map-tree-width-": "39ch",
     "menu-button-padding-inline-": "1ch",
-    "menu-logo-padding-inline-": "1ch",
     "menu-pulldown-entry-list-max-height-share-": "0.6",
     "menu-pulldown-entry-list-z-index-": "3",
     "menu-pulldown-entry-padding-inline-": "1ch",
     "menu-pulldown-search-box-min-width-": "13ch",
-    "menu-title-width-": "66ch",
+    "overview-collapsed-section-log-box-max-height-share-": "0.6",
     "page-body-line-height-": "1.1",
-    "page-dark-mode-disabled-border-width-": "0.125ch",
-    "page-scrollbar-thickness-": "14px",
+    "page-emphasis-padding-inline-": "1ch",
+    "page-line-width-": "0.125ch",
     "page-table-cell-padding-inline-": "1ch",
     "page-table-column-title-z-index-": "1",
-    "screenshot-label-border-width-": "1ch",
-    "screenshot-label-font-size-": "2em",
+    "page-text-scrollbar-horizontal-height-": "1lh",
+    "page-text-scrollbar-vertical-width-": "1ch",
+    "screenshot-label-border-width-": "1.5ch",
+    "screenshot-label-font-size-": "1.5em",
     "screenshot-label-z-index-": "3",
 }
 
-TABLE_COLUMN_SLIDE_THRESHOLD_PX = 5
+TABLE_MARKDOWN_COLUMN_NARROWEST_CHARS = 3
+TABLE_ROW_COUNT_CHOICES: tuple[int, ...] = (
+    10,
+    20,
+    30,
+    40,
+    50,
+    60,
+    70,
+    80,
+    90,
+    100,
+)
+
+TEXT_SCROLLBAR_WHEEL_DELTA_PER_NOTCH = 100
+TEXT_SCROLLBAR_WHEEL_NOTCH_LINES = 2.5
 
 THEME_TIME_UNIT_ENTRIES: tuple[tuple[str, float], ...] = (
     ("s", 1.0),
@@ -417,6 +334,8 @@ THEME_TIME_UNIT_ENTRIES: tuple[tuple[str, float], ...] = (
     ("ns", 1e-9),
     ("ps", 1e-12),
 )
+
+VALGRIND_DEBUG_LINE_PATTERN = "^--[0-9]+--"
 
 WIDGET_KEY_NAMES: dict[str, str] = {
     "activate": "Enter",
@@ -430,14 +349,7 @@ WIDGET_KEY_NAMES: dict[str, str] = {
     "up": "ArrowUp",
 }
 
-
 _SETTING_NAMES: frozenset[str] = frozenset()
-
-
-def _is_setting_name(name: str) -> bool:
-    bare = name.lstrip("_")
-    return bool(bare) and bare[0].isupper() and bare.isupper()
-
 
 _MANIFEST_TABLE_COLUMN_GAP_CHARS = 2
 
@@ -459,21 +371,23 @@ _SENTINEL_EMPTY_TYPES = (
 _SENTINEL_TEXT = 'False, 0, 0.0, "", (), [], {}'
 
 _SETTINGS_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
-
 _SETTINGS_PAGE_DATA_MARKER = "__DATA__"
-_SETTINGS_PAGE_NAME_MARKER = "__NAME__"
 
 _SHELL_INTEGER_PATTERN = re.compile(r"-?[0-9]+")
-
 _SHELL_MAP_KEY_PATTERN = re.compile(r"\[\"?([A-Za-z0-9_.+-]+)\"?\]=")
-
+_SHELL_PRODUCT_PATTERN = re.compile(
+    r"\$\(\(([A-Za-z_][A-Za-z0-9_]*)((?: \* -?[0-9]+)+)\)\)"
+)
 _SHELL_SETTINGS_FILE_NAME = "settings.sh"
-
 _SHELL_STATEMENT_PATTERN = re.compile(
     r"(declare -A )?([A-Za-z_][A-Za-z0-9_]*)=(.*)"
 )
-
 _SHELL_WORD_PATTERN = re.compile(r"'([^']*)'|\"([^\"]*)\"|([^\s)]+)")
+
+
+def _is_setting_name(name: str) -> bool:
+    bare = name.lstrip("_")
+    return bool(bare) and bare[0].isupper() and bare.isupper()
 
 
 class SettingsReader:
@@ -555,11 +469,26 @@ class SettingsReader:
                 "definition, in one of the two files",
             )
 
-    def shell_scalar_parse(self, number: int, text: str) -> int | str:
+    def shell_scalar_parse(
+        self, number: int, text: str, found: dict[str, object]
+    ) -> int | str:
+        product = _SHELL_PRODUCT_PATTERN.fullmatch(text)
+        if product is not None:
+            factor = found.get(product.group(1))
+            if not isinstance(factor, int):
+                self.shell_settings_fail(
+                    number,
+                    f"{product.group(1)} is not an integer setting assigned "
+                    "above",
+                )
+            factor_texts = _SHELL_INTEGER_PATTERN.findall(product.group(2))
+            return factor * math.prod(map(int, factor_texts))
         pairs, closed = self.shell_words_parse(number, text, False)
         if closed or len(pairs) != 1:
             self.shell_settings_fail(
-                number, "a scalar is exactly one bare or quoted word"
+                number,
+                "a scalar is exactly one bare or quoted word, or "
+                "$((NAME * INTEGER [* INTEGER ...]))",
             )
         value = pairs[0][1]
         if _SHELL_INTEGER_PATTERN.fullmatch(value):
@@ -598,7 +527,7 @@ class SettingsReader:
                         self.shell_settings_fail(
                             number, "declare -A NAME takes =([key]=word ...)"
                         )
-                    found[name] = self.shell_scalar_parse(number, text)
+                    found[name] = self.shell_scalar_parse(number, text, found)
                     continue
                 opened = (name, number, keyed, [])
                 text = text[1:]
@@ -685,8 +614,12 @@ class SettingsWriter:
         return {name: scope[name] for name in sorted(_SETTING_NAMES)}
 
     def manifest_table(self, lines: Sequence[str]) -> str:
-        rows = [("", "", lines[0])]
-        rows += [line.partition("=") for line in lines[1:]]
+        for line in lines:
+            if "=" not in line:
+                raise ValueError(
+                    f"error: manifest row {line!r} is not LABEL=VALUE"
+                )
+        rows = [line.partition("=") for line in lines]
         label_width = max(len(label) for label, _, _ in rows)
         column_gap = " " * _MANIFEST_TABLE_COLUMN_GAP_CHARS
         return "\n".join(
@@ -697,14 +630,14 @@ class SettingsWriter:
     def script_write(self) -> str:
         values = self.all_named()
         data = json.dumps(values, indent=2, sort_keys=True, ensure_ascii=False)
-        path = os.path.join(
-            _SETTINGS_DIRECTORY, ASSET_TEMPLATE_SETTINGS_HANDLER_NAME
-        )
+        path = os.path.join(_SETTINGS_DIRECTORY, ASSET_SETTINGS_SCRIPT_NAME)
         with open(path, encoding="utf-8") as handle:
             runtime = handle.read()
-        return runtime.replace(
-            _SETTINGS_PAGE_NAME_MARKER, PAGE_SETTINGS_GLOBAL_NAME
-        ).replace(_SETTINGS_PAGE_DATA_MARKER, data)
+        if _SETTINGS_PAGE_DATA_MARKER not in runtime:
+            raise ValueError(
+                f"{path} holds no marker {_SETTINGS_PAGE_DATA_MARKER}"
+            )
+        return runtime.replace(_SETTINGS_PAGE_DATA_MARKER, data)
 
 
 _reader = SettingsReader()

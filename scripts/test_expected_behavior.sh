@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-
-# The rest of this comment is intentionally blank. No documentation goes here.
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE-MIT.md file.
+#
+# This comment intentionally blank. No documentation goes here.
 
 usage_show() {
   cat <<'EOF'
 test_expected_behavior.sh [debug-flags] [--check-formatting]
     Formats, lints and scans the files scripts/test_whitelist.txt lists,
     runs perf2html_batch.sh over the three reports it cleared, then
-    validates and screenshots what it wrote. Any fault stops the run where
-    it happened.
+    validates and screenshots what it wrote. When screenshots-gold/
+    exists, each shot is compared with its same named gold shot and a
+    compare_ image of each difference goes to screenshots-diff/, which
+    every run clears and only a difference makes. Any fault stops the run
+    where it happened.
     --check-formatting  Report what would change rather than writing it.
 
     The debug-flags are the same as the README.md documents.
@@ -17,14 +23,14 @@ EOF
 
 set -euo pipefail
 
-_SCRIPT="$(readlink -f "$0")"
+_SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 _SCRIPTS="$(dirname "$_SCRIPT")"
 
 INVOKED_FROM="$PWD"
 cd "$_SCRIPTS"
 
-_DIR_DEV=..
-_DIR_REPO=../..
+_DIR_PERF2HTML=..
+_DIR_REPO="$(cd ../../.. && pwd)"
 
 _COLUMNS_MAX=79
 _CLANG_FORMAT_CONFIG=../src/.clang-format
@@ -43,12 +49,14 @@ _WHITELIST_FILE=test_whitelist.txt
 . ./test_utility.sh
 
 _BATCH_SCRIPT_NAME=perf2html_batch.sh
+_SCREENSHOT_DIFF_DIR="$_DIR_PERF2HTML/screenshots-diff"
+_SCREENSHOT_GOLD_DIR="$_DIR_PERF2HTML/screenshots-gold"
 _SCREENSHOT_SCRIPT_NAME=test_screenshot.py
 
 _DEFAULT_REPORTS=(
-  "$_DIR_DEV/$REPORT_BASELINE_DIR_NAME"
-  "$_DIR_DEV/$REPORT_MODIFIED_DIR_NAME"
-  "$_DIR_DEV/$REPORT_DIFF_DIR_NAME"
+  "$_DIR_PERF2HTML/$REPORT_BASELINE_DIR_NAME"
+  "$_DIR_PERF2HTML/$REPORT_MODIFIED_DIR_NAME"
+  "$_DIR_PERF2HTML/$REPORT_DIFF_DIR_NAME"
 )
 
 tools_resolve() {
@@ -87,7 +95,7 @@ whitelist_expand() {
       error_exit 1 "error: $_WHITELIST_FILE:$_line: not one glob: '$_glob'"
     fi
 
-    mapfile -t _matches < <(compgen -G "$_DIR_DEV/$_glob")
+    mapfile -t _matches < <(compgen -G "$_DIR_PERF2HTML/$_glob")
     for _match in "${_matches[@]}"; do
       if [ ! -f "$_match" ]; then
         error_exit 1 \
@@ -216,7 +224,7 @@ lint_run() {
     return 0
   fi
 
-  if [ "$VERBOSE" -ge 1 ]; then
+  if [ "$VERBOSE" -ge 1 ] && [ "$VERBOSE" -lt "$VERBOSE_RAW_LEVEL" ]; then
     pyright_filtered_run "$_PYRIGHT" --project "$_PYRIGHT_CONFIG" \
       "${_files[@]}"
   else
@@ -270,7 +278,8 @@ test_expected_report_check_run() {
       _args+=(--diff)
     fi
 
-    subprocess_run python3 test_report.py "${_flags[@]}" "${_args[@]}"
+    subprocess_run python3 "$_SCRIPTS/test_report.py" "${_flags[@]}" \
+      "${_args[@]}"
   done
 }
 
@@ -303,14 +312,14 @@ test_source_scan_run() {
   mapfile -t _flags < <(verbose_flags_of)
 
   heading_print test_source_scan.py
-  subprocess_run python3 test_source_scan.py "${_flags[@]}" \
+  subprocess_run python3 "$_SCRIPTS/test_source_scan.py" "${_flags[@]}" \
     "${_WHITELISTED_FILES[@]}"
 }
 
 batch_run() {
   local _flags=() _target _shown _exit_code=0
   mapfile -t _flags < <(verbose_flags_of)
-  _target="$(cd "$_DIR_DEV" && pwd)"
+  _target="$(cd "$_DIR_PERF2HTML" && pwd)"
 
   if [ "$_REGENERATE" = 1 ]; then _flags+=(--regenerate); fi
 
@@ -321,26 +330,66 @@ batch_run() {
 
   log_verbose "$_shown"
 
-  "$_DIR_DEV/$_BATCH_SCRIPT_NAME" "${_flags[@]}" "--target-dir=$_target" \
-    || _exit_code=$?
+  "$_DIR_PERF2HTML/$_BATCH_SCRIPT_NAME" "${_flags[@]}" \
+    "--target-dir=$_target" || _exit_code=$?
   [ "$_exit_code" = 0 ] \
     || error_exit "$_exit_code" "error: exit $_exit_code from: $_shown"
 }
 
-screenshots_run() {
-  local _name _path _prefix _flags=()
+# Sets `_SCREENSHOT_COMMAND` to the screenshot script command for one report.
+screenshot_command_set() {
+  local _name="$1" _path _prefix _args _flags=()
+  shift
   mapfile -t _flags < <(verbose_flags_of)
+  _path="$_DIR_PERF2HTML/$_name"
+
+  _prefix="${_name#perf2html_}"
+  _prefix="${_prefix%_report}_"
+
+  _args=("$_path" "$_prefix")
+  if [ "$(report_version "$_path")" = "$REPORT_MANIFEST_VERSION_DIFF" ]; then
+    _args+=(--diff)
+  fi
+
+  _SCREENSHOT_COMMAND=(python3 "$_SCRIPTS/$_SCREENSHOT_SCRIPT_NAME"
+    "${_flags[@]}" "${_args[@]}" "$@")
+}
+
+screenshots_run() {
+  local _name _exit_code _failure_code=0 _exit_codes=()
 
   heading_print "$_SCREENSHOT_SCRIPT_NAME"
   for _name in "$REPORT_MODIFIED_DIR_NAME" "$REPORT_DIFF_DIR_NAME"; do
-    _path="$_DIR_DEV/$_name"
-
-    _prefix="${_name#perf2html_}"
-    _prefix="${_prefix%_report}_"
-
-    subprocess_run python3 "$_SCREENSHOT_SCRIPT_NAME" "${_flags[@]}" \
-      "$_path" "$_prefix"
+    screenshot_command_set "$_name"
+    subprocess_run "${_SCREENSHOT_COMMAND[@]}"
   done
+
+  # A measuring run changes the recorded values the golden screenshots show.
+  if [ "$_REGENERATE" != 1 ]; then
+    log_verbose "screenshots: measured, not compared without --regenerate"
+    return 0
+  fi
+
+  # The golden screenshots are a developer's own and optional.
+  if [ -d "$_SCREENSHOT_GOLD_DIR" ]; then
+    # Both reports are compared before either exit code fails the run.
+    for _name in "$REPORT_MODIFIED_DIR_NAME" "$REPORT_DIFF_DIR_NAME"; do
+      screenshot_command_set "$_name" --compare-only \
+        --compare-gold "$_SCREENSHOT_GOLD_DIR" \
+        --compare-out "$_SCREENSHOT_DIFF_DIR"
+      _exit_code=0
+      command_item_print "${_SCREENSHOT_COMMAND[*]}"
+      "${_SCREENSHOT_COMMAND[@]}" || _exit_code=$?
+      _exit_codes+=("$_name=$_exit_code")
+      if [ "$_failure_code" = 0 ]; then
+        _failure_code="$_exit_code"
+      fi
+    done
+    [ "$_failure_code" = 0 ] || error_exit "$_failure_code" \
+      "error: $_SCREENSHOT_SCRIPT_NAME exit codes: ${_exit_codes[*]}"
+  else
+    log_verbose "screenshots: no $_SCREENSHOT_GOLD_DIR, not compared"
+  fi
 }
 
 regenerate_refuse() {
@@ -354,7 +403,7 @@ header_row_of() {
 regenerate_check() {
   [ "$_REGENERATE" = 1 ] || return 0
 
-  local _artifacts="$_DIR_DEV/$ARTIFACTS_NAME"
+  local _artifacts="$_DIR_PERF2HTML/$ARTIFACTS_NAME"
   if [ ! -d "$_artifacts" ]; then
     regenerate_refuse "no recordings at $_artifacts"
   fi
@@ -418,6 +467,9 @@ clear_overwritten_folders() {
       "error: could not remove the previous archive: $_archive"
   done
   log_verbose "cleared ${#_DEFAULT_REPORTS[@]} report(s)"
+
+  rm -rf "$_SCREENSHOT_DIFF_DIR" || error_exit 1 \
+    "error: could not remove the previous shot diffs: $_SCREENSHOT_DIFF_DIR"
 }
 
 args_parse() {

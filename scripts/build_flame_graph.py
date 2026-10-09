@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE-MIT.md file.
+
 from __future__ import annotations
 
 import argparse, base64, json, os, sys
@@ -7,8 +11,8 @@ from typing import NamedTuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import settings, theme
 
+_ASSET_DEBUG_SCRIPT_NAME: str = ""
 _ASSET_FLAME_GRAPH_SCRIPT_NAME: str = ""
-_ASSET_REPORT_COMPLETE_SCRIPT_NAME: str = ""
 _ASSET_SETTINGS_SCRIPT_NAME: str = ""
 _ASSET_TEMPLATE_FLAME_GRAPH_PAGE_NAME: str = ""
 _ASSET_THEME_SCRIPT_NAME: str = ""
@@ -16,11 +20,11 @@ _ASSET_UI_STRINGS_SCRIPT_NAME: str = ""
 _FLAME_GRAPH_APP_DIR_NAME: str = ""
 _FLAME_GRAPH_PROFILE_DIR_NAME: str = ""
 _FLAME_GRAPH_PROFILE_GLOBAL_NAME: str = ""
-_FLAME_GRAPH_VIEW_ENTRY: tuple[str, str, str] = ("", "", "")
+_FLAME_GRAPH_VIEW_ENTRY: tuple[str, str] = ("", "")
 _REPORT_ASSETS_DIR_NAME: str = ""
 settings.load_into(__name__)
 
-_FLAME_GRAPH_PAGE_PATH = _FLAME_GRAPH_VIEW_ENTRY[2]
+_FLAME_GRAPH_PAGE_PATH = _FLAME_GRAPH_VIEW_ENTRY[1]
 _FLAME_GRAPH_PAGE_DEPTH = _FLAME_GRAPH_PAGE_PATH.count("/")
 
 _PAGE = theme.asset_text_read(_ASSET_TEMPLATE_FLAME_GRAPH_PAGE_NAME)
@@ -38,26 +42,34 @@ class BuildFlameGraph:
         test: str
 
     def page_write(self, args: BuildFlameGraph.PageArgs) -> None:
-        assets_href = theme.shared_href(
+        assets_href = theme.href(
             _FLAME_GRAPH_PAGE_DEPTH, _REPORT_ASSETS_DIR_NAME
         )
-        app_href = theme.shared_href(
+        app_href = theme.href(
             _FLAME_GRAPH_PAGE_DEPTH, _FLAME_GRAPH_APP_DIR_NAME
         )
         scripts = theme.script_tags(
             assets_href,
-            (
-                _ASSET_UI_STRINGS_SCRIPT_NAME,
-                _ASSET_REPORT_COMPLETE_SCRIPT_NAME,
-                _ASSET_SETTINGS_SCRIPT_NAME,
-                _ASSET_THEME_SCRIPT_NAME,
-                _ASSET_FLAME_GRAPH_SCRIPT_NAME,
-            ),
+            (_ASSET_UI_STRINGS_SCRIPT_NAME, _ASSET_SETTINGS_SCRIPT_NAME),
         )
-        html = (
-            _PAGE.replace("__APP_CSS__", f"{app_href}/{args.app_css}")
-            .replace("__APP_JS__", f"{app_href}/{args.app_js}")
-            .replace("__SCRIPTS__", scripts)
+        held_scripts = theme.held_script_tags(
+            theme.script_tags(
+                assets_href,
+                (
+                    _ASSET_DEBUG_SCRIPT_NAME,
+                    _ASSET_THEME_SCRIPT_NAME,
+                    _ASSET_FLAME_GRAPH_SCRIPT_NAME,
+                ),
+            )
+            + theme.script_tags(app_href, (args.app_js,))
+        )
+        html = theme.template_fill(
+            _PAGE,
+            {
+                "__APP_CSS__": f"{app_href}/{args.app_css}",
+                "__HELD_SCRIPTS__": held_scripts,
+                "__SCRIPTS__": scripts,
+            },
         )
         path = os.path.join(args.report_dir, _FLAME_GRAPH_PAGE_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)

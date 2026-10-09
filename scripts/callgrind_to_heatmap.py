@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE-MIT.md file.
+
 from __future__ import annotations
 
 import argparse, dataclasses, json, os, subprocess, sys
@@ -8,27 +12,28 @@ from typing import NamedTuple, NotRequired, TypedDict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import callgrind, callgrind_diff, settings, theme
 
+_ASSET_DEBUG_SCRIPT_NAME: str = ""
 _ASSET_HEAT_MAP_SCRIPT_NAME: str = ""
 _ASSET_HEAT_MAP_STYLESHEET_NAME: str = ""
 _ASSET_MENU_STYLESHEET_NAME: str = ""
 _ASSET_PULLDOWN_TEXT_SCRIPT_NAME: str = ""
-_ASSET_REPORT_COMPLETE_SCRIPT_NAME: str = ""
-_ASSET_SETTINGS_SCRIPT_NAME: str = ""
+_ASSET_TEMPLATE_HEAT_MAP_MAIN_NAME: str = ""
 _ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME: str = ""
 _ASSET_THEME_SCRIPT_NAME: str = ""
 _HEAT_MAP_MODEL_DIR_NAME: str = ""
 _HEAT_MAP_MODEL_GLOBAL_NAME: str = ""
 _HEAT_MAP_TREE_ALWAYS_LISTED_DIRS: tuple[str, ...] = ()
-_HEAT_MAP_VIEW_ENTRY: tuple[str, str, str] = ("", "", "")
-_MENU_PULLDOWN_MERGED_TEST_NAME: str = ""
-_RANKING_COUNTER_NAME: str = ""
+_HEAT_MAP_VIEW_ENTRY: tuple[str, str] = ("", "")
 _REPORT_ASSETS_DIR_NAME: str = ""
 _REPORT_SOURCES_DIR_NAME: str = ""
+_REPORT_TEST_SUITE_NAME: str = ""
 settings.load_into(__name__)
 
 BODY = theme.asset_text_read(_ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME)
 
-_HEAT_MAP_PAGE_PATH = _HEAT_MAP_VIEW_ENTRY[2]
+_HEAT_MAP_MAIN = theme.asset_text_read(_ASSET_TEMPLATE_HEAT_MAP_MAIN_NAME)
+
+_HEAT_MAP_PAGE_PATH = _HEAT_MAP_VIEW_ENTRY[1]
 _HEAT_MAP_PAGE_DEPTH = _HEAT_MAP_PAGE_PATH.count("/")
 
 
@@ -124,13 +129,11 @@ class CallgrindToHeatmap:
     class HeatMapTotals(TypedDict):
         counters: list[str]
         derived: list[callgrind.ResolvedDerivedCounter]
-        defaultCounter: str
         totals: callgrind.Costs
         diff: bool
 
     class HeatModel(TypedDict):
         heatMapTotals: CallgrindToHeatmap.HeatMapTotals
-        theme: theme.ThemeRuntime
         files: dict[str, CallgrindToHeatmap.FileModel]
         functions: list[CallgrindToHeatmap.FunctionModel]
         cold: list[str]
@@ -172,7 +175,7 @@ class CallgrindToHeatmap:
             info,
             model,
         )
-        if args.test == _MENU_PULLDOWN_MERGED_TEST_NAME:
+        if args.test == _REPORT_TEST_SUITE_NAME:
             self.pulldown_text_write(args.report_dir, model)
         model_script = self.data_render(args.test, model)
         data_dir = os.path.join(
@@ -184,14 +187,14 @@ class CallgrindToHeatmap:
         path = os.path.join(data_dir, f"{args.test}.js")
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(model_script)
-        shared_count = sum(
+        count = sum(
             1
             for entry in model["files"].values()
             if entry["source"] is not None
         )
         print(
             f"files with samples: {len(model['files'])}"
-            f" ({shared_count} with source shared),"
+            f" ({count} with source shared),"
             f" cold files listed: {len(model['cold'])}, "
             f"functions: {len(model['functions'])}",
             file=sys.stderr,
@@ -377,44 +380,43 @@ class CallgrindToHeatmap:
             if relative not in files
         )
         callgrind.ranking_counter_check(profile.counters, "this profile")
-        default_counter = _RANKING_COUNTER_NAME
         return {
             "heatMapTotals": {
                 "counters": profile.counters,
                 "derived": profile.resolved_derived_counters(),
-                "defaultCounter": default_counter,
                 "totals": profile.totals(),
                 "diff": False,
             },
-            "theme": theme.theme_runtime(),
             "files": files,
             "functions": functions,
             "cold": cold,
         }, info
 
     def page_render(self, source_names: Sequence[str]) -> str:
-        assets_href = theme.shared_href(
-            _HEAT_MAP_PAGE_DEPTH, _REPORT_ASSETS_DIR_NAME
-        )
-        sources_href = theme.shared_href(
+        assets_href = theme.href(_HEAT_MAP_PAGE_DEPTH, _REPORT_ASSETS_DIR_NAME)
+        sources_href = theme.href(
             _HEAT_MAP_PAGE_DEPTH, _REPORT_SOURCES_DIR_NAME
         )
-        scripts = theme.script_tags(
-            assets_href, (_ASSET_REPORT_COMPLETE_SCRIPT_NAME,)
-        )
-        scripts += theme.script_tags(sources_href, source_names)
+        scripts = theme.script_tags(sources_href, source_names)
         scripts += theme.script_tags(
-            assets_href,
-            (
-                _ASSET_PULLDOWN_TEXT_SCRIPT_NAME,
-                _ASSET_SETTINGS_SCRIPT_NAME,
-                _ASSET_THEME_SCRIPT_NAME,
-                _ASSET_HEAT_MAP_SCRIPT_NAME,
-            ),
+            assets_href, (_ASSET_PULLDOWN_TEXT_SCRIPT_NAME,)
+        )
+        scripts += theme.held_script_tags(
+            theme.script_tags(
+                assets_href,
+                (
+                    _ASSET_DEBUG_SCRIPT_NAME,
+                    _ASSET_THEME_SCRIPT_NAME,
+                    _ASSET_HEAT_MAP_SCRIPT_NAME,
+                ),
+            )
         )
         return theme.page_document(
-            _HEAT_MAP_VIEW_ENTRY[1],
-            BODY.replace("__SCRIPTS__", scripts),
+            "",
+            theme.template_fill(
+                BODY,
+                {"__HEAT_MAP_MAIN__": _HEAT_MAP_MAIN, "__SCRIPTS__": scripts},
+            ),
             depth=_HEAT_MAP_PAGE_DEPTH,
             extra_css=(
                 _ASSET_MENU_STYLESHEET_NAME,
@@ -468,20 +470,18 @@ class CallgrindToHeatmap:
             "--",
             *_HEAT_MAP_TREE_ALWAYS_LISTED_DIRS,
         ]
-        try:
-            output = subprocess.run(
-                command,
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout
-        except (OSError, subprocess.CalledProcessError) as failure:
+        completed = subprocess.run(
+            command, check=False, stdout=subprocess.PIPE, text=True
+        )
+        if completed.returncode != 0:
             sys.exit(
-                f"error: cannot list the tracked files a cold tree needs:"
-                f" {' '.join(command)}\n{failure}"
+                "error: cannot list the tracked files a cold tree needs:"
+                f" exit {completed.returncode} from: {' '.join(command)}"
             )
         return [
-            line for line in output.split("\n") if line.endswith((".c", ".h"))
+            line
+            for line in completed.stdout.split("\n")
+            if line.endswith((".c", ".h"))
         ]
 
     @staticmethod

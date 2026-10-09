@@ -1,4 +1,6 @@
-# dev/scripts/utility.sh
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE-MIT.md file.
 
 absolute_path() {
   local path="$1"
@@ -7,7 +9,7 @@ absolute_path() {
     /*) ;;
     *) path="$INVOKED_FROM/$path" ;;
   esac
-  readlink -m -- "$path"
+  realpath -m -s -- "$path"
 }
 
 archive_extract() {
@@ -41,12 +43,12 @@ archive_report_write() {
 }
 
 artifact_path_of() {
-  local kind="$1" name="$2" loops="$CALLGRIND_LOOPS" file
+  local kind="$1" name="$2" file
   local timer_root="$TIMER_ARTIFACTS_NAME_PREFIX$TIMESTAMP"
   case "$kind" in
-    callgrind) file="$CALLGRIND_OUTPUT_FILE_PREFIX.$name.$loops.$TIMESTAMP" ;;
+    callgrind) file="$CALLGRIND_OUTPUT_FILE_PREFIX.$name.$TIMESTAMP" ;;
     callgrind-member)
-      file="$timer_root/$CALLGRIND_OUTPUT_FILE_PREFIX.$name.$loops"
+      file="$timer_root/$CALLGRIND_OUTPUT_FILE_PREFIX.$name"
       ;;
     caller-counts)
       file="$DIFF_DELTA_FILE_PREFIX.$name.$TIMESTAMP"
@@ -67,18 +69,18 @@ artifact_path_of() {
     timer-artifacts) file="$timer_root" ;;
     timing-csv) file="$PROFILE_TIMING_FILE_PREFIX.$name.$TIMESTAMP.csv" ;;
     timing-page) file="$PROFILE_TIMING_FILE_PREFIX.$name.$TIMESTAMP.txt" ;;
-    trace-binary) file="$TRACE_FILE_PREFIX.$name.$loops.$TIMESTAMP.bin" ;;
-    trace-log) file="$TRACE_FILE_PREFIX.$name.$loops.$TIMESTAMP.log" ;;
+    trace-binary) file="$TRACE_FILE_PREFIX.$name.$TIMESTAMP.bin" ;;
+    trace-log) file="$TRACE_FILE_PREFIX.$name.$TIMESTAMP.log" ;;
     trace-speedscope)
-      file="$TRACE_FILE_PREFIX.$name.$loops.$TIMESTAMP"
+      file="$TRACE_FILE_PREFIX.$name.$TIMESTAMP"
       file="$file$TRACE_SPEEDSCOPE_FILE_SUFFIX"
       ;;
     trace-speedscope-member)
-      file="$timer_root/$TRACE_FILE_PREFIX.$name.$loops"
+      file="$timer_root/$TRACE_FILE_PREFIX.$name"
       file="$file$TRACE_SPEEDSCOPE_FILE_SUFFIX"
       ;;
     valgrind-log)
-      file="$VALGRIND_LOG_FILE_PREFIX.$name.$loops.$TIMESTAMP.log"
+      file="$VALGRIND_LOG_FILE_PREFIX.$name.$TIMESTAMP.log"
       ;;
     *) error_exit 1 "error: unknown artifact kind $kind, named $name" ;;
   esac
@@ -86,9 +88,9 @@ artifact_path_of() {
 }
 
 artifacts_clean() {
-  [ -d "$ARTIFACTS_DIR" ] || return 0
-  rm -r "$ARTIFACTS_DIR"
-  rmdir --ignore-fail-on-non-empty "$(dirname "$ARTIFACTS_DIR")"
+  [ ! -d "$ARTIFACTS_DIR" ] || rm -r "$ARTIFACTS_DIR"
+  [ ! -d "$(dirname "$ARTIFACTS_DIR")" ] \
+    || rmdir --ignore-fail-on-non-empty "$(dirname "$ARTIFACTS_DIR")"
 }
 
 artifacts_dir_resolve() {
@@ -120,7 +122,8 @@ checksum_compute() {
       | LC_ALL=C tr '\n' '\0' \
       | xargs -0 -r cksum -- \
       | LC_ALL=C sort \
-      | cksum
+      | cksum \
+      | sed 's/ .*//'
   )
 }
 
@@ -184,6 +187,7 @@ command_item_print() {
   VERBOSE_ITEM_INDENT="${#marker}"
   VERBOSE_COMMAND_NUMBER=$((VERBOSE_COMMAND_NUMBER + 1))
   [ "$VERBOSE" -ge 1 ] || return 0
+  [ "$VERBOSE" -lt "$VERBOSE_RAW_LEVEL" ] || marker=''
   block_lead item
   printf '%s%s\n' "$marker" "$(code_span "\$ $1")" >&2
 }
@@ -209,18 +213,20 @@ elapsed_format() {
 error_exit() {
   local exit_code="$1"
   shift
-  printf '%s\n' "$@" | verbose_filter 0
+  [ "$VERBOSE" -lt 1 ] || block_lead other
+  printf '%s\n' "$@" >&2
   exit "$exit_code"
 }
 
 failure_print_log_tail() {
   local exit_code="$1" shown="$2"
+  [ "$VERBOSE" -lt 1 ] || block_lead other
   {
     echo "error: exit $exit_code from: $shown"
     tail -n +"$((LOG_LINE_FROM + 1))" "$RUN_LOG" \
       | tail -n "$LOG_FAILURE_TAIL_LINES"
-    echo "(see: $RUN_LOG)"
-  } | verbose_filter 0
+    [ "$KEEP_ARTIFACTS" = 0 ] || echo "(see: $RUN_LOG)"
+  } >&2
 }
 
 heading_print() {
@@ -247,7 +253,7 @@ install_command_of() {
       echo "sudo apt-get install -y ${CONTAINING_PACKAGES[$1]}"
       ;;
     cc) echo "sudo apt-get install -y build-essential" ;;
-    addr2line | readelf) echo "sudo apt-get install -y binutils" ;;
+    addr2line | objdump | readelf) echo "sudo apt-get install -y binutils" ;;
     perf) echo "sudo apt-get install -y linux-perf" ;;
     speedscope) echo "npm install -g speedscope" ;;
     *) error_exit 1 "error: no install command is recorded for $1" ;;
@@ -256,16 +262,11 @@ install_command_of() {
 
 item_output_print() {
   [ "$VERBOSE" -ge 1 ] || return 0
+  if [ "$VERBOSE" -ge "$VERBOSE_RAW_LEVEL" ]; then
+    printf '%s\n' "$@" >&2
+    return 0
+  fi
   printf '%s\n' "$@" | verbose_filter "$VERBOSE_ITEM_INDENT"
-}
-
-json_quote() {
-  local text="$1"
-  text="${text//\\/\\\\}"
-  text="${text//\"/\\\"}"
-  text="${text//$'\r'/\\r}"
-  text="${text//$'\n'/\\n}"
-  printf '"%s"' "$text"
 }
 
 log_verbose() {
@@ -328,13 +329,7 @@ manifest_recorded_of() {
 }
 
 manifest_recorded_row() {
-  echo "recorded=$TIMESTAMP $(date -d "@$TIMESTAMP" +'%F %I:%M:%S %p')"
-}
-
-manifest_table_of() {
-  PYTHONPATH="$PERF2HTML_DIR_/scripts${PYTHONPATH:+:$PYTHONPATH}" \
-    python3 -c 'import sys, settings
-print(settings.manifest_table(sys.argv[1:]), end="")' "$@"
+  echo "recorded=$TIMESTAMP $(date -d "@$TIMESTAMP" +'%F %I:%M:%S %p %Z')"
 }
 
 manifest_value() {
@@ -362,11 +357,14 @@ manifest_wanted_phrase() {
 manifest_write() {
   local version="$1" dir="$2"
   shift 2
-  local manifest="$dir/MANIFEST.txt" table checksum
+  local manifest="$dir/MANIFEST.txt" checksum
   command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" assets \
     -o "$dir/$REPORT_ASSETS_DIR_NAME"
-  table="$(manifest_table_of "$version" "$@")"
-  report_complete_write "$dir" "$table"
+  command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" settings \
+    -o "$dir"
+  command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" debug \
+    -o "$dir/$REPORT_ASSETS_DIR_NAME" \
+    -- "$REPORT_MANIFEST_VERSION_LABEL=$version" "$@"
   checksum="$(checksum_compute "$dir")"
   {
     printf '%s\n' "$version"
@@ -424,6 +422,10 @@ path_overlap_check() {
 quiet_switch_set() {
   QUIET_SWITCH=()
   case "$1" in
+    curl)
+      [ "$VERBOSE" -ge "$VERBOSE_RAW_LEVEL" ] \
+        || QUIET_SWITCH=(--silent --show-error)
+      ;;
     prettier) [ "$VERBOSE" -ge 1 ] || QUIET_SWITCH=(--log-level warn) ;;
     ruff) [ "$VERBOSE" -ge 1 ] || QUIET_SWITCH=(--quiet) ;;
     *) error_exit 1 "error: no quiet switch is recorded for $1" ;;
@@ -438,19 +440,11 @@ report_begin() {
   cp README.md "$dir/README.md"
 }
 
-report_complete_write() {
-  local dir="$1" table="$2"
-  local out="$dir/$REPORT_ASSETS_DIR_NAME/$ASSET_REPORT_COMPLETE_SCRIPT_NAME"
-  {
-    printf 'window.report_manifest_table_ = %s;\n' "$(json_quote "$table")"
-    screenshot_label_script_print
-  } >"$out"
-}
-
 report_delete() {
   local dir="$1" answer present=0
-  local archive="$dir$REPORT_RAW_ARCHIVE_SUFFIX"
-  path_overlap_check "$dir" report "$ARTIFACTS_DIR" "artifacts dir"
+  local archive="$dir$REPORT_RAW_ARCHIVE_SUFFIX" checked_paths=("$dir" report)
+  [ -z "$ARTIFACTS_DIR" ] || checked_paths+=("$ARTIFACTS_DIR" "artifacts dir")
+  path_overlap_check "${checked_paths[@]}"
   [ ! -e "$dir" ] || present=1
   if [ "$present" = 1 ] \
     && { [ ! -d "$dir" ] || [ ! -e "$dir/MANIFEST.txt" ]; }; then
@@ -501,20 +495,7 @@ revision_describe() {
   echo "$revision"
 }
 
-screenshot_label_script_print() {
-  cat <<'EOF'
-(function () {
-  var value = new URLSearchParams(location.search).get("screenshot");
-  if (value === null) return;
-  var label = document.createElement("div");
-  label.className = "screenshot-label-";
-  label.textContent = value;
-  document.body.appendChild(label);
-})();
-EOF
-}
-
-shared_options_parse() {
+options_parse() {
   KEEP_ARTIFACTS=0
   REGENERATE=0
   REMAINING_ARGUMENTS=()
@@ -573,7 +554,8 @@ source_cache_fetch() {
   staged="$directory.$TIMESTAMP.part"
   mkdir -p "$staged"
   tarball="$staged/source.tar.xz"
-  command_run curl --fail --location --silent --show-error \
+  quiet_switch_set curl
+  command_run curl --fail --location "${QUIET_SWITCH[@]}" \
     --output "$tarball" "$url"
   command_run tar xJf "$tarball" -C "$staged"
   rm -f "$tarball"
@@ -653,7 +635,7 @@ title_print() {
 toolchain_check() {
   local tool missing=() lines=()
   for tool in cmake ninja ccache cc valgrind perf taskset python3 \
-    addr2line readelf speedscope cksum curl tar xz dpkg-query; do
+    addr2line objdump readelf speedscope cksum curl tar xz dpkg-query; do
     command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
   done
   if [ "${#missing[@]}" != 0 ]; then
@@ -685,19 +667,8 @@ verbose_begin() {
 }
 
 verbose_filter() {
-  local separate=0 lead=0 loose status=0 raw_line
-  if [ "$VERBOSE" -ge "$VERBOSE_RAW_LEVEL" ]; then
-    while IFS= read -r raw_line || [ -n "$raw_line" ]; do
-      printf '%s\n' "$raw_line" >&2
-    done
-    return 0
-  fi
-  if [ "$1" = 0 ]; then
-    separate=1
-    [ "${VERBOSE_BLOCK_PRINTED-other}" = none ] || lead=1
-  fi
-  loose="$(awk -v indent="$(printf '%*s' "$1" '')" -v home="${HOME:?}/" \
-    -v separate="$separate" -v lead="$lead" '
+  local loose status=0
+  loose="$(awk -v indent="$(printf '%*s' "$1" '')" -v home="${HOME:?}/" '
   function line_print(text) {
     print text > "/dev/stderr"
     fflush("/dev/stderr")
@@ -755,7 +726,6 @@ verbose_filter() {
   $0 == "" { next }
   { while (at = index($0, home))
       $0 = substr($0, 1, at - 1) "~/" substr($0, at + length(home)) }
-  indent != "" &&
   /^[A-Za-z][A-Za-z0-9\/ ]*: +-?[0-9][0-9.,]*( [A-Za-z\/]+)?$/ {
     match($0, /: +/)
     held++
