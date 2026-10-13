@@ -5,36 +5,33 @@
 
 from __future__ import annotations
 
-import argparse, dataclasses, json, os, subprocess, sys
+import argparse, dataclasses, json, os, shutil, subprocess, sys
 from collections.abc import Sequence
 from typing import NamedTuple, NotRequired, TypedDict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import callgrind, callgrind_diff, settings, theme
 
-_ASSET_DEBUG_SCRIPT_NAME: str = ""
-_ASSET_HEAT_MAP_SCRIPT_NAME: str = ""
-_ASSET_HEAT_MAP_STYLESHEET_NAME: str = ""
-_ASSET_MENU_STYLESHEET_NAME: str = ""
 _ASSET_PULLDOWN_TEXT_SCRIPT_NAME: str = ""
 _ASSET_TEMPLATE_HEAT_MAP_MAIN_NAME: str = ""
 _ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME: str = ""
-_ASSET_THEME_SCRIPT_NAME: str = ""
+_CALLGRIND_FILE_DATA_ERROR_CODE: str = ""
+_CALLGRIND_FILE_DATA_GIT_CODE: str = ""
+_CALLGRIND_FILE_DATA_INDENT_CHARS: int = 0
 _HEAT_MAP_MODEL_DIR_NAME: str = ""
 _HEAT_MAP_MODEL_GLOBAL_NAME: str = ""
 _HEAT_MAP_TREE_ALWAYS_LISTED_DIRS: tuple[str, ...] = ()
 _HEAT_MAP_VIEW_ENTRY: tuple[str, str] = ("", "")
-_REPORT_ASSETS_DIR_NAME: str = ""
+_REPORT_SCRIPTS_DIR_NAME: str = ""
 _REPORT_SOURCES_DIR_NAME: str = ""
 _REPORT_TEST_SUITE_NAME: str = ""
 settings.load_into(__name__)
 
-BODY = theme.asset_text_read(_ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME)
-
 _HEAT_MAP_MAIN = theme.asset_text_read(_ASSET_TEMPLATE_HEAT_MAP_MAIN_NAME)
 
+_HEAT_MAP_PAGE = theme.asset_text_read(_ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME)
+
 _HEAT_MAP_PAGE_PATH = _HEAT_MAP_VIEW_ENTRY[1]
-_HEAT_MAP_PAGE_DEPTH = _HEAT_MAP_PAGE_PATH.count("/")
 
 
 class CallgrindToHeatmap:
@@ -51,6 +48,10 @@ class CallgrindToHeatmap:
         test: str
         diff: bool
         baseline_data: str
+        paths_output: str
+        baseline_paths: str
+        modified_paths: str
+        sources_dir: str
 
     class FileModel(TypedDict):
         self: callgrind.Costs
@@ -60,16 +61,16 @@ class CallgrindToHeatmap:
         lineFunction: dict[str, int]
         baseline: NotRequired[dict[str, callgrind.Costs]]
         callees: dict[str, list[CallgrindToHeatmap.CallRow]]
-        group: callgrind.Group
+        group: str
         raw: str
 
     @dataclasses.dataclass
     class FileTally:
-        group: callgrind.Group
+        group: str
         raw: str
         self_cost: callgrind.Costs
         calls_cost: callgrind.Costs
-        source: str | None = None
+        source_path: str | None = None
         lines: dict[str, CallgrindToHeatmap.LineTally] = dataclasses.field(
             default_factory=dict
         )
@@ -86,7 +87,7 @@ class CallgrindToHeatmap:
                 "calls": trim(self.calls_cost),
                 "source": (
                     None
-                    if self.source is None
+                    if self.source_path is None
                     else CallgrindToHeatmap.source_name(self.raw)
                 ),
                 "lines": {
@@ -125,6 +126,10 @@ class CallgrindToHeatmap:
         self: callgrind.Costs
         calls: callgrind.Costs
         callers: list[CallgrindToHeatmap.CallRow]
+
+    class Derive(NamedTuple):
+        paths: callgrind.DerivedPaths
+        sources_dir: str
 
     class HeatMapTotals(TypedDict):
         counters: list[str]
@@ -167,13 +172,34 @@ class CallgrindToHeatmap:
 
     def data_write(self, args: CallgrindToHeatmap.DataArgs) -> None:
         profile = callgrind.profile_load(args.callgrind_file)
-        model, info = self.model(profile)
+        derive: CallgrindToHeatmap.Derive | None = None
+        tracked: Sequence[str]
+        if args.diff:
+            if not (args.baseline_paths and args.modified_paths):
+                sys.exit(
+                    "error: --diff needs --baseline-paths and --modified-paths"
+                )
+            if not args.sources_dir:
+                sys.exit("error: --diff needs --sources-dir")
+            derive = CallgrindToHeatmap.Derive(
+                callgrind.DerivedPaths(
+                    args.baseline_paths, args.modified_paths
+                ),
+                args.sources_dir,
+            )
+            tracked = derive.paths.tracked
+        else:
+            tracked = self.repo_tracked_files()
+        model, info = self.model(profile, derive, tracked)
         if args.diff:
             self.diff_model(model, profile, args.baseline_data)
+        if args.paths_output:
+            self.paths_write(args.paths_output, info, model)
         self.sources_write(
             os.path.join(args.report_dir, _REPORT_SOURCES_DIR_NAME),
             info,
             model,
+            derive,
         )
         if args.test == _REPORT_TEST_SUITE_NAME:
             self.pulldown_text_write(args.report_dir, model)
@@ -211,7 +237,8 @@ class CallgrindToHeatmap:
         baseline_data: str,
     ) -> None:
         if not baseline_data:
-            sys.exit("error: --diff needs --baseline-data FILE")
+            print("error: --diff needs --baseline-data FILE", file=sys.stderr)
+            sys.exit(2)
         synthesized = callgrind_diff.callers_doc_load(baseline_data)
         totals = model["heatMapTotals"]
         totals["totals"] = callgrind_diff.profile_magnitudes(profile)
@@ -238,14 +265,31 @@ class CallgrindToHeatmap:
         self,
         profile: callgrind.Profile,
         raw_files: Sequence[str],
+        derive: CallgrindToHeatmap.Derive | None,
     ) -> dict[str, callgrind.PathInfo]:
         info: dict[str, callgrind.PathInfo] = {}
         for raw in raw_files:
-            info[raw] = callgrind.path_norm(raw)._replace(
-                display=callgrind.display_path_of(
-                    raw, profile.file_ob.get(raw, "")
+            object_path = profile.file_ob.get(raw, "")
+            if derive is None:
+                path_info = callgrind.path_norm(raw)
+                info[raw] = path_info._replace(
+                    display=callgrind.display_path(
+                        path_info.display, path_info.group, object_path
+                    )
                 )
+                continue
+            entry = derive.paths.path_entry(raw)
+            display = callgrind.display_path(
+                entry.canonical, entry.group, object_path
             )
+            script = None
+            if entry.has_source:
+                script = os.path.join(
+                    derive.sources_dir, self.source_name(display)
+                )
+                if not os.path.isfile(script):
+                    sys.exit(f"error: no source script {script} of {display}")
+            info[raw] = callgrind.PathInfo(display, script, entry.group)
         return info
 
     def files_model(
@@ -264,14 +308,14 @@ class CallgrindToHeatmap:
                     CallgrindToHeatmap.FileTally(
                         group=path_info.group,
                         raw=raw
-                        if path_info.group == "external"
+                        if path_info.group == _CALLGRIND_FILE_DATA_ERROR_CODE
                         else path_info.display,
                         self_cost=[0] * counter_count,
                         calls_cost=[0] * counter_count,
                     )
                 )
-            if entry.source is None and path_info.local:
-                entry.source = self.source_read(path_info.local)
+            if entry.source_path is None and path_info.local:
+                entry.source_path = path_info.local
         for key, costs in profile.line_self.items():
             entry = accumulators[display[key.file]]
             callgrind.costs_add(entry.self_cost, costs)
@@ -360,7 +404,10 @@ class CallgrindToHeatmap:
         return functions
 
     def model(
-        self, profile: callgrind.Profile
+        self,
+        profile: callgrind.Profile,
+        derive: CallgrindToHeatmap.Derive | None,
+        tracked: Sequence[str],
     ) -> tuple[CallgrindToHeatmap.HeatModel, dict[str, callgrind.PathInfo]]:
         function_names = sorted(profile.function_home)
         function_index = {name: i for i, name in enumerate(function_names)}
@@ -369,15 +416,13 @@ class CallgrindToHeatmap:
             | {key.file for key in profile.line_calls}
             | {entry.file for entry in profile.function_entry.values()}
         )
-        info = self.display_paths(profile, raw_files)
+        info = self.display_paths(profile, raw_files, derive)
         files = self.files_model(profile, info, function_index)
         functions = self.functions_model(
             profile, info, function_names, function_index
         )
         cold = sorted(
-            relative
-            for relative in self.repo_tracked_files()
-            if relative not in files
+            relative for relative in tracked if relative not in files
         )
         callgrind.ranking_counter_check(profile.counters, "this profile")
         return {
@@ -392,51 +437,52 @@ class CallgrindToHeatmap:
             "cold": cold,
         }, info
 
-    def page_render(self, source_names: Sequence[str]) -> str:
-        assets_href = theme.href(_HEAT_MAP_PAGE_DEPTH, _REPORT_ASSETS_DIR_NAME)
-        sources_href = theme.href(
-            _HEAT_MAP_PAGE_DEPTH, _REPORT_SOURCES_DIR_NAME
-        )
-        scripts = theme.script_tags(sources_href, source_names)
-        scripts += theme.script_tags(
-            assets_href, (_ASSET_PULLDOWN_TEXT_SCRIPT_NAME,)
-        )
-        scripts += theme.held_script_tags(
-            theme.script_tags(
-                assets_href,
-                (
-                    _ASSET_DEBUG_SCRIPT_NAME,
-                    _ASSET_THEME_SCRIPT_NAME,
-                    _ASSET_HEAT_MAP_SCRIPT_NAME,
-                ),
-            )
-        )
-        return theme.page_document(
-            "",
-            theme.template_fill(
-                BODY,
-                {"__HEAT_MAP_MAIN__": _HEAT_MAP_MAIN, "__SCRIPTS__": scripts},
-            ),
-            depth=_HEAT_MAP_PAGE_DEPTH,
-            extra_css=(
-                _ASSET_MENU_STYLESHEET_NAME,
-                _ASSET_HEAT_MAP_STYLESHEET_NAME,
-            ),
-            body_holds_scripts=True,
+    def page_render(self) -> str:
+        return theme.template_fill(
+            _HEAT_MAP_PAGE, {"__HEAT_MAP_MAIN__": _HEAT_MAP_MAIN}
         )
 
     def page_write(self, report_dir: str) -> None:
-        source_names = sorted(
-            os.listdir(os.path.join(report_dir, _REPORT_SOURCES_DIR_NAME))
-        )
-        html = self.page_render(source_names)
+        html = self.page_render()
         path = os.path.join(report_dir, _HEAT_MAP_PAGE_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(html)
         print(
-            f"wrote {path} ({len(html.encode('utf-8')):,} bytes,"
-            f" {len(source_names)} sources linked)",
+            f"wrote {path} ({len(html.encode('utf-8')):,} bytes)",
+            file=sys.stderr,
+        )
+
+    # Writes the code of each path this report shows or keeps cold, for a diff.
+    def paths_write(
+        self,
+        path: str,
+        info: dict[str, callgrind.PathInfo],
+        model: CallgrindToHeatmap.HeatModel,
+    ) -> None:
+        coded: dict[str, tuple[str, str]] = {}
+        for raw, path_info in info.items():
+            code = path_info.group
+            canonical = callgrind.path_canonical(raw)
+            first_raw, first_code = coded.setdefault(canonical, (raw, code))
+            if first_code != code:
+                sys.exit(
+                    f"error: {first_raw} and {raw} share the canonical path"
+                    f" {canonical} but not the code: {first_code} vs {code}"
+                )
+        document = {canonical: code for canonical, (_, code) in coded.items()}
+        for cold in model["cold"]:
+            document.setdefault(cold, _CALLGRIND_FILE_DATA_GIT_CODE)
+        text = json.dumps(
+            document,
+            sort_keys=True,
+            indent=_CALLGRIND_FILE_DATA_INDENT_CHARS,
+            ensure_ascii=False,
+        )
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(f"{text}\n")
+        print(
+            f"wrote {path} ({len(text.encode('utf-8')) + 1:,} bytes)",
             file=sys.stderr,
         )
 
@@ -454,7 +500,7 @@ class CallgrindToHeatmap:
         }
         path = os.path.join(
             report_dir,
-            _REPORT_ASSETS_DIR_NAME,
+            _REPORT_SCRIPTS_DIR_NAME,
             _ASSET_PULLDOWN_TEXT_SCRIPT_NAME,
         )
         data = json.dumps(names, separators=(",", ":"), ensure_ascii=False)
@@ -474,10 +520,12 @@ class CallgrindToHeatmap:
             command, check=False, stdout=subprocess.PIPE, text=True
         )
         if completed.returncode != 0:
-            sys.exit(
+            print(
                 "error: cannot list the tracked files a cold tree needs:"
-                f" exit {completed.returncode} from: {' '.join(command)}"
+                f" exit {completed.returncode} from: {' '.join(command)}",
+                file=sys.stderr,
             )
+            sys.exit(completed.returncode)
         return [
             line
             for line in completed.stdout.split("\n")
@@ -489,19 +537,16 @@ class CallgrindToHeatmap:
         flat = "".join(char if char.isalnum() else "_" for char in display)
         return f"{flat}.js"
 
-    def source_read(self, local: str) -> str | None:
-        try:
-            with open(local, "rb") as handle:
-                data = handle.read()
-        except OSError:
-            return None
-        return data.decode("utf-8", errors="replace")
+    def source_read(self, local: str) -> str:
+        with open(local, "rb") as handle:
+            return handle.read().decode("utf-8", errors="replace")
 
     def sources_write(
         self,
         out_dir: str,
         info: dict[str, callgrind.PathInfo],
         model: CallgrindToHeatmap.HeatModel,
+        derive: CallgrindToHeatmap.Derive | None,
     ) -> None:
         shared = [
             (entry["source"], display)
@@ -526,23 +571,20 @@ class CallgrindToHeatmap:
                 "error: two source paths share one sources/ script"
                 f" name:\n{report}"
             )
-        local_of = {
+        local = {
             path_info.display: path_info.local
             for path_info in info.values()
             if path_info.local
         }
         os.makedirs(out_dir, exist_ok=True)
         for name, display in sorted(names.items()):
-            text = self.source_read(local_of[display])
-            if text is None:
-                raise RuntimeError(
-                    f"source for {display!r} was readable earlier but"
-                    " is not now"
-                )
+            path = os.path.join(out_dir, str(name))
+            if derive is not None:
+                shutil.copyfile(local[display], path)
+                continue
+            text = self.source_read(local[display])
             body = json.dumps(text, ensure_ascii=False).replace("</", "<\\/")
-            with open(
-                os.path.join(out_dir, str(name)), "w", encoding="utf-8"
-            ) as handle:
+            with open(path, "w", encoding="utf-8") as handle:
                 handle.write(
                     "window.report_sources_ = window.report_sources_ || {};\n"
                     f"window.report_sources_[{json.dumps(display)}] ="
@@ -606,6 +648,33 @@ def main() -> None:
         help="callgrind_diff.py's synthesized callers diff, holding the "
         "baseline cost each share divides by (--diff only)",
     )
+    data_parser.add_argument(
+        "--paths-output",
+        default="",
+        metavar="FILE",
+        help="writes how this report shows each recorded path, for a diff"
+        " to derive",
+    )
+    data_parser.add_argument(
+        "--baseline-paths",
+        default="",
+        metavar="FILE",
+        help="the baseline report's paths document, whose tracked files"
+        " list the cold tree (--diff only)",
+    )
+    data_parser.add_argument(
+        "--modified-paths",
+        default="",
+        metavar="FILE",
+        help="the modified report's paths document (--diff only)",
+    )
+    data_parser.add_argument(
+        "--sources-dir",
+        default="",
+        metavar="DIR",
+        help="the baseline report's sources, copied for each file the diff"
+        " shows (--diff only)",
+    )
 
     page_parser = subparsers.add_parser(
         "page",
@@ -630,6 +699,10 @@ def main() -> None:
                 test=namespace.test,
                 diff=namespace.diff,
                 baseline_data=namespace.baseline_data,
+                paths_output=namespace.paths_output,
+                baseline_paths=namespace.baseline_paths,
+                modified_paths=namespace.modified_paths,
+                sources_dir=namespace.sources_dir,
             )
         )
 

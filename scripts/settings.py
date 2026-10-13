@@ -20,6 +20,7 @@ ASSET_LIGHT_MODE_STYLESHEET_NAME = "light_mode.css"
 ASSET_MENU_SCRIPT_NAME = "menu.js"
 ASSET_MENU_STYLESHEET_NAME = "menu.css"
 ASSET_OVERVIEW_SCRIPT_NAME = "overview.js"
+ASSET_PREFERENCES_SCRIPT_NAME = "preferences.js"
 ASSET_PULLDOWN_TEXT_SCRIPT_NAME = "pulldown_text.js"
 ASSET_SETTINGS_PAGE_SCRIPT_NAME = "settings_page.js"
 ASSET_SETTINGS_SCRIPT_NAME = "settings.js"
@@ -34,10 +35,20 @@ ASSET_THEME_STYLESHEET_NAME = "theme.css"
 ASSET_UI_STRINGS_SCRIPT_NAME = "ui_strings.js"
 ASSET_UTILITY_SCRIPT_NAME = "utility.js"
 
+CALLERS_CELL_SEPARATOR_TEXT = ", "
 CALLERS_PAGE_DIR_NAME = "callers"
 CALLERS_TIME_SUFFIX_SECONDS: dict[str, float] = {"ns": 1e-9, "usecs": 1e-6}
 CALLERS_TOP_FUNCTION_ROWS = 50
 CALLERS_VIEW_KEY = "callers"
+
+CALLGRIND_FILE_DATA_ERROR_CODE = "err"
+CALLGRIND_FILE_DATA_GIT_CODE = "git"
+CALLGRIND_FILE_DATA_INDENT_CHARS = 2
+CALLGRIND_FILE_DATA_REPO_CODE = "repo"
+CALLGRIND_FILE_DATA_SYSTEM_CODE = "sys"
+
+COUNTER_SELECTION_CALLS_SHOWN_DEFAULT = True
+COUNTER_SELECTION_DEFAULT_NAMES: tuple[str, ...] = ("D1m", "DLm", "Bcm")
 
 DARK_MODE_ATTRIBUTE_NAME = "data-dark-mode-"
 DARK_MODE_DISABLED_VALUE = "disabled"
@@ -89,13 +100,13 @@ HEAT_MAP_COUNTER_DESCRIPTION_STRING_ID_PREFIX = "str_counter_"
 HEAT_MAP_HOME_LINES_LOCATION_MAX_CHARS = 28
 HEAT_MAP_HOME_LINES_SOURCE_COLUMN_MAX_CHARS = 36
 HEAT_MAP_HOME_LINES_SOURCE_SNIPPET_MAX_CHARS = 110
+HEAT_MAP_HOME_TABLE_DEFAULT_KIND = "functions"
 HEAT_MAP_HOME_TABLE_DEFAULT_ROWS = 20
 HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX = 8
 HEAT_MAP_MODEL_DIR_NAME = "data"
 HEAT_MAP_MODEL_GLOBAL_NAME = "report_heat_map_models_"
 HEAT_MAP_SCALE_DEFAULT_VALUE = "log/global"
 HEAT_MAP_SCALE_DIFF_DEFAULT_VALUE = "log/line"
-HEAT_MAP_SECONDARY_COUNTER_NAMES: tuple[str, ...] = ("D1m", "DLm", "Bcm")
 HEAT_MAP_SORT_DEFAULT_MODE = "heat"
 HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE = 0.01
 HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_MAX_COUNT = 10
@@ -124,12 +135,9 @@ MENU_SCALE_KEY_STEPS: dict[str, int] = {"+": 1, "=": 1, "-": -1}
 NUMBER_FRACTION_DIGITS = 2
 NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES = 999.99
 
-OVERVIEW_VALGRIND_LOG_FIRST_LINE_PATTERN = "^Events *:"
-
 RANKING_COUNTER_NAME = "CEst"
 
-REPORT_SOURCES_DIR_NAME = "sources"
-
+SCREENSHOT_LABEL_TITLE_TEXT = "click to copy"
 SCREENSHOT_MENU_KEY_NUMBER = "screenshot-menu"
 
 SETTINGS_DEBUG_ENABLED = False
@@ -137,23 +145,30 @@ SETTINGS_DEBUG_HASH_KEY_NAME = "setting-values"
 SETTINGS_DEBUG_JSON_INDENT_CHARS = 2
 SETTINGS_DEBUG_JSON_MAX_LENGTH_CHARS = 79
 SETTINGS_DEBUG_JSON_SPACING_PATTERN = r'("(?:[^\\"]|\\.)*")|[:,]'
-SETTINGS_DEBUG_QUERY_ENABLED_VALUE = "1"
 SETTINGS_DEBUG_QUERY_KEY_NAME = "debug"
+SETTINGS_DEBUG_QUERY_VALUES: dict[str, str] = {"disabled": "0", "enabled": "1"}
+SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES = 0
+SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES: tuple[int, ...] = (0, 10, 20, 50, 100)
+SETTINGS_LOAD_LOG_HISTORY_MAX_LINES = 100
 SETTINGS_VIEW_ENTRY: tuple[str, str] = ("settings", "settings/index.html")
 
 STORAGE_KEY_CALLERS_ROWS = "callers.rows"
-STORAGE_KEY_HEAT_COUNTER = "heat.counter"
 STORAGE_KEY_HEAT_ROWS = "heat.rows"
 STORAGE_KEY_HEAT_SCALE = "heat.scale"
 STORAGE_KEY_HEAT_SORT = "heat.sort"
+STORAGE_KEY_SETTINGS_HISTORY = "settings.history"
+STORAGE_KEY_VIEW_CALLS = "view.calls"
+STORAGE_KEY_VIEW_COUNTERS = "view.counters"
 STORAGE_KEY_VIEW_DARK_MODE = "view.dark_mode"
 STORAGE_KEY_VIEW_SCALE = "view.scale"
 STORAGE_OWNED_KEYS: tuple[str, ...] = (
     STORAGE_KEY_CALLERS_ROWS,
-    STORAGE_KEY_HEAT_COUNTER,
     STORAGE_KEY_HEAT_ROWS,
     STORAGE_KEY_HEAT_SCALE,
     STORAGE_KEY_HEAT_SORT,
+    STORAGE_KEY_SETTINGS_HISTORY,
+    STORAGE_KEY_VIEW_CALLS,
+    STORAGE_KEY_VIEW_COUNTERS,
     STORAGE_KEY_VIEW_DARK_MODE,
     STORAGE_KEY_VIEW_SCALE,
 )
@@ -166,7 +181,7 @@ STYLE_COLOR_DARK_MODE: dict[str, list[str]] = {
         "dark-mode-menu-normal-outline-",
         "dark-mode-page-link-fg-",
     ],
-    "#0E4F6E": ["dark-mode-menu-normal-bg-"],
+    "#0E4F6E": ["dark-mode-menu-normal-bg-", "dark-mode-status-bar-bg-"],
     "#F5F6FA": [
         "dark-mode-menu-focus-bg-",
         "dark-mode-page-emphasis-fg-",
@@ -177,17 +192,12 @@ STYLE_COLOR_DARK_MODE: dict[str, list[str]] = {
     "#273C75": ["dark-mode-page-emphasis-bg-"],
     "#192A56": ["dark-mode-menu-focus-fg-", "dark-mode-panel-bg-"],
     "#353B48": ["dark-mode-table-panel-even-bg-"],
-    "#2F3640": [
-        "dark-mode-page-bg-",
-        "dark-mode-status-bar-bg-",
-        "dark-mode-table-panel-odd-bg-",
-    ],
+    "#2F3640": ["dark-mode-page-bg-", "dark-mode-table-panel-odd-bg-"],
     "#FFFFFF": ["dark-mode-debug-tip-fg-", "dark-mode-screenshot-label-fg-"],
     "#000000": [
         "dark-mode-debug-tip-bg-",
         "dark-mode-debug-tip-border-",
         "dark-mode-screenshot-label-bg-",
-        "dark-mode-screenshot-label-border-",
     ],
 }
 STYLE_COLOR_DARK_MODE_ROLE_PREFIX = "dark-mode-"
@@ -202,7 +212,6 @@ STYLE_COLOR_LIGHT_MODE: dict[str, list[str]] = {
         "light-mode-page-emphasis-bg-",
         "light-mode-page-fg-",
         "light-mode-screenshot-label-bg-",
-        "light-mode-screenshot-label-border-",
     ],
     "#FFFFFF": [
         "light-mode-debug-tip-fg-",
@@ -224,11 +233,11 @@ STYLE_COLOR_LIGHT_MODE: dict[str, list[str]] = {
 STYLE_COLOR_LIGHT_MODE_ROLE_PREFIX = "light-mode-"
 STYLE_DESIGN_COORDINATES_WIDTH_PX = 1920
 STYLE_DESIGN_DEVICE_PIXEL_WIDEST_PROPERTY = "--design-device-pixel-widest-px-"
-STYLE_DESIGN_FONT_CHARACTER_WIDTH_PX = 7.2
+STYLE_DESIGN_FONT_CHARACTER_WIDTH_SHARE = 0.6
 STYLE_DESIGN_FONT_FIT_PROPERTY = "--design-font-fit-"
 STYLE_DESIGN_FONT_FIT_START_MULTIPLE = 1
 STYLE_DESIGN_FONT_SIZE_PROPERTY = "--design-font-size-px-"
-STYLE_DESIGN_FONT_SIZE_PX = 12
+STYLE_DESIGN_FONT_SIZE_PX = 24
 STYLE_DESIGN_MINIMUM_WINDOW_WIDTH_PX = 1280
 STYLE_DESIGN_SCALE_DEFAULT_MULTIPLE = 1
 STYLE_DESIGN_SCALE_DEFAULT_STOP = 6
@@ -280,7 +289,6 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "debug-tip-font-size-": "1.5em",
     "debug-tip-z-index-": "2147483647",
     "heat-map-band-z-index-": "2",
-    "heat-map-menu-padding-bottom-": "1lh",
     "heat-map-minimap-width-": "110px",
     "heat-map-overview-home-border-block-": "1lh",
     "heat-map-overview-home-border-inline-": "2ch",
@@ -297,7 +305,8 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "menu-pulldown-entry-list-z-index-": "3",
     "menu-pulldown-entry-padding-inline-": "1ch",
     "menu-pulldown-search-box-min-width-": "13ch",
-    "overview-collapsed-section-log-box-max-height-share-": "0.6",
+    "menu-status-bar-cell-padding-left-": "2ch",
+    "menu-strip-blank-line-height-": "0.5lh",
     "page-body-line-height-": "1.1",
     "page-emphasis-padding-inline-": "1ch",
     "page-line-width-": "0.125ch",
@@ -305,8 +314,6 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "page-table-column-title-z-index-": "1",
     "page-text-scrollbar-horizontal-height-": "1lh",
     "page-text-scrollbar-vertical-width-": "1ch",
-    "screenshot-label-border-width-": "1.5ch",
-    "screenshot-label-font-size-": "1.5em",
     "screenshot-label-z-index-": "3",
 }
 
@@ -410,7 +417,7 @@ class SettingsReader:
             expected = wanted.get(name)
             self.match_check(module_name, name)
             self.sentinel_check(module_name, name, scope[name], expected)
-            value = self.value_of(name)
+            value = self.value(name)
             self.type_check(module_name, name, value, expected)
             setattr(module, name, value)
 
@@ -604,7 +611,7 @@ class SettingsReader:
             "in settings.py."
         )
 
-    def value_of(self, name: str) -> object:
+    def value(self, name: str) -> object:
         return globals()[name.lstrip("_")]
 
 

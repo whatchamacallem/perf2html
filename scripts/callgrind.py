@@ -4,20 +4,23 @@
 
 from __future__ import annotations
 
-import collections, dataclasses, functools, os, posixpath, re, sys
+import collections, dataclasses, functools, json, os, posixpath, re, sys
 from collections.abc import Callable, Sequence
-from typing import Literal, NamedTuple, TypeAlias, TypeVar
+from typing import NamedTuple, TypeAlias, TypeVar
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import settings
 
 _CACHE_ROOT_DIR: str = ""
+_CALLGRIND_FILE_DATA_ERROR_CODE: str = ""
+_CALLGRIND_FILE_DATA_GIT_CODE: str = ""
+_CALLGRIND_FILE_DATA_REPO_CODE: str = ""
+_CALLGRIND_FILE_DATA_SYSTEM_CODE: str = ""
 _DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {}
 _RANKING_COUNTER_NAME: str = ""
 settings.load_into(__name__)
 
 Costs: TypeAlias = list[int]
-Group = Literal["repo", "system", "external"]
 
 REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
@@ -101,6 +104,69 @@ class CounterSchema:
         )
 
 
+class DerivedPath(NamedTuple):
+    canonical: str
+    group: str
+    has_source: bool
+
+
+# Answers each recorded path's category as a diff's two reports coded it.
+class DerivedPaths:
+    def __init__(self, baseline_document: str, modified_document: str) -> None:
+        baseline = self.document_read(baseline_document)
+        self.tracked = [
+            path
+            for path, code in baseline.items()
+            if code == _CALLGRIND_FILE_DATA_GIT_CODE
+        ]
+        self.files: dict[str, DerivedPath] = {}
+        codes = (
+            _CALLGRIND_FILE_DATA_ERROR_CODE,
+            _CALLGRIND_FILE_DATA_GIT_CODE,
+            _CALLGRIND_FILE_DATA_REPO_CODE,
+            _CALLGRIND_FILE_DATA_SYSTEM_CODE,
+        )
+        for document, read in (
+            (baseline_document, baseline),
+            (modified_document, self.document_read(modified_document)),
+        ):
+            for path, code in read.items():
+                if code not in codes:
+                    sys.exit(
+                        f"error: {document} codes {path} as {code!r},"
+                        f" which is none of {' '.join(codes)}"
+                    )
+                if code == _CALLGRIND_FILE_DATA_GIT_CODE:
+                    continue
+                shown = DerivedPath(
+                    path, code, code != _CALLGRIND_FILE_DATA_ERROR_CODE
+                )
+                known = self.files.setdefault(path, shown)
+                if known != shown:
+                    sys.exit(
+                        f"error: the two reports code {path} apart:"
+                        f" {known} in {baseline_document}, {shown} in"
+                        f" {document}"
+                    )
+
+    def document_read(self, path: str) -> dict[str, str]:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                return json.load(handle)
+        except OSError as error:
+            sys.exit(f"error: {path}: {error}: no file data to derive")
+
+    def path_entry(self, path: str) -> DerivedPath:
+        canonical = path_canonical(path)
+        entry = self.files.get(canonical)
+        if entry is None:
+            sys.exit(
+                f"error: neither report's file data names {canonical},"
+                f" recorded as {path}"
+            )
+        return entry
+
+
 @dataclasses.dataclass
 class LineProfile:
     counters: list[str] = dataclasses.field(default_factory=list)
@@ -145,7 +211,7 @@ class LineProfile:
 class PathInfo(NamedTuple):
     display: str
     local: str | None
-    group: Group
+    group: str
 
 
 @dataclasses.dataclass
@@ -251,7 +317,9 @@ class Callgrind:
 
     # Renames each function spelled as an address, through its object or None.
     def address_names_resolve(
-        self, text: str, name_of: Callable[[str | None, str], str | None]
+        self,
+        text: str,
+        address_name_resolve: Callable[[str | None, str], str | None],
     ) -> str:
         names = Callgrind.CompressedNames()
         lines = text.split("\n")
@@ -280,7 +348,7 @@ class Callgrind:
                 name = match.group(2)
                 if not Callgrind.ADDRESS_NAME_RE.fullmatch(name):
                     continue
-                resolved = name_of(
+                resolved = address_name_resolve(
                     None
                     if object_path == _CALLGRIND_UNKNOWN_NAME
                     else object_path,
@@ -302,7 +370,7 @@ class Callgrind:
                 profile.function_entry[function] = SourceLine(home, line)
 
     # Refuses a function in no object that is still named by its address.
-    def function_name_of(
+    def function_name(
         self,
         names: Callgrind.CompressedNames,
         compressed_name: str,
@@ -501,12 +569,12 @@ class Callgrind:
                     raw_line[equals_index + 1 :],
                 )
                 if key in ("fl", "fi", "fe"):
-                    current_file = file_key_of(
+                    current_file = file_key(
                         names.uncompress("fl", specification_value),
                         current_object,
                     )
                 elif key == "fn":
-                    cur_function = self.function_name_of(
+                    cur_function = self.function_name(
                         names, specification_value, current_object, path
                     )
                     profile.function_home.setdefault(
@@ -522,12 +590,12 @@ class Callgrind:
                         "ob", specification_value
                     )
                 elif key in ("cfl", "cfi"):
-                    cur_callee_file = file_key_of(
+                    cur_callee_file = file_key(
                         names.uncompress("fl", specification_value),
                         current_callee_object or current_object,
                     )
                 elif key == "cfn":
-                    cur_callee_function = self.function_name_of(
+                    cur_callee_function = self.function_name(
                         names,
                         specification_value,
                         current_callee_object or current_object,
@@ -574,16 +642,16 @@ _profile_parser = Callgrind()
 
 
 def address_names_resolve(
-    text: str, name_of: Callable[[str | None, str], str | None]
+    text: str, address_name_resolve: Callable[[str | None, str], str | None]
 ) -> str:
-    return _profile_parser.address_names_resolve(text, name_of)
+    return _profile_parser.address_names_resolve(text, address_name_resolve)
 
 
 def baseline_line_key(display: str, line: int | str) -> str:
     return f"{display}\n{line}"
 
 
-def cached_source_of(display: str) -> str | None:
+def cached_source(display: str) -> str | None:
     if display.startswith(".."):
         return None
     parts = display.split("/")
@@ -645,48 +713,87 @@ def counter_value(counters: Sequence[str], costs: Costs, name: str) -> int:
     return counter_schema(tuple(counters)).value(costs, name)
 
 
-def display_path_of(path: str, object_path: str) -> str:
-    info = path_norm(path)
-    if info.group != "external":
-        return info.display
+# Answers the path a page shows, an external one under its object's name.
+def display_path(canonical: str, group: str, object_path: str) -> str:
+    if group != _CALLGRIND_FILE_DATA_ERROR_CODE:
+        return canonical
     owner = os.path.basename(object_path) or "(unknown object)"
-    return f"{owner}/{info.display}"
+    return f"{owner}/{canonical}"
 
 
-def file_key_of(path: str, object_path: str) -> str:
+def file_key(path: str, object_path: str) -> str:
     if path != _CALLGRIND_UNKNOWN_NAME:
         return path
     return f"{os.path.basename(object_path)}/{path}"
 
 
-def path_norm(path: str) -> PathInfo:
+# Answers each file a path names, keyed by what its one `*` stands for.
+def named_paths(pattern: str) -> dict[str, str]:
+    directory, name_pattern = os.path.split(pattern)
+    head, star, tail = name_pattern.partition("*")
+    if not star or "*" in tail or "*" in directory:
+        print(
+            f"error: {pattern!r} holds no single * in its file name",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    path = {
+        entry[len(head) : len(entry) - len(tail)]: os.path.join(
+            directory, entry
+        )
+        for entry in os.listdir(directory)
+        if len(entry) > len(head) + len(tail)
+        and entry.startswith(head)
+        and entry.endswith(tail)
+    }
+    if not path:
+        print(f"error: no file matches {pattern}", file=sys.stderr)
+        sys.exit(2)
+    return dict(sorted(path.items()))
+
+
+# Answers the one path a recorded path is known by, the repo root cut.
+def path_canonical(path: str) -> str:
     if posixpath.basename(path) == _CALLGRIND_UNKNOWN_NAME:
-        return PathInfo("(unknown)", None, "external")
+        return "(unknown)"
+    return posixpath.normpath(repo_root_strip(path)).lstrip("/")
+
+
+def path_norm(path: str) -> PathInfo:
+    display = path_canonical(path)
+    if posixpath.basename(path) == _CALLGRIND_UNKNOWN_NAME:
+        return PathInfo(display, None, _CALLGRIND_FILE_DATA_ERROR_CODE)
     root = REPO_ROOT + "/"
     if os.path.isabs(path):
         path = posixpath.normpath(path)
     if path.startswith(root):
-        relative = path[len(root) :]
-        local = os.path.join(REPO_ROOT, relative)
-        return PathInfo(
-            relative, local if os.path.isfile(local) else None, "repo"
-        )
+        local = os.path.join(REPO_ROOT, path[len(root) :])
+        if os.path.isfile(local):
+            return PathInfo(display, local, _CALLGRIND_FILE_DATA_REPO_CODE)
+        return PathInfo(display, None, _CALLGRIND_FILE_DATA_ERROR_CODE)
     if os.path.isabs(path):
         if os.path.isfile(path):
-            return PathInfo(path.lstrip("/"), path, "system")
-        return PathInfo(path.lstrip("/"), None, "external")
+            return PathInfo(display, path, _CALLGRIND_FILE_DATA_SYSTEM_CODE)
+        return PathInfo(display, None, _CALLGRIND_FILE_DATA_ERROR_CODE)
     candidate = os.path.join(REPO_ROOT, path)
     if os.path.isfile(candidate):
-        return PathInfo(posixpath.normpath(path), candidate, "repo")
-    display = posixpath.normpath(path)
-    cached = cached_source_of(display)
+        return PathInfo(display, candidate, _CALLGRIND_FILE_DATA_REPO_CODE)
+    cached = cached_source(display)
     if cached is not None:
-        return PathInfo(display, cached, "system")
-    return PathInfo(display, None, "external")
+        return PathInfo(display, cached, _CALLGRIND_FILE_DATA_SYSTEM_CODE)
+    return PathInfo(display, None, _CALLGRIND_FILE_DATA_ERROR_CODE)
 
 
 def profile_load(paths: Sequence[str]) -> Profile:
-    return _profile_parser.load(paths)
+    return _profile_parser.load(
+        [
+            found
+            for path in paths
+            for found in (
+                named_paths(path).values() if "*" in path else [path]
+            )
+        ]
+    )
 
 
 def ranking_counter_check(counters: Sequence[str], source: str) -> None:
@@ -697,6 +804,11 @@ def ranking_counter_check(counters: Sequence[str], source: str) -> None:
         f" counter every page ranks and divides by: it records"
         f" {' '.join(counters)}"
     )
+
+
+# Cuts the repository root as the archived recordings have it cut.
+def repo_root_strip(text: str) -> str:
+    return text.replace(REPO_ROOT + "/", "")
 
 
 def tally_accumulate(

@@ -8,29 +8,23 @@ window.try_catch_handler_(function () {
   const RANKING_COUNTER_NAME = settings_("RANKING_COUNTER_NAME");
 
   const MANIFEST_TABLE_COLUMNS = [{ label: "" }, { label: "", grow: true }];
-  const OPTIONAL_SLOT_STRING_IDS = {
-    "#overview-collapsed-section-perf-log- > summary": "str_section_perf_log",
-    "#overview-collapsed-section-trace-log- > summary":
-      "str_section_trace_log",
-    "#overview-collapsed-section-valgrind-log- > summary":
-      "str_section_valgrind_log",
-    "#overview-manifest-heading-": "str_heading_manifest",
-  };
 
-  const text_of = window.ui_strings_.text_of;
+  const text = window.ui_strings_.text;
   const text_fill = window.ui_strings_.text_fill;
+  const manifest_heading = document.getElementById(
+    "overview-manifest-heading-",
+  );
   const raw_data_link = document.querySelector("#overview-raw-data- > a");
   const tests_heading = document.getElementById("overview-tests-heading-");
   const tests_table_data = document.getElementById("overview-tests-table-");
-  const title_heading = document.getElementById("overview-title-heading-");
 
   // Answers the tests table columns, a diff's naming the ranking counter.
-  function tests_columns_of() {
+  function tests_columns() {
     if (tests_table_data.getAttribute("data-diff-") === "1")
       return [
-        { label: text_of("str_column_report_per_test") },
+        { label: text("str_column_report_per_test") },
         { label: RANKING_COUNTER_NAME, numeric: true },
-        { label: text_of("str_column_change_share"), numeric: true },
+        { label: text("str_column_change_share"), numeric: true },
         {
           label: text_fill("str_column_functions_changed", {
             counter: RANKING_COUNTER_NAME,
@@ -42,7 +36,7 @@ window.try_catch_handler_(function () {
       tests_table_data.getAttribute("data-column-labels-"),
     );
     return [
-      { label: text_of("str_column_report") },
+      { label: text("str_column_report") },
       ...column_labels.map((column_label) => ({
         label: column_label,
         numeric: true,
@@ -63,24 +57,19 @@ window.try_catch_handler_(function () {
     );
   }
 
-  title_heading.textContent = text_of("str_view_overview");
-  tests_heading.textContent = text_of("str_heading_tests");
+  tests_heading.textContent = text("str_heading_tests");
   window.report_ui_.view_frame.setAttribute(
     "title",
-    text_of("str_view_frame_title"),
+    text("str_view_frame_title"),
   );
-  // A diff report holds no manifest heading, raw data or log section.
-  for (const [slot_selector, string_id] of Object.entries(
-    OPTIONAL_SLOT_STRING_IDS,
-  )) {
-    const slot_element = document.querySelector(slot_selector);
-    if (slot_element) slot_element.textContent = text_of(string_id);
-  }
+  // A diff report holds no manifest heading or raw data.
+  if (manifest_heading)
+    manifest_heading.textContent = text("str_heading_manifest");
   if (raw_data_link)
     raw_data_link.textContent = text_fill("str_raw_data_link", {
       name: raw_data_link.getAttribute("href").split("/").pop(),
     });
-  table_data_replace(tests_table_data, tests_columns_of(), {});
+  table_data_replace(tests_table_data, tests_columns(), {});
   for (const table_data of document.querySelectorAll(
     ".overview-manifest-table-",
   ))

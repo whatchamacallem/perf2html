@@ -5,9 +5,16 @@ profile and generate reports.
 
 - [HTML Report Generators](#html-report-generators)
 
-The remainder of these sections describe the source code implementing the
-`perf2html` report generators as a guide for interested developers. Starting
-with running the tests and checking the results is recommended.
+The rest of these sections are provided as a guide for interested developers.
+
+These are the data formats.
+
+- [URL Components](#url-components)
+- [Report Contents](#report-contents)
+- [Raw Data Archive Contents](#raw-data-archive-contents)
+
+The remaining sections describe the source code implementing the `perf2html`
+report generators. Start by running the tests and checking the results.
 
 - [Callers Page](#callers-page)
 - [Callgrind Parsing](#callgrind-parsing)
@@ -35,12 +42,73 @@ with running the tests and checking the results is recommended.
 |                         | report and writes a diff report, measuring        |
 |                         | nothing.                                          |
 
+## URL Components
+
+- `debug`: query key, value `1`, that unfreezes the settings so the settings
+  view can apply a setting.
+- `file`: hash key, heat map view only, that names the source file to open.
+- `function`: hash key, heat map view only, that names the function to open and
+  excludes `file` and `line`.
+- `line`: hash key, heat map view only, that names the line within `file` to
+  scroll to.
+- `localProfilePath`: hash key, flame graph view only, that is speedscope's own
+  key naming the profile to load.
+- `screenshot`: query key whose value is shown as a label on the page.
+- `screenshot-menu`: query key, a menu entry number, that opens or focuses
+- `screenshot-mode`: query key, `1` dark or `0` light, that sets the mode a
+  screenshot is shot in. that entry after each menu render.
+- `setting`: hash key, settings view only, that names the setting scrolled to
+  the top.
+- `setting-val`: hash key, settings view only, that carries the base64 JSON of
+  the new value for `setting`, applied on load.
+- `test`: hash key that names the test shown, `all` being the merged test.
+- `view`: hash key, one of `callers`, `heat-map`, `flame-graph` or `settings`,
+  that names the page framed, required whenever `test` is present.
+
+## Report Contents
+
+Reading a report requires opening `index.html`. The rest of the report is of no
+interest to users, except perhaps automated processing of `MANIFEST.txt`.
+
+Otherwise, if you are an interested developer, these are the rest of the files
+in the directory. A diff report lacks the `flame-graph/`, `flame-graph-app/`
+and raw data archive files.
+
+- `scripts/*.js`: Files copied whole or modified, from the scripts/ dir.
+- `callers/<test>.html`: a test's callers page holding its JSON callers model.
+- `flame-graph-app/SourceCodePro-Regular.ttf-*.woff2`: the speedscope font.
+- `flame-graph-app/speedscope-*.css`: the speedscope app's stylesheet.
+- `flame-graph-app/speedscope-*.js`: the speedscope app.
+- `flame-graph/index.html`: the flame graph page loading the speedscope app.
+- `flame-graph/profiles/<test>.js`: a test's speedscope profile, no `all`.
+- `heat-map/data/<test>.js`: a test's heat map model.
+- `heat-map/index.html`: the one heat map page for every test.
+- `index.html`: the overview, the top page with the menu, home panel and frame.
+- `MANIFEST.txt`: the version line, then the `LABEL=VALUE` rows, written last.
+- `README.md`: a copy of the user contract.
+- `settings/index.html`: the settings view page.
+- `sources/<path>.js`: a source file's text, the path's non-alphanumerics `_`.
+- `timer-artifacts-c.txz`: the raw data archive, recorded at `<time_t>`.
+
+## Raw Data Archive Contents
+
+- `0_file_data.<time_t>.json`: Source directory file listing with mode flags.
+- `<test>.callgrind.<time_t>.out`: a test's callgrind file, the repo root cut.
+
+In `0_file_data.<time_t>.json` each filename is mapped to one of `repo`,
+`sys`, `git`, or `err`.
+
+- `repo` : A project file with source.
+- `sys` : A system file with source.
+- `git` : A non-contributing project file with no source.
+- `err` : A file that Callgrind could not find or was deleted.
+
 ## Callers Page
 
 | File           | Purpose                                              |
 | -------------- | ---------------------------------------------------- |
 | `callers.html` | Templates the callers page of one test, holding the  |
-|                | function rows that `callers.js` draws.               |
+|                | JSON callers model that `callers.js` draws.          |
 | `callers.js`   | Draws the callers heading and function table, then   |
 |                | activates the page as a view that scrolls to the top |
 |                | when the address is followed again.                  |
@@ -58,14 +126,15 @@ with running the tests and checking the results is recommended.
 
 ## Error Overlay
 
-| File               | Purpose                                                |
-| ------------------ | ------------------------------------------------------ |
-| `debug.js`         | Templates the report's debug script, the manifest      |
-|                    | table the error report shows, then the debug tip.      |
-| `error_overlay.js` | Catches the first error a page throws and replaces the |
-|                    | top page with a plain error report.                    |
-| `utility.js`       | Relays an error report up the frames and reports a     |
-|                    | failed load of a link, script or image.                |
+| File               | Purpose                                               |
+| ------------------ | ----------------------------------------------------- |
+| `debug.js`         | Templates the report's debug script, the manifest     |
+|                    | table the error report shows, then the debug tip.     |
+| `error_overlay.js` | Catches the first error a page throws, relays it up   |
+|                    | the frames and replaces the top page with a plain     |
+|                    | error report.                                         |
+| `utility.js`       | Reports a failed load of a link, script or image, and |
+|                    | keeps the log.                                        |
 
 ## Flame Graph
 
@@ -85,24 +154,28 @@ with running the tests and checking the results is recommended.
 | File                      | Purpose                                      |
 | ------------------------- | -------------------------------------------- |
 | `callgrind_to_heatmap.py` | Writes the heat map data and sources of each |
-|                           | test, then the one heat map page.            |
+|                           | test, the paths document a diff derives and  |
+|                           | the one heat map page.                       |
 | `heat_map.css`            | Lays out the heat map tree, source table,    |
 |                           | minimap and info boxes.                      |
-| `heat_map.html`           | Templates the heat map page with its strip,  |
-|                           | tree pane, main box, minimap and text bars.  |
-| `heat_map.js`             | Draws the heat map tree, home tables, source |
+| `heat_map.html`           | Templates the heat map page with its tree    |
+|                           | pane, main box, minimap and text bars.       |
+| `heat_map.js`             | Draws the heat map tree, home table, source  |
 |                           | view and info boxes for every test.          |
-| `heat_map_main.html`      | Templates the heat map home with its lines   |
-|                           | table and functions table.                   |
+| `heat_map_main.html`      | Templates the heat map home, a heading over  |
+|                           | the table of the kind its pulldown picks.    |
 
 ## Menu Strip
 
-| File       | Purpose                                                       |
-| ---------- | ------------------------------------------------------------- |
-| `menu.css` | Styles every strip and pulldown, the menu, the heat map strip |
-|            | and the table headings.                                       |
-| `menu.js`  | Holds the menu controller, which draws the strip, takes keys  |
-|            | and starts every navigation.                                  |
+| File             | Purpose                                                 |
+| ---------------- | ------------------------------------------------------- |
+| `menu.css`       | Styles every strip and pulldown, the menu, its          |
+|                  | preference strip, the table headings and the history    |
+|                  | strip of the settings view.                             |
+| `menu.js`        | Holds the menu controller, which draws the strip, takes |
+|                  | keys and starts every navigation.                       |
+| `preferences.js` | Holds the preferences the menu edits and a view draws   |
+|                  | with, their choices and their counter labels.           |
 
 ## Overview Page
 
@@ -113,10 +186,9 @@ with running the tests and checking the results is recommended.
 | `frame.js`        | Holds the model of the top page, which checks the      |
 |                   | address and loads each view into the frame.            |
 | `overview.html`   | Templates the top page with the menu, the home panel   |
-|                   | holding each test's logs, and the view frame.          |
-| `overview.js`     | Fills the home panel's headings, raw data link and     |
-|                   | log titles, then draws its tables from the rows the    |
-|                   | page holds.                                            |
+|                   | and the view frame.                                    |
+| `overview.js`     | Fills the home panel's headings and raw data link,     |
+|                   | then draws its tables from the rows the page holds.    |
 
 ## Settings Files
 
@@ -126,15 +198,12 @@ with running the tests and checking the results is recommended.
 |                      | page installing them, a framed page taking them      |
 |                      | relayed, then writes every root value a stylesheet   |
 |                      | reads.                                               |
-| `settings.py`        | Holds every Python and JavaScript setting with the   |
-|                      | reader and writer that load and ship them.           |
+| `settings.py`        | Holds every PY and JS setting with the reader and    |
+|                      | writer that load and ship them.                      |
 | `settings.sh`        | Holds every shell setting, read by the shell scripts |
 |                      | and by `settings.py`.                                |
-| `settings_page.html` | Templates the settings view, one pre that            |
-|                      | `settings_page.js` fills, beside its text bar.       |
-| `settings_page.js`   | Lists every setting over an editable JSON box with   |
-|                      | link, copy, paste and apply buttons, then applies    |
-|                      | the value an address carries.                        |
+| `settings_page.html` | Templates the settings view                          |
+| `settings_page.js`   | Draws every setting in an editable JSON box.         |
 | `ui_strings.js`      | Holds every user interface string, looked up by      |
 |                      | name.                                                |
 
@@ -176,9 +245,8 @@ with running the tests and checking the results is recommended.
 | `theme.css`      | Holds the layout rules shared by every report page.    |
 | `theme.js`       | Holds the shared page library for addresses, strips,   |
 |                  | tables, numbers, scrollbars and layout.                |
-| `theme.py`       | Writes table rows, numbers and page heads, then writes |
-|                  | the shared assets and checks the root value names the  |
-|                  | stylesheets read.                                      |
+| `theme.py`       | Writes table rows and numbers, fills the page          |
+|                  | templates, and writes the shared scripts.              |
 
 ## Tool Configuration
 

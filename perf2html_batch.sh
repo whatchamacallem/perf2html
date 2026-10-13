@@ -13,8 +13,8 @@ perf2html_batch.sh [debug-flags] [--target-dir=DIR] [cmake-flags...]
                       batch cannot rename them.
     --txz             Create .txz archives of all reports generated.
                       .txz files may also be used as inputs.
-    cmake-flags:      Every argument not one of its own options, applied to the
-                      modified build (default -D CMAKE_C_FLAGS=-Os).
+    cmake-flags       Everything else is passed directly to cmake in the
+                      modified build (default is -D CMAKE_C_FLAGS=-Os).
 
     The debug-flags are the same as the README.md documents.
     --artifacts=TMP   The profiler artifacts directory. Defaults to
@@ -34,14 +34,14 @@ set -euo pipefail
 
 TIMESTAMP="$(date +%s)"
 INVOKED_FROM="$PWD"
-_SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-PERF2HTML_DIR_="$(dirname "$_SCRIPT")"
-cd "$PERF2HTML_DIR_"
+_SCRIPT="$(readlink -f -- "$0")"
+cd -P -- "$(dirname -- "$_SCRIPT")"
+PERF2HTML_DIR_="$PWD"
 
 . ./scripts/settings.sh
 . ./scripts/utility.sh
 
-_REPO="$(dirname "$(dirname "$PERF2HTML_DIR_")")"
+_REPO="$(cd -P -- ../.. && pwd)"
 
 step_run() {
   local _number="$1" _name="$2"
@@ -93,9 +93,9 @@ args_parse() {
   if [ "$KEEP_ARTIFACTS" = 1 ] || [ -n "$ARTIFACTS_DIR" ]; then
     artifacts_dir_resolve "$TARGET_DIR"
   fi
-  _BASE_DIR="$(report_path_of "$REPORT_BASELINE_DIR_NAME")"
-  _MOD_DIR="$(report_path_of "$REPORT_MODIFIED_DIR_NAME")"
-  _DIFF_DIR="$(report_path_of "$REPORT_DIFF_DIR_NAME")"
+  _BASE_DIR="$(report_path "$REPORT_BASELINE_DIR_NAME")"
+  _MOD_DIR="$(report_path "$REPORT_MODIFIED_DIR_NAME")"
+  _DIFF_DIR="$(report_path "$REPORT_DIFF_DIR_NAME")"
 }
 
 main() {
@@ -128,7 +128,7 @@ main() {
     _artifact_flags+=(--keep-artifacts)
   fi
   local _verbose_args=()
-  mapfile -t _verbose_args < <(verbose_flags_of)
+  mapfile -t _verbose_args < <(verbose_flags)
   log_verbose "[$(elapsed_format)s] $_SCRIPT $TIMESTAMP: modified build" \
     "flags: ${_CMAKE_FLAGS[*]}"
 

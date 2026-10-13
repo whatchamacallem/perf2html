@@ -76,7 +76,7 @@ window.try_catch_handler_(function () {
   window.resource_failure_expect_(
     FLAME_GRAPH_LOCAL_PROFILE_URL_PREFIX + _FORWARDED_ADDRESS.localProfilePath,
   );
-  document.title = window.ui_strings_.text_of("str_flame_graph_page_title");
+  document.title = window.ui_strings_.text("str_flame_graph_page_title");
   window.addEventListener(
     "hashchange",
     window.try_catch_handler_(() => location.reload()),
@@ -85,7 +85,6 @@ window.try_catch_handler_(function () {
     dark_mode_apply: color_scheme_hand_over,
     dark_mode_arrive: color_scheme_hand_over,
     forwards_input: false,
-    preferences_apply: null,
     recenter: () => location.reload(),
   });
   const script_name = encodeURIComponent(_FORWARDED_ADDRESS.test) + ".js";

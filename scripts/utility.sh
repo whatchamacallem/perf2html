@@ -42,46 +42,31 @@ archive_report_write() {
   log_verbose "$archive"
 }
 
-artifact_path_of() {
-  local kind="$1" name="$2" file
-  local timer_root="$TIMER_ARTIFACTS_NAME_PREFIX$TIMESTAMP"
+artifact_path() {
+  local kind="$1" name="$2" time="${3:-$TIMESTAMP}" file
+  local profile=".$CALLGRIND_OUTPUT_FILE_EXTENSION"
   case "$kind" in
-    callgrind) file="$CALLGRIND_OUTPUT_FILE_PREFIX.$name.$TIMESTAMP" ;;
-    callgrind-member)
-      file="$timer_root/$CALLGRIND_OUTPUT_FILE_PREFIX.$name"
-      ;;
+    callgrind) file="$name.$CALLGRIND_OUTPUT_TOOL_NAME.$time$profile" ;;
+    callgrind-file-data) file="$CALLGRIND_FILE_DATA_NAME.$time.json" ;;
     caller-counts)
-      file="$DIFF_DELTA_FILE_PREFIX.$name.$TIMESTAMP"
-      file="$file$DIFF_CALLER_COUNTS_FILE_SUFFIX"
+      file="$name.$DIFF_DELTA_TOOL_NAME.$time"
+      file="$file.$DIFF_CALLER_COUNTS_FILE_EXTENSION"
       ;;
-    delta) file="$DIFF_DELTA_FILE_PREFIX.$name.$TIMESTAMP" ;;
-    diff-log) file="$DIFF_LOG_FILE_PREFIX.$TIMESTAMP.log" ;;
-    extracted-profiles) file="$name.$TIMESTAMP" ;;
-    header-block) file="$DIFF_HEADER_BLOCK_FILE_PREFIX.$name.$TIMESTAMP.txt" ;;
-    header-rows) file="$HEADER_ROWS_NAME.$name.txt" ;;
-    profile-listing)
-      file="$DIFF_PROFILE_LISTING_FILE_PREFIX.$name.$TIMESTAMP.txt"
-      ;;
-    profile-log) file="$PROFILE_LOG_FILE_PREFIX.$TIMESTAMP.log" ;;
-    regenerate-log)
-      file="$REGENERATE_LOG_FILE_PREFIX.$TIMESTAMP.$(date +%s).log"
-      ;;
-    timer-artifacts) file="$timer_root" ;;
-    timing-csv) file="$PROFILE_TIMING_FILE_PREFIX.$name.$TIMESTAMP.csv" ;;
-    timing-page) file="$PROFILE_TIMING_FILE_PREFIX.$name.$TIMESTAMP.txt" ;;
-    trace-binary) file="$TRACE_FILE_PREFIX.$name.$TIMESTAMP.bin" ;;
-    trace-log) file="$TRACE_FILE_PREFIX.$name.$TIMESTAMP.log" ;;
-    trace-speedscope)
-      file="$TRACE_FILE_PREFIX.$name.$TIMESTAMP"
-      file="$file$TRACE_SPEEDSCOPE_FILE_SUFFIX"
-      ;;
-    trace-speedscope-member)
-      file="$timer_root/$TRACE_FILE_PREFIX.$name"
-      file="$file$TRACE_SPEEDSCOPE_FILE_SUFFIX"
-      ;;
-    valgrind-log)
-      file="$VALGRIND_LOG_FILE_PREFIX.$name.$TIMESTAMP.log"
-      ;;
+    delta) file="$name.$DIFF_DELTA_TOOL_NAME.$time$profile" ;;
+    diff-log) file="$DIFF_TOOL_NAME.$time.log" ;;
+    diff-regenerate-log) file="$DIFF_TOOL_NAME.log" ;;
+    extracted-profiles) file="$name" ;;
+    header-block) file="$name/$DIFF_TOOL_NAME.$time.txt" ;;
+    header-rows) file="$PROFILE_TOOL_NAME.txt" ;;
+    profile-log) file="$PROFILE_TOOL_NAME.$time.log" ;;
+    profile-regenerate-log) file="$PROFILE_TOOL_NAME.log" ;;
+    timer-artifacts) file="$TIMER_ARTIFACTS_NAME_PREFIX$time" ;;
+    timing-csv) file="$name.$PROFILE_TIMING_TOOL_NAME.$time.csv" ;;
+    timing-page) file="$name.$PROFILE_TIMING_TOOL_NAME.$time.txt" ;;
+    trace-binary) file="$name.$TRACE_TOOL_NAME.$time.bin" ;;
+    trace-log) file="$name.$TRACE_TOOL_NAME.$time.log" ;;
+    trace-speedscope) file="$name.$TRACE_SPEEDSCOPE_TOOL_NAME.$time.json" ;;
+    valgrind-log) file="$name.$VALGRIND_LOG_TOOL_NAME.$time.log" ;;
     *) error_exit 1 "error: unknown artifact kind $kind, named $name" ;;
   esac
   echo "$ARTIFACTS_DIR/$file"
@@ -150,7 +135,7 @@ child_capture() {
   [ "${#statuses[@]}" != 0 ] || return 0
   CHILD_EXIT_CODE="${statuses[0]}"
   for status in "${statuses[@]:1}"; do
-    [ "$status" = 0 ] || error_exit 1 \
+    [ "$status" = 0 ] || error_exit "$status" \
       "error: tee or verbose_filter exited $status behind: $*"
   done
 }
@@ -237,16 +222,18 @@ heading_write() {
   local depth="$1" text="$2" marks=''
   VERBOSE_COMMAND_NUMBER=1
   [ "$VERBOSE" -ge 1 ] || return 0
+  text="[$(elapsed_format)s] $text"
   if [ "$VERBOSE" -lt "$VERBOSE_RAW_LEVEL" ]; then
     printf -v marks '%*s' "$depth" ''
     marks="${marks// /#} "
+    text="${text//"${HOME:?}"\//\~/}"
+    text="${text//</\\<}"
   fi
   block_lead other
-  printf '%s%s\n' "$marks" \
-    "$(code_span "[$(elapsed_format)s] $text")" >&2
+  printf '%s%s\n' "$marks" "$text" >&2
 }
 
-install_command_of() {
+install_command() {
   case "$1" in
     cmake | ninja | ccache | valgrind | taskset | python3 | cksum | curl | \
       tar | xz | dpkg-query)
@@ -275,7 +262,7 @@ log_verbose() {
   code_span "$*" >&2
 }
 
-manifest_fault_of() {
+manifest_fault() {
   local dir="$1"
   shift
   local manifest="$dir/MANIFEST.txt" version expected found wanted
@@ -313,7 +300,7 @@ manifest_fault_of() {
   fi
 }
 
-manifest_recorded_of() {
+manifest_recorded() {
   local dir="$1" role="$2"
   shift 2
 
@@ -340,7 +327,7 @@ manifest_verify() {
   local dir="$1" role="$2"
   shift 2
   local fault
-  fault="$(manifest_fault_of "$dir" "$@")"
+  fault="$(manifest_fault "$dir" "$@")"
   [ -z "$fault" ] || error_exit 2 "error: $role report: $fault"
 }
 
@@ -358,12 +345,12 @@ manifest_write() {
   local version="$1" dir="$2"
   shift 2
   local manifest="$dir/MANIFEST.txt" checksum
-  command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" assets \
-    -o "$dir/$REPORT_ASSETS_DIR_NAME"
+  command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" scripts \
+    -o "$dir/$REPORT_SCRIPTS_DIR_NAME"
   command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" settings \
     -o "$dir"
   command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" debug \
-    -o "$dir/$REPORT_ASSETS_DIR_NAME" \
+    -o "$dir/$REPORT_SCRIPTS_DIR_NAME" \
     -- "$REPORT_MANIFEST_VERSION_LABEL=$version" "$@"
   checksum="$(checksum_compute "$dir")"
   {
@@ -434,7 +421,7 @@ quiet_switch_set() {
 
 report_begin() {
   local dir="$1" log_file="$2" opening_line="$3"
-  mkdir -p "$dir" "$dir/$REPORT_ASSETS_DIR_NAME" "$ARTIFACTS_DIR"
+  mkdir -p "$dir" "$dir/$REPORT_SCRIPTS_DIR_NAME" "$ARTIFACTS_DIR"
   RUN_LOG="$log_file"
   echo "$opening_line" >"$RUN_LOG"
   cp README.md "$dir/README.md"
@@ -475,7 +462,7 @@ report_finish() {
   archive_report_write "$dir"
 }
 
-report_path_of() {
+report_path() {
   local report_name="$1"
   case "$report_name" in
     /* | "~/"*) absolute_path "$report_name" ;;
@@ -490,7 +477,7 @@ revision_describe() {
   if [ "$dirty" = 1 ]; then
     revision="$revision-dirty"
   elif [ "$dirty" != 0 ]; then
-    error_exit 1 "error: git diff --quiet exited $dirty in $repository"
+    error_exit "$dirty" "error: git diff --quiet exited $dirty in $repository"
   fi
   echo "$revision"
 }
@@ -642,15 +629,15 @@ toolchain_check() {
     lines=("error: ${#missing[@]} tool(s) not found on PATH:")
     for tool in "${missing[@]}"; do
       lines+=("$(printf '  %-12s -> %s' "$tool" \
-        "$(install_command_of "$tool")")")
+        "$(install_command "$tool")")")
     done
-    error_exit 1 "${lines[@]}"
+    error_exit 127 "${lines[@]}"
   fi
   SPEEDSCOPE_RELEASE="$(dirname \
     "$(dirname "$(readlink -f "$(command -v speedscope)")")")/dist/release"
   local reason="error: no speedscope bundle at $SPEEDSCOPE_RELEASE/index.html"
   [ -f "$SPEEDSCOPE_RELEASE/index.html" ] || error_exit 1 \
-    "$reason -> $(install_command_of speedscope)"
+    "$reason -> $(install_command speedscope)"
 }
 
 verbose_begin() {
@@ -674,7 +661,7 @@ verbose_filter() {
     fflush("/dev/stderr")
   }
   function block_open() {
-    if (blocks ? separate : lead) line_print("")
+    line_print("")
     blocks++
   }
   function fence_close() {
@@ -702,7 +689,6 @@ verbose_filter() {
       return
     }
     fence_close()
-    if (!blocks && !separate) { separate = 1; lead = 1; loose = 1 }
     block_open()
     head = indent "|"
     rule = indent "|"
@@ -735,13 +721,13 @@ verbose_filter() {
     next
   }
   { held_print(); text_print($0) }
-  END { held_print(); fence_close(); if (loose) print "loose" }
+  END { held_print(); fence_close(); if (blocks) print "loose" }
   ')" || status=$?
   [ "$loose" != loose ] || VERBOSE_BLOCK_PRINTED=loose
   return "$status"
 }
 
-verbose_flags_of() {
+verbose_flags() {
   local flag_count
   for ((flag_count = 0; flag_count < VERBOSE; flag_count++)); do
     echo --verbose

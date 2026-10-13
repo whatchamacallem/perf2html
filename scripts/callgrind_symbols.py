@@ -53,7 +53,7 @@ class CallgrindSymbols:
             recorded_text = handle.read()
         resolved_text = callgrind.address_names_resolve(
             recorded_text,
-            lambda object_path, name: self.name_of(
+            lambda object_path, name: self.name(
                 args, loaded_objects, object_path, name
             ),
         )
@@ -64,7 +64,7 @@ class CallgrindSymbols:
     def code_sections(self, path: str) -> list[CodeSection]:
         if path not in self.sections_by_path:
             sections: list[CodeSection] = []
-            for line in self.listing_of(["-h", "-w"], path).splitlines():
+            for line in self.listing(["-h", "-w"], path).splitlines():
                 line_fields = line.split(maxsplit=7)
                 if (
                     len(line_fields) == 8
@@ -81,13 +81,18 @@ class CallgrindSymbols:
             self.sections_by_path[path] = sections
         return self.sections_by_path[path]
 
-    def listing_of(self, options: list[str], path: str) -> str:
-        return subprocess.run(
-            ["objdump", *options, path],
-            check=True,
-            stdout=subprocess.PIPE,
-            text=True,
-        ).stdout
+    def listing(self, options: list[str], path: str) -> str:
+        command = ["objdump", *options, path]
+        completed = subprocess.run(
+            command, check=False, stdout=subprocess.PIPE, text=True
+        )
+        if completed.returncode != 0:
+            print(
+                f"error: {' '.join(command)} returned {completed.returncode}",
+                file=sys.stderr,
+            )
+            sys.exit(completed.returncode)
+        return completed.stdout
 
     def loaded_objects_read(self, path: str) -> list[LoadedObject]:
         loaded_objects: list[LoadedObject] = []
@@ -115,7 +120,7 @@ class CallgrindSymbols:
         return loaded_objects
 
     # Names an address in its object, or keeps callgrind's name there.
-    def name_of(
+    def name(
         self,
         args: CallgrindSymbols.SymbolsArgs,
         loaded_objects: list[LoadedObject],
@@ -157,7 +162,7 @@ class CallgrindSymbols:
     def object_labels(self, path: str) -> dict[int, str]:
         if path not in self.labels_by_path:
             label_names: dict[int, str] = {}
-            for line in self.listing_of(["-t"], path).splitlines():
+            for line in self.listing(["-t"], path).splitlines():
                 match = _OBJDUMP_FUNCTION_SYMBOL_RE.match(line)
                 if match:
                     label_names.setdefault(
@@ -170,7 +175,7 @@ class CallgrindSymbols:
                 for option in ("-j", section.name)
             ]
             if section_options:
-                disassembly_text = self.listing_of(
+                disassembly_text = self.listing(
                     ["-d", "--no-show-raw-insn", *section_options], path
                 )
                 for line in disassembly_text.splitlines():

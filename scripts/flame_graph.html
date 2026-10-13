@@ -2,14 +2,20 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <script src="../assets/error_overlay.js"></script>
-    <script src="../assets/utility.js"></script>
+    <script src="../scripts/error_overlay.js"></script>
+    <script src="../scripts/utility.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title></title>
-    __SCRIPTS__
+    <script src="../scripts/ui_strings.js"></script>
+    <script src="../scripts/settings.js"></script>
     <link rel="stylesheet" href="__APP_CSS__" />
   </head>
   <body>
-    __HELD_SCRIPTS__
+    <template id="page-held-script-">
+      <script src="../scripts/debug.js"></script>
+      <script src="../scripts/theme.js"></script>
+      <script src="../scripts/flame_graph.js"></script>
+      <script src="__APP_SCRIPT__"></script>
+    </template>
   </body>
 </html>

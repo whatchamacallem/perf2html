@@ -23,14 +23,13 @@ EOF
 
 set -euo pipefail
 
-_SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-_SCRIPTS="$(dirname "$_SCRIPT")"
-
 INVOKED_FROM="$PWD"
-cd "$_SCRIPTS"
+_SCRIPT="$(readlink -f -- "$0")"
+cd -P -- "$(dirname -- "$_SCRIPT")"
+_SCRIPT_DIR="$PWD"
 
 _DIR_PERF2HTML=..
-_DIR_REPO="$(cd ../../.. && pwd)"
+_DIR_REPO="$(cd -P -- ../../.. && pwd)"
 
 _COLUMNS_MAX=79
 _CLANG_FORMAT_CONFIG=../src/.clang-format
@@ -66,7 +65,7 @@ tools_resolve() {
   _CLANG_FORMAT="$(tool_find clang-format)" || _missing+=(clang-format)
   _PRETTIER="$(tool_find prettier)" || _missing+=(prettier)
   _PYRIGHT="$(tool_find pyright)" || _missing+=(pyright)
-  [ "${#_missing[@]}" = 0 ] || error_exit 1 \
+  [ "${#_missing[@]}" = 0 ] || error_exit 127 \
     "error: ${#_missing[@]} tool(s) missing, so nothing is verified:" \
     "${_missing[*]}" \
     "  sudo apt-get install -y shfmt clang-format" \
@@ -115,7 +114,7 @@ whitelist_expand() {
   log_verbose "whitelist: ${#_WHITELISTED_FILES[@]} file(s)"
 }
 
-files_of() {
+files() {
   local _file _extension
 
   for _file in "${_WHITELISTED_FILES[@]}"; do
@@ -130,7 +129,7 @@ files_of() {
 
 format_shell() {
   local _files
-  mapfile -t _files < <(files_of .sh)
+  mapfile -t _files < <(files .sh)
 
   heading_print shfmt
   if [ "${#_files[@]}" = 0 ]; then
@@ -149,7 +148,7 @@ format_shell() {
 
 format_python() {
   local _files
-  mapfile -t _files < <(files_of .py)
+  mapfile -t _files < <(files .py)
 
   heading_print ruff
   if [ "${#_files[@]}" = 0 ]; then
@@ -177,7 +176,7 @@ format_python() {
 
 format_c() {
   local _files
-  mapfile -t _files < <(files_of .c .h)
+  mapfile -t _files < <(files .c .h)
 
   heading_print clang-format
   if [ "${#_files[@]}" = 0 ]; then
@@ -196,7 +195,7 @@ format_c() {
 
 format_prettier() {
   local _files
-  mapfile -t _files < <(files_of .md .js .css .html)
+  mapfile -t _files < <(files .md .js .css .html)
 
   heading_print prettier
   if [ "${#_files[@]}" = 0 ]; then
@@ -216,7 +215,7 @@ format_prettier() {
 
 lint_run() {
   local _files
-  mapfile -t _files < <(files_of .py)
+  mapfile -t _files < <(files .py)
 
   heading_print pyright
   if [ "${#_files[@]}" = 0 ]; then
@@ -228,7 +227,7 @@ lint_run() {
     pyright_filtered_run "$_PYRIGHT" --project "$_PYRIGHT_CONFIG" \
       "${_files[@]}"
   else
-    subprocess_run "$_PYRIGHT" --project "$_PYRIGHT_CONFIG" "${_files[@]}"
+    subprocess_run "$_PYRIGHT" --project "$_PYRIGHT_CONFIG" "${_files[@]}" >&2
   fi
 }
 
@@ -266,7 +265,7 @@ report_version() {
 
 test_expected_report_check_run() {
   local _path _args _flags=()
-  mapfile -t _flags < <(verbose_flags_of)
+  mapfile -t _flags < <(verbose_flags)
 
   heading_print test_report.py
   for _path in "${_DEFAULT_REPORTS[@]}"; do
@@ -278,7 +277,7 @@ test_expected_report_check_run() {
       _args+=(--diff)
     fi
 
-    subprocess_run python3 "$_SCRIPTS/test_report.py" "${_flags[@]}" \
+    subprocess_run python3 "$_SCRIPT_DIR/test_report.py" "${_flags[@]}" \
       "${_args[@]}"
   done
 }
@@ -309,16 +308,16 @@ test_expected_archive_check_run() {
 
 test_source_scan_run() {
   local _flags=()
-  mapfile -t _flags < <(verbose_flags_of)
+  mapfile -t _flags < <(verbose_flags)
 
   heading_print test_source_scan.py
-  subprocess_run python3 "$_SCRIPTS/test_source_scan.py" "${_flags[@]}" \
+  subprocess_run python3 "$_SCRIPT_DIR/test_source_scan.py" "${_flags[@]}" \
     "${_WHITELISTED_FILES[@]}"
 }
 
 batch_run() {
   local _flags=() _target _shown _exit_code=0
-  mapfile -t _flags < <(verbose_flags_of)
+  mapfile -t _flags < <(verbose_flags)
   _target="$(cd "$_DIR_PERF2HTML" && pwd)"
 
   if [ "$_REGENERATE" = 1 ]; then _flags+=(--regenerate); fi
@@ -340,7 +339,7 @@ batch_run() {
 screenshot_command_set() {
   local _name="$1" _path _prefix _args _flags=()
   shift
-  mapfile -t _flags < <(verbose_flags_of)
+  mapfile -t _flags < <(verbose_flags)
   _path="$_DIR_PERF2HTML/$_name"
 
   _prefix="${_name#perf2html_}"
@@ -351,7 +350,7 @@ screenshot_command_set() {
     _args+=(--diff)
   fi
 
-  _SCREENSHOT_COMMAND=(python3 "$_SCRIPTS/$_SCREENSHOT_SCRIPT_NAME"
+  _SCREENSHOT_COMMAND=(python3 "$_SCRIPT_DIR/$_SCREENSHOT_SCRIPT_NAME"
     "${_flags[@]}" "${_args[@]}" "$@")
 }
 
@@ -396,7 +395,7 @@ regenerate_refuse() {
   error_exit 2 "error: --regenerate cannot reuse the recordings: $1"
 }
 
-header_row_of() {
+header_row() {
   sed -n "s/^$2=//p" "$1" | head -1
 }
 
@@ -415,25 +414,25 @@ regenerate_check() {
     if [ ! -d "$_report_artifacts" ]; then
       regenerate_refuse "$_name has no recordings at $_report_artifacts"
     fi
-    _rows="$_report_artifacts/$HEADER_ROWS_NAME.$_name.txt"
+    _rows="$_report_artifacts/$PROFILE_TOOL_NAME.txt"
     if [ ! -f "$_rows" ]; then
       regenerate_refuse "$_name has no recordings, $_rows is missing"
     fi
 
-    _recorded="$(header_row_of "$_rows" recorded)"
+    _recorded="$(header_row "$_rows" recorded)"
     _recorded="${_recorded%% *}"
     if [ -z "$_recorded" ]; then
       regenerate_refuse "$_name records no recorded= row in $_rows"
     fi
 
     mapfile -t _timing_files < <(find "$_report_artifacts" -maxdepth 1 \
-      -type f -name "$PROFILE_TIMING_FILE_PREFIX.*.$_recorded.csv" | sort)
+      -type f -name "*.$PROFILE_TIMING_TOOL_NAME.$_recorded.csv" | sort)
     if [ "${#_timing_files[@]}" = 0 ]; then
       regenerate_refuse "$_name has no recordings left from $_recorded"
     fi
     _recorded_times+=("$_recorded")
 
-    _binary="$(header_row_of "$_rows" executable)"
+    _binary="$(header_row "$_rows" executable)"
     if [ -z "$_binary" ]; then
       regenerate_refuse "$_name records no executable= row in $_rows"
     fi
@@ -443,7 +442,7 @@ regenerate_check() {
     fi
 
     _newest="$(find "$_report_artifacts" -maxdepth 1 -type f \
-      -name "$PROFILE_TIMING_FILE_PREFIX.*.$_recorded.csv" \
+      -name "*.$PROFILE_TIMING_TOOL_NAME.$_recorded.csv" \
       -printf '%T@ %p\n' | sort -rn | head -1)"
     _newest="${_newest#* }"
     if [ -n "$(find "$_binary" -newer "$_newest" -print -quit)" ]; then

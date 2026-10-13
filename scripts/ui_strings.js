@@ -5,6 +5,7 @@
 window.ui_strings_ = (function () {
   "use strict";
   const STRINGS = {
+    str_callers_cell_entry: "{function} ({share})",
     str_caret_down: "▼",
     str_caret_right: "►",
     str_column_baseline_share: "vs baseline",
@@ -18,6 +19,7 @@ window.ui_strings_ = (function () {
     str_column_count: "count",
     str_column_counter: "counter",
     str_column_defined_at: "defined at",
+    str_column_file: "file",
     str_column_file_share: "file %",
     str_column_function: "function",
     str_column_function_share: "function %",
@@ -85,24 +87,27 @@ window.ui_strings_ = (function () {
       "a view page opened outside the overview gets no settings to run under",
     str_error_internal: "internal error: halted and caught fire",
     str_error_report_incomplete:
-      "report incomplete, assets/debug.js not written.",
+      "report incomplete, scripts/debug.js not written.",
+    str_error_setting_choice_unknown:
+      "setting {0} names a choice this report does not offer: {1}",
     str_error_setting_unknown: "no such setting: {0}",
     str_error_settings_debug_query_unusable:
-      "the {0} query value came out as {1}, expected {2}",
+      "the {0} query value came out as {1}, expected {2} or {3}",
     str_error_settings_values_unusable:
       "url part {0} holds no object of setting values",
     str_error_strip_number_unusable:
       "no available strip entry is numbered {0}",
     str_flame_graph_page_title: "speedscope",
     str_function_name_unknown: "?",
+    str_heading_files_by_counter: "top {count} files by {measure}",
     str_heading_functions_by_counter: "top {count} functions by {measure}",
     str_heading_lines_by_counter: "top {count} lines by {measure}",
     str_heading_manifest: "manifest",
-    str_heading_measure_calls: "calls",
-    str_heading_measure_calls_diff: "change in calls",
-    str_heading_measure_diff: "change in self {counter}",
-    str_heading_measure_self: "self {counter}",
+    str_heading_measure_diff: "change in {column}",
     str_heading_tests: "tests",
+    str_heat_map_home_kind_files: "files",
+    str_heat_map_home_kind_functions: "functions",
+    str_heat_map_home_kind_lines: "lines",
     str_heat_map_main_label: "heat map view",
     str_heat_map_tree_label: "files",
     str_in_function: " in {function}",
@@ -117,7 +122,27 @@ window.ui_strings_ = (function () {
       "{function} by call count: self {self}, total {total}.",
     str_information_line_link: "{path} self {share} info",
     str_line_self: "line self",
+    str_load_log_script_entry: "[{time}ms] {page} loaded {asset}",
+    str_load_log_scripts_entry:
+      "[{time}ms] {page} loaded {count} scripts in {span}ms, the last {asset}",
+    str_load_log_frame_entry:
+      "[{time}ms] {page} long frame {span}ms, {render}ms rendering",
+    str_load_log_input_entry:
+      "[{time}ms] {page} {event} {target}, painted after {span}ms",
+    str_load_log_load_entry: "[{time}ms] {page} load event",
+    str_load_log_parse_entry:
+      "[{time}ms] {page} parsed, {count} scripts loaded while parsing",
+    str_load_log_render_entry:
+      "[{time}ms] {page} {cause}, rendered after {span}ms",
+    str_load_log_script_entry:
+      "[{time}ms] {page} script {span}ms, {invoker}, {source}",
+    str_load_log_script_function_entry:
+      "[{time}ms] {page} script {span}ms, {invoker}, {function} in {source}",
     str_menu_button: "{number} {label}",
+    str_menu_counter_entry: "{mark}{label}",
+    str_menu_counter_selected_mark: " ◼ ",
+    str_menu_counter_unselected_mark: "   ",
+    str_menu_counters: "{count} counters",
     str_menu_dark_mode_enabled: "dark",
     str_menu_file: "file",
     str_menu_function: "function",
@@ -144,11 +169,10 @@ window.ui_strings_ = (function () {
     str_scale_entry: "{curve}, {scope}",
     str_scope_file: "per file",
     str_scope_function: "per function",
-    str_section_perf_log: "perf log",
-    str_section_trace_log: "trace log",
-    str_section_valgrind_log: "valgrind log",
     str_settings_apply: "apply",
     str_settings_copy: "copy",
+    str_settings_debug_query: "{name}={value}",
+    str_settings_load_log_history: "history: {count}",
     str_settings_paste: "paste",
     str_sort_alphabetical: "alphabetical",
     str_sort_hottest_first: "hottest first",
@@ -170,18 +194,18 @@ window.ui_strings_ = (function () {
     str_view_settings: "settings",
   };
   function text_fill(string_id, replacements) {
-    const template = text_of(string_id);
+    const template = text(string_id);
     return template.replace(/\{(\w+)\}/g, (marker, field_name) => {
       if (!Object.prototype.hasOwnProperty.call(replacements, field_name))
         return "error (and missing ui string): " + string_id + " " + marker;
       return String(replacements[field_name]);
     });
   }
-  function text_of(string_id) {
+  function text(string_id) {
     if (!Object.prototype.hasOwnProperty.call(STRINGS, string_id)) {
       return "error (and missing ui string): " + string_id;
     }
     return STRINGS[string_id];
   }
-  return { text_fill, text_of };
+  return { text_fill, text };
 })();
