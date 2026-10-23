@@ -10,8 +10,10 @@ from typing import NamedTuple, TypeAlias
 
 import settings
 
-_ASSET_CALLERS_SCRIPT_NAME: str = ""
+_ASSET_CALL_GRAPH_SCRIPT_NAME: str = ""
 _ASSET_DARK_MODE_STYLESHEET_NAME: str = ""
+_ASSET_DATABASE_SCRIPT_NAME: str = ""
+_ASSET_DEBUG_SCRIPT_NAME: str = ""
 _ASSET_ERROR_OVERLAY_SCRIPT_NAME: str = ""
 _ASSET_FLAME_GRAPH_SCRIPT_NAME: str = ""
 _ASSET_FRAME_SCRIPT_NAME: str = ""
@@ -19,11 +21,11 @@ _ASSET_HEAT_MAP_SCRIPT_NAME: str = ""
 _ASSET_HEAT_MAP_STYLESHEET_NAME: str = ""
 _ASSET_LIGHT_MODE_STYLESHEET_NAME: str = ""
 _ASSET_MENU_SCRIPT_NAME: str = ""
-_ASSET_MENU_STYLESHEET_NAME: str = ""
 _ASSET_OVERVIEW_SCRIPT_NAME: str = ""
 _ASSET_PREFERENCES_SCRIPT_NAME: str = ""
 _ASSET_SETTINGS_PAGE_SCRIPT_NAME: str = ""
 _ASSET_SETTINGS_SCRIPT_NAME: str = ""
+_ASSET_SOURCE_DATABASE_SCRIPT_NAME: str = ""
 _ASSET_THEME_SCRIPT_NAME: str = ""
 _ASSET_THEME_STYLESHEET_NAME: str = ""
 _ASSET_UI_STRINGS_SCRIPT_NAME: str = ""
@@ -36,7 +38,6 @@ _STYLE_COLOR_DARK_MODE: dict[str, list[str]] = {}
 _STYLE_COLOR_DARK_MODE_ROLE_PREFIX: str = ""
 _STYLE_COLOR_LIGHT_MODE: dict[str, list[str]] = {}
 _STYLE_COLOR_LIGHT_MODE_ROLE_PREFIX: str = ""
-_STYLE_DESIGN_DEVICE_PIXEL_WIDEST_PROPERTY: str = ""
 _STYLE_DESIGN_FONT_FIT_PROPERTY: str = ""
 _STYLE_DESIGN_FONT_SIZE_PROPERTY: str = ""
 _STYLE_DESIGN_SCALE_DEFAULT_MULTIPLE: int = 0
@@ -65,8 +66,6 @@ _DARK_MODE_ENABLED_SELECTOR = (
     f':root:not([{_DARK_MODE_ATTRIBUTE_NAME}="{_DARK_MODE_DISABLED_VALUE}"])'
 )
 
-_MENU_BUTTON_KIND_NAMES = ("link",)
-
 
 class Cell(NamedTuple):
     text: str = ""
@@ -74,12 +73,6 @@ class Cell(NamedTuple):
 
 
 CellOrText: TypeAlias = Cell | str
-
-
-class MenuButtonFields(NamedTuple):
-    tag_name: str
-    href: str = ""
-    opens_new_tab: bool = False
 
 
 class Theme:
@@ -135,10 +128,10 @@ class Theme:
                 return ""
             return ("-" if number < 0 else "") + self.human(abs(number))
 
-        def signed_percent(self, percent: float, is_line: bool = False) -> str:
+        def signed_percent(self, percent: float) -> str:
             digit_count = _NUMBER_FRACTION_DIGITS
             if percent == 0:
-                return "" if is_line else self.fixed_text(0, digit_count) + "%"
+                return self.fixed_text(0, digit_count) + "%"
             arrow = "▼" if percent < 0 else "▲"
             times = percent / 100
             if percent == math.inf:
@@ -151,8 +144,6 @@ class Theme:
                 amount_text = "≈∞%"
             else:
                 amount_text = self.fixed_text(times, digit_count) + "x"
-            if not is_line:
-                return arrow + amount_text
             return arrow + amount_text.rjust(self.signed_percent_amount_chars)
 
         def time(self, seconds: float) -> str:
@@ -201,83 +192,49 @@ class Theme:
     def scripts_write(self, out_dir: str) -> None:
         self.root_value_names_check()
         os.makedirs(out_dir, exist_ok=True)
-        heat_map_script = _ASSET_HEAT_MAP_SCRIPT_NAME
-        heat_map_stylesheet = _ASSET_HEAT_MAP_STYLESHEET_NAME
-        shared = (
-            (
-                _ASSET_CALLERS_SCRIPT_NAME,
-                self.asset_read(_ASSET_CALLERS_SCRIPT_NAME),
-            ),
-            (
-                _ASSET_LIGHT_MODE_STYLESHEET_NAME,
-                self.asset_read(_ASSET_LIGHT_MODE_STYLESHEET_NAME),
-            ),
-            (
-                _ASSET_DARK_MODE_STYLESHEET_NAME,
-                self.mode_stylesheet_read(
-                    _ASSET_DARK_MODE_STYLESHEET_NAME,
-                    _DARK_MODE_ENABLED_SELECTOR,
-                ),
-            ),
-            (
-                _ASSET_ERROR_OVERLAY_SCRIPT_NAME,
-                self.asset_read(_ASSET_ERROR_OVERLAY_SCRIPT_NAME),
-            ),
-            (
-                _ASSET_FLAME_GRAPH_SCRIPT_NAME,
-                self.asset_read(_ASSET_FLAME_GRAPH_SCRIPT_NAME),
-            ),
-            (
-                _ASSET_FRAME_SCRIPT_NAME,
-                self.asset_read(_ASSET_FRAME_SCRIPT_NAME),
-            ),
-            (heat_map_stylesheet, self.asset_read(heat_map_stylesheet)),
-            (heat_map_script, self.asset_read(heat_map_script)),
-            (
-                _ASSET_MENU_SCRIPT_NAME,
-                self.asset_read(_ASSET_MENU_SCRIPT_NAME),
-            ),
-            (
-                _ASSET_MENU_STYLESHEET_NAME,
-                self.asset_read(_ASSET_MENU_STYLESHEET_NAME),
-            ),
-            (
-                _ASSET_OVERVIEW_SCRIPT_NAME,
-                self.asset_read(_ASSET_OVERVIEW_SCRIPT_NAME),
-            ),
-            (
-                _ASSET_PREFERENCES_SCRIPT_NAME,
-                self.asset_read(_ASSET_PREFERENCES_SCRIPT_NAME),
-            ),
-            (
-                _ASSET_SETTINGS_PAGE_SCRIPT_NAME,
-                self.asset_read(_ASSET_SETTINGS_PAGE_SCRIPT_NAME),
-            ),
-            (
-                _ASSET_SETTINGS_SCRIPT_NAME,
-                settings.settings_script_write(),
-            ),
-            (
-                _ASSET_THEME_STYLESHEET_NAME,
-                self.asset_read(_ASSET_THEME_STYLESHEET_NAME),
-            ),
-            (_ASSET_THEME_SCRIPT_NAME, self.js()),
-            (
-                _ASSET_UI_STRINGS_SCRIPT_NAME,
-                self.asset_read(_ASSET_UI_STRINGS_SCRIPT_NAME),
-            ),
-            (
-                _ASSET_UTILITY_SCRIPT_NAME,
-                self.asset_read(_ASSET_UTILITY_SCRIPT_NAME),
-            ),
-        )
+        shared = [
+            (name, self.shared_text(name)) for name in self.shared_names()
+        ]
         for name, text in shared:
             with open(
                 os.path.join(out_dir, name), "w", encoding="utf-8"
             ) as handle:
                 handle.write(text)
 
-    # Answers a cell as the JS table writer's fields, defaults left out.
+    # Returns each stylesheet and script the theme ships, in the order written.
+    def shared_names(self) -> tuple[str, ...]:
+        return (
+            _ASSET_CALL_GRAPH_SCRIPT_NAME,
+            _ASSET_LIGHT_MODE_STYLESHEET_NAME,
+            _ASSET_DARK_MODE_STYLESHEET_NAME,
+            _ASSET_DATABASE_SCRIPT_NAME,
+            _ASSET_ERROR_OVERLAY_SCRIPT_NAME,
+            _ASSET_FLAME_GRAPH_SCRIPT_NAME,
+            _ASSET_FRAME_SCRIPT_NAME,
+            _ASSET_HEAT_MAP_STYLESHEET_NAME,
+            _ASSET_HEAT_MAP_SCRIPT_NAME,
+            _ASSET_MENU_SCRIPT_NAME,
+            _ASSET_OVERVIEW_SCRIPT_NAME,
+            _ASSET_PREFERENCES_SCRIPT_NAME,
+            _ASSET_SETTINGS_PAGE_SCRIPT_NAME,
+            _ASSET_SETTINGS_SCRIPT_NAME,
+            _ASSET_THEME_STYLESHEET_NAME,
+            _ASSET_THEME_SCRIPT_NAME,
+            _ASSET_UI_STRINGS_SCRIPT_NAME,
+            _ASSET_UTILITY_SCRIPT_NAME,
+        )
+
+    # Returns the text a shipped file holds, the generated ones made here.
+    def shared_text(self, name: str) -> str:
+        if name == _ASSET_DARK_MODE_STYLESHEET_NAME:
+            return self.mode_stylesheet_read(name, _DARK_MODE_ENABLED_SELECTOR)
+        if name == _ASSET_SETTINGS_SCRIPT_NAME:
+            return settings.settings_script_write()
+        if name == _ASSET_THEME_SCRIPT_NAME:
+            return self.js()
+        return self.asset_read(name)
+
+    # Returns a cell as the JS table writer's fields, defaults left out.
     def cell_fields(self, value: CellOrText) -> str | dict[str, str]:
         if isinstance(value, str):
             return value
@@ -333,7 +290,6 @@ class Theme:
                 )
             names.add(f"--{name}")
         names |= {
-            _STYLE_DESIGN_DEVICE_PIXEL_WIDEST_PROPERTY,
             _STYLE_DESIGN_FONT_FIT_PROPERTY,
             _STYLE_DESIGN_FONT_SIZE_PROPERTY,
             _STYLE_DESIGN_VIEWPORT_HEIGHT_PROPERTY,
@@ -344,7 +300,6 @@ class Theme:
             self.asset_read(name)
             for name in (
                 _ASSET_HEAT_MAP_STYLESHEET_NAME,
-                _ASSET_MENU_STYLESHEET_NAME,
                 _ASSET_THEME_STYLESHEET_NAME,
             )
         )
@@ -389,6 +344,11 @@ def diff_share(delta: int, baseline: int | None) -> float:
     return _renderer.number_format.diff_share(delta, baseline)
 
 
+# Writes a decimal with the given count of fraction digits.
+def fixed_text(number: float, digit_count: int) -> str:
+    return _renderer.number_format.fixed_text(number, digit_count)
+
+
 def href(depth: int, name: str) -> str:
     return "../" * depth + name
 
@@ -401,8 +361,8 @@ def num_signed(number: float) -> str:
     return _renderer.number_format.signed(number)
 
 
-def num_signed_pct(percent: float, is_line: bool = False) -> str:
-    return _renderer.number_format.signed_percent(percent, is_line)
+def num_signed_pct(percent: float) -> str:
+    return _renderer.number_format.signed_percent(percent)
 
 
 def num_time(seconds: float) -> str:
@@ -442,28 +402,15 @@ def render_html_escape(value: object) -> str:
     )
 
 
-# Writes a menu button: menu colors, then a link, a tab stop unless an anchor.
-def render_menu_button(
-    kind_name: str, label_markup: str, fields: MenuButtonFields
-) -> str:
-    if kind_name not in _MENU_BUTTON_KIND_NAMES:
-        raise ValueError(f"menu button kind unrecognized: {kind_name}")
-    own_attributes = {"class": "menu-button-"}
-    inner_markup = label_markup
-    link_attributes = {"href": fields.href}
-    if fields.opens_new_tab:
-        link_attributes["target"] = "_blank"
-    if fields.tag_name == "a":
-        own_attributes |= link_attributes
-    else:
-        own_attributes["tabindex"] = "0"
-        inner_markup = render_element(
-            "a", link_attributes | {"tabindex": "-1"}, label_markup
-        )
-    return render_element(fields.tag_name, own_attributes, inner_markup)
+# Returns every file name the report's scripts directory holds.
+def shipped_script_names() -> tuple[str, ...]:
+    return _renderer.shared_names() + (
+        _ASSET_DEBUG_SCRIPT_NAME,
+        _ASSET_SOURCE_DATABASE_SCRIPT_NAME,
+    )
 
 
-# Answers rows as the JSON a page script hands the table writer.
+# Returns rows as the JSON a page script hands the table writer.
 def table_rows_text(rows: Sequence[Sequence[CellOrText]]) -> str:
     return json.dumps(
         [[_renderer.cell_fields(value) for value in row] for row in rows],

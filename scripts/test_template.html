@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <title>test index</title>
+    <script src="scripts/error_overlay.js"></script>
     <style>
       html,
       body {
@@ -65,6 +66,7 @@
       <select id="width-" autocomplete="off"></select>
     </div>
     <div id="grid-"></div>
+    <pre id="page-timings-"></pre>
     __SHOT_LIST__
     <script>
       (function () {
@@ -74,6 +76,9 @@
         const select = document.getElementById("width-");
         const grid = document.getElementById("grid-");
         const report_links = document.getElementById("report-links-");
+        const timing_list = document.getElementById("page-timings-");
+        // The page y of the menu and view boundary, kept on whole pixels.
+        const SCALE_QUANTUM_PAGE_Y = 51;
         const WIDTH_CHOICE_MAX = 16;
         const WIDTH_DEFAULT = 4;
         const WIDTH_STORAGE_KEY = "perf2html.test.thumbs_width";
@@ -93,8 +98,13 @@
           report_link.textContent = report_entry.name;
           report_links.append(report_link);
         });
+        // Draws each report's page load and phase timings below the grid.
+        const timing_lines = data.page_timings.map(function (page_timing) {
+          return page_timing.line;
+        });
+        timing_list.textContent = timing_lines.join("\n");
 
-        // Answers the stored width choice, the default when none is stored.
+        // Returns the stored width choice, the default when none is stored.
         function width_choice_read() {
           let stored_choice = null;
           try {
@@ -118,13 +128,18 @@
           } catch (storage_error) {}
         }
 
+        // Sizes whole pixel boxes under a scale quantized for whole rows.
         function layout() {
           const count = Number(select.value);
           const cell_width = grid.clientWidth / count;
-          const scale = cell_width / data.width;
-          const cell_height = data.height * scale;
+          const scale =
+            Math.floor((cell_width / data.width) * SCALE_QUANTUM_PAGE_Y) /
+            SCALE_QUANTUM_PAGE_Y;
+          const box_width = Math.floor(data.width * scale);
+          const box_height = Math.floor(data.height * scale);
           for (const cell of grid.querySelectorAll(".cell-")) {
-            cell.style.height = cell_height + "px";
+            cell.style.width = box_width + "px";
+            cell.style.height = box_height + "px";
             cell.firstChild.style.transform = "scale(" + scale + ")";
           }
         }
@@ -145,8 +160,13 @@
             frame.src = page.href;
             frame.width = data.width;
             frame.height = data.height;
+            // Opens the page as a user loads it, with no screenshot code.
+            const page_address = new URL(page.href, document.baseURI);
+            for (const screenshot_key of data.screenshot_keys) {
+              page_address.searchParams.delete(screenshot_key);
+            }
             const link = document.createElement("a");
-            link.href = page.href;
+            link.href = page_address.href;
             link.setAttribute("aria-label", page.name);
             box.appendChild(frame);
             box.appendChild(link);

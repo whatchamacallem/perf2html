@@ -5,12 +5,11 @@
 window.report_ui_ = window.try_catch_handler_(function () {
   "use strict";
 
-  const CALLERS_PAGE_DIR_NAME = settings_("CALLERS_PAGE_DIR_NAME");
-  const CALLERS_VIEW_KEY = settings_("CALLERS_VIEW_KEY");
-  const DARK_MODE_ATTRIBUTE_NAME = settings_("DARK_MODE_ATTRIBUTE_NAME");
-  const DARK_MODE_DISABLED_VALUE = settings_("DARK_MODE_DISABLED_VALUE");
+  const CALL_GRAPH_PAGE_DIR_NAME = settings_("CALL_GRAPH_PAGE_DIR_NAME");
+  const CALL_GRAPH_VIEW_KEY = settings_("CALL_GRAPH_VIEW_KEY");
   const DARK_MODE_ENABLED_DEFAULT = settings_("DARK_MODE_ENABLED_DEFAULT");
-  const DARK_MODE_ENABLED_VALUE = settings_("DARK_MODE_ENABLED_VALUE");
+  const DATABASE_PAGE_DIR_NAME = settings_("DATABASE_PAGE_DIR_NAME");
+  const DATABASE_VIEW_KEY = settings_("DATABASE_VIEW_KEY");
   const DRAG_DIRECTION_THRESHOLD_PX = settings_("DRAG_DIRECTION_THRESHOLD_PX");
   const FLAME_GRAPH_LOCAL_PROFILE_PATH = settings_(
     "FLAME_GRAPH_LOCAL_PROFILE_PATH",
@@ -29,20 +28,21 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const MENU_PULLDOWN_SKIPPED_KEY_NAMES = settings_(
     "MENU_PULLDOWN_SKIPPED_KEY_NAMES",
   );
+  const MENU_PULLDOWN_SMALL_ENTRY_MAX_COUNT = settings_(
+    "MENU_PULLDOWN_SMALL_ENTRY_MAX_COUNT",
+  );
   const MENU_SCALE_KEY_STEPS = settings_("MENU_SCALE_KEY_STEPS");
   const NUMBER_FRACTION_DIGITS = settings_("NUMBER_FRACTION_DIGITS");
   const NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES = settings_(
     "NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES",
   );
+  const OVERVIEW_PAGE_PATH = settings_("OVERVIEW_PAGE_PATH");
   const SETTINGS_DEBUG_HASH_KEY_NAME = settings_(
     "SETTINGS_DEBUG_HASH_KEY_NAME",
   );
   const SETTINGS_VIEW_ENTRY = settings_("SETTINGS_VIEW_ENTRY");
   const STORAGE_KEY_VIEW_DARK_MODE = settings_("STORAGE_KEY_VIEW_DARK_MODE");
   const STORAGE_KEY_VIEW_SCALE = settings_("STORAGE_KEY_VIEW_SCALE");
-  const STORAGE_OWNED_KEYS = settings_("STORAGE_OWNED_KEYS");
-  const STORAGE_VERSION = settings_("STORAGE_VERSION");
-  const STORAGE_VERSION_KEY = settings_("STORAGE_VERSION_KEY");
   const STYLE_DESIGN_COORDINATES_WIDTH_PX = settings_(
     "STYLE_DESIGN_COORDINATES_WIDTH_PX",
   );
@@ -94,14 +94,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
     "STYLE_MENU_PULLDOWN_EXTRA_WIDTH_CHARS",
   );
   const STYLE_PAGE_FONT_FAMILY = settings_("STYLE_PAGE_FONT_FAMILY");
-  const STYLE_PANE_SPLITTER_KEY_STEP_CHARS = settings_(
-    "STYLE_PANE_SPLITTER_KEY_STEP_CHARS",
-  );
-  const STYLE_TABLE_COLUMN_EXTRA_WIDTH_CHARS = settings_(
-    "STYLE_TABLE_COLUMN_EXTRA_WIDTH_CHARS",
-  );
-  const STYLE_TABLE_GROW_COLUMN_NARROWEST_CHARS = settings_(
-    "STYLE_TABLE_GROW_COLUMN_NARROWEST_CHARS",
+  const STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS = settings_(
+    "STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS",
   );
   const STYLE_TEXT_SCROLLBAR_THUMB_SHORTEST_CHARS = settings_(
     "STYLE_TEXT_SCROLLBAR_THUMB_SHORTEST_CHARS",
@@ -129,30 +123,49 @@ window.report_ui_ = window.try_catch_handler_(function () {
     SETTINGS_DEBUG_HASH_KEY_NAME,
   ];
   const ADDRESS_VIEW_KEY_NAMES = new Map([
-    [CALLERS_VIEW_KEY, []],
+    [CALL_GRAPH_VIEW_KEY, []],
+    [DATABASE_VIEW_KEY, []],
     [FLAME_GRAPH_VIEW_ENTRY[0], ["localProfilePath"]],
     [HEAT_MAP_VIEW_ENTRY[0], ["file", "line", "function"]],
     [SETTINGS_VIEW_ENTRY[0], ["setting"]],
   ]);
+  // Tells per view whether an address of the view needs a test.
+  const ADDRESS_VIEW_NEEDS_TEST = new Map([
+    [CALL_GRAPH_VIEW_KEY, true],
+    [DATABASE_VIEW_KEY, true],
+    [FLAME_GRAPH_VIEW_ENTRY[0], true],
+    [HEAT_MAP_VIEW_ENTRY[0], true],
+    [SETTINGS_VIEW_ENTRY[0], false],
+  ]);
   const CH_UNIT_GLYPH = "0";
+  const CLIP_ELLIPSIS_TEXT = window.ui_strings_.text("str_clip_ellipsis");
   const DESIGN_CHARACTER_WIDTH_PX =
     STYLE_DESIGN_FONT_SIZE_PX * STYLE_DESIGN_FONT_CHARACTER_WIDTH_SHARE;
+  const DESIGN_COLUMN_EDGE_GRAB_WIDTH_PX =
+    STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS * DESIGN_CHARACTER_WIDTH_PX;
   const DESIGN_SCALE_LAST_STOP = STYLE_DESIGN_SCALE_STOP_COUNT - 1;
   const DESIGN_SCALE_LOWER_TRAVEL_SHARE =
     STYLE_DESIGN_SCALE_DEFAULT_STOP / DESIGN_SCALE_LAST_STOP;
-  const MENU_BUTTON_KIND_NAMES = ["action", "link", "pulldown"];
+  const MENU_BUTTON_KIND_NAMES = ["action", "label", "link", "pulldown"];
   const PULLDOWN_COMMAND_KEY_NAMES = Object.values(MENU_PULLDOWN_KEY_NAMES);
   const PULLDOWN_HIGHLIGHTED_ENTRY_CLASS = "highlighted-entry-";
   const RAMP_CHANNEL_STOPS = STYLE_HEAT_COLOR_STOPS.map((hex) =>
     [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16)),
   );
   const REPORT_ROOT_HREF = new URL("..", document.currentScript.src).href;
-  const REPORT_TOP_PAGE_HREF = new URL("index.html", REPORT_ROOT_HREF).href;
+  const REPORT_TOP_PAGE_HREF = new URL(OVERVIEW_PAGE_PATH, REPORT_ROOT_HREF)
+    .href;
   const SIGNED_PERCENT_AMOUNT_CHARS = (
     fixed_text(-100, NUMBER_FRACTION_DIGITS) + "%"
   ).length;
   const SMALLEST_PRINTED_PERCENT = 1 / 10 ** NUMBER_FRACTION_DIGITS;
-  const STRIP_ENTRY_KIND_NAMES = ["action", "link", "pulldown", "text"];
+  const STRIP_ENTRY_KIND_NAMES = [
+    "action",
+    "label",
+    "link",
+    "pulldown",
+    "text",
+  ];
   const STRIP_GAP_TEXT = window.ui_strings_.text("str_strip_gap");
   const STRIP_STATUS_SEPARATOR_TEXT = window.ui_strings_.text(
     "str_menu_status_separator",
@@ -193,29 +206,29 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const view_frame = document.getElementById("overview-view-frame-");
   const is_scaled = !is_framed && !!home_panel;
   const page_element = document.getElementById("overview-page-");
-  const page_scroll_box = document.getElementById("overview-page-scroll-box-");
-  const page_scrollbar = document.querySelector(
-    "#overview-page-scroll-box- ~ .page-text-scrollbar-",
-  );
   const attached_headings = new WeakMap();
   const attached_scrollbars = new WeakMap();
+  const drag_scroll_surfaces = new WeakSet();
   const wheel_taken_events = {
     horizontal: new WeakSet(),
     vertical: new WeakSet(),
   };
+  const kept_column_widths = new Map();
   const registered_panes = [];
   const rendered_strips = new WeakMap();
   const resize_settle_callbacks = [];
   const row_walks = new WeakMap();
+  const table_column_move_callbacks = new Map();
   const table_sort_callbacks = new Map();
+  const view_storage = window.report_view_storage_;
   let settle_animation_frame = 0;
   let window_resize_is_pending = false;
-  let storage_is_checked = false;
-  let preferences_are_ignored = false;
   let tests_pulldown_is_open = false;
   let dark_mode_is_enabled = null;
   let design_scale = 1;
   let design_scale_stop = null;
+  let column_edge_hovered_element = null;
+  let column_press_is_active = false;
 
   function ramp_channels_at(fraction) {
     const scaled_position = fraction * (RAMP_CHANNEL_STOPS.length - 1);
@@ -232,7 +245,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       );
     });
   }
-  // Answers the heat of a share: clamped to full scale, divided, then curved.
+  // Returns the heat of a share: clamped to full scale, divided, then curved.
   function heat_of_share(percent, curve_name, is_diff) {
     const magnitude = Math.min(
       Math.abs(percent),
@@ -398,36 +411,20 @@ window.report_ui_ = window.try_catch_handler_(function () {
   function dark_mode_enabled_now_() {
     return dark_mode_is_enabled;
   }
-  function dark_mode_state(is_enabled) {
-    return is_enabled ? DARK_MODE_ENABLED_VALUE : DARK_MODE_DISABLED_VALUE;
-  }
   // Shows a dark mode on the page, storing nothing.
   function dark_mode_show(is_enabled) {
     dark_mode_is_enabled = is_enabled;
-    document.documentElement.setAttribute(
-      DARK_MODE_ATTRIBUTE_NAME,
-      dark_mode_state(is_enabled),
-    );
+    window.report_dark_mode_.root_show(is_enabled);
   }
   // Stores the dark mode the user chose, null the default, then shows it.
   function dark_mode_set_(is_enabled) {
     view_storage.value_write(
       STORAGE_KEY_VIEW_DARK_MODE,
-      is_enabled === null ? null : dark_mode_state(is_enabled),
+      is_enabled === null ? null : Number(is_enabled),
     );
     dark_mode_show(
       is_enabled === null ? DARK_MODE_ENABLED_DEFAULT : is_enabled,
     );
-  }
-  function dark_mode_stored_enabled_() {
-    const stored_value = view_storage.value_read(STORAGE_KEY_VIEW_DARK_MODE);
-    if (stored_value === null) return DARK_MODE_ENABLED_DEFAULT;
-    if (stored_value === DARK_MODE_ENABLED_VALUE) return true;
-    if (stored_value === DARK_MODE_DISABLED_VALUE) return false;
-    window.throw_exception_("str_error_internal");
-  }
-  function dark_mode_stored_apply_() {
-    dark_mode_show(dark_mode_stored_enabled_());
   }
 
   function rounded_units(value, digit_count) {
@@ -481,8 +478,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
     if (!delta) return 0;
     return baseline_count ? (100 * delta) / baseline_count : Infinity;
   }
-  function signed_percent_text(percent, is_line = false) {
-    if (!percent) return is_line ? "" : zero_percent_text();
+  function signed_percent_text(percent, uses_whitespace = true) {
+    if (!percent) return zero_percent_text();
     const arrow = percent < 0 ? "▼" : "▲";
     const times = percent / 100;
     let amount_text;
@@ -497,7 +494,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     } else {
       amount_text = fixed_text(times, NUMBER_FRACTION_DIGITS) + "x";
     }
-    if (!is_line) return arrow + amount_text;
+    if (!uses_whitespace) return arrow + amount_text;
     return arrow + amount_text.padStart(SIGNED_PERCENT_AMOUNT_CHARS);
   }
   function zero_percent_text() {
@@ -543,14 +540,16 @@ window.report_ui_ = window.try_catch_handler_(function () {
         parsed_address[key_name] === null ||
         key_name === SETTINGS_DEBUG_HASH_KEY_NAME,
     );
-    if (parsed_address.test === null && !is_home)
-      window.throw_exception_("str_error_hash_test_missing");
-    if (parsed_address.test !== null && parsed_address.view === null)
+    if (is_home) return;
+    if (parsed_address.view === null)
       window.throw_exception_(
         "str_error_hash_view_missing",
-        parsed_address.test,
+        parsed_address.test === null
+          ? ADDRESS_KEY_NAMES.find(
+              (key_name) => parsed_address[key_name] !== null,
+            )
+          : parsed_address.test,
       );
-    if (is_home) return;
     if (!ADDRESS_VIEW_KEY_NAMES.has(parsed_address.view))
       window.throw_exception_(
         "str_error_hash_view_unknown",
@@ -589,6 +588,17 @@ window.report_ui_ = window.try_catch_handler_(function () {
         "str_error_hash_line_unusable",
         parsed_address.line,
       );
+    if (
+      parsed_address.view === HEAT_MAP_VIEW_ENTRY[0] &&
+      (parsed_address.test === null ||
+        (parsed_address.file === null && parsed_address.function === null))
+    )
+      window.throw_exception_("str_error_hash_heat_map_parts_missing");
+    if (
+      parsed_address.test === null &&
+      ADDRESS_VIEW_NEEDS_TEST.get(parsed_address.view)
+    )
+      window.throw_exception_("str_error_hash_test_missing");
   }
   function address_of_hash(hash) {
     const parsed_address = Object.fromEntries(
@@ -658,19 +668,32 @@ window.report_ui_ = window.try_catch_handler_(function () {
       !click_event.shiftKey
     );
   }
+  // Returns the hash a plain press on a hash link or a link row asks for.
   function address_link_hash(click_event) {
-    const link_element = click_event.target.closest('a[href^="#"]');
-    return link_element && !link_element.target && click_is_plain(click_event)
-      ? address_hash(address_of_hash(link_element.getAttribute("href")))
+    const link_element = click_event.target.closest("a[href]");
+    const link_row = click_event.target.closest("tr.row-link-");
+    const link_href = link_element
+      ? !link_element.target && link_element.getAttribute("href")
+      : link_row && link_row.getAttribute("data-href-");
+    if (!link_href || !link_href.startsWith("#")) return "";
+    return click_is_plain(click_event)
+      ? address_hash(address_of_hash(link_href))
       : "";
   }
+  // Returns the page of a test in a directory holding one page per test.
+  function address_test_page_href(page_dir_name, test_name) {
+    return page_dir_name + "/" + encodeURIComponent(test_name) + ".html";
+  }
   function address_page_href(checked_address) {
-    if (checked_address.view === CALLERS_VIEW_KEY)
-      return (
-        CALLERS_PAGE_DIR_NAME +
-        "/" +
-        encodeURIComponent(checked_address.test) +
-        ".html"
+    if (checked_address.view === CALL_GRAPH_VIEW_KEY)
+      return address_test_page_href(
+        CALL_GRAPH_PAGE_DIR_NAME,
+        checked_address.test,
+      );
+    if (checked_address.view === DATABASE_VIEW_KEY)
+      return address_test_page_href(
+        DATABASE_PAGE_DIR_NAME,
+        checked_address.test,
       );
     if (checked_address.view === HEAT_MAP_VIEW_ENTRY[0])
       return HEAT_MAP_VIEW_ENTRY[1];
@@ -680,7 +703,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       return SETTINGS_VIEW_ENTRY[1];
     window.throw_exception_("str_error_internal");
   }
-  // Answers the link to the top page at a hash, the address the menu shows.
+  // Returns the link to the top page at a hash, the address the menu shows.
   function address_top_href(hash) {
     return REPORT_TOP_PAGE_HREF + hash;
   }
@@ -701,7 +724,26 @@ window.report_ui_ = window.try_catch_handler_(function () {
   function load_log_history_send(line_count) {
     parent_post({ report_ui: "load_log_history_set", line_count });
   }
-  // Answers the path of a report file from the report root, which a log names.
+  // Asks the top page to move a counters list line before or after another.
+  function counter_line_move_send(
+    list_key,
+    line_name,
+    anchor_name,
+    lands_after,
+  ) {
+    parent_post({
+      report_ui: "counter_line_move",
+      list_key,
+      line_name,
+      anchor_name,
+      lands_after,
+    });
+  }
+  // Sends the call graph's focused path up, root first, for the status line.
+  function focused_path_send(path_entries) {
+    parent_post({ report_ui: "focused_path_set", path_entries });
+  }
+  // Returns the path of a report file from the report root, which a log names.
   function address_path(file_href) {
     const file_url = new URL(file_href);
     file_url.hash = "";
@@ -710,12 +752,12 @@ window.report_ui_ = window.try_catch_handler_(function () {
       window.throw_exception_("str_error_internal");
     return file_url.href.slice(REPORT_ROOT_HREF.length);
   }
-  // Answers the href of a report file from its path from the report root.
+  // Returns the href of a report file from its path from the report root.
   function address_file_href(report_path) {
     return new URL(report_path, REPORT_ROOT_HREF).href;
   }
 
-  // Answers whether the key was typed in an editable field, which keeps it.
+  // Returns whether the key was typed in an editable field, which keeps it.
   function field_owns_key(key_event) {
     return (
       key_event.target.matches("input, textarea") ||
@@ -815,17 +857,12 @@ window.report_ui_ = window.try_catch_handler_(function () {
       if (message_name === "layout_reset") {
         layout_reset();
         dark_mode_show(message_data.dark_mode_enabled);
-        if (view_options.dark_mode_apply) view_options.dark_mode_apply();
         // A reset of the preferences changes the history count shown.
         if (view_options.load_log_show)
           parent_post({ report_ui: "load_log_request" });
-      } else if (message_name === "dark_mode_show") {
+      } else if (message_name === "dark_mode_show")
         dark_mode_show(message_data.dark_mode_enabled);
-        if (view_options.dark_mode_arrive) view_options.dark_mode_arrive();
-      } else if (message_name === "dark_mode_apply") {
-        dark_mode_show(message_data.dark_mode_enabled);
-        if (view_options.dark_mode_apply) view_options.dark_mode_apply();
-      } else if (message_name === "load_log_relay")
+      else if (message_name === "load_log_relay")
         view_options.load_log_show(
           message_data.load_log_entries,
           message_data.load_log_line_count,
@@ -834,7 +871,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
         if (view_options.recenter) view_options.recenter();
       } else if (message_name === "tests_pulldown_closed")
         view_key_tests_pulldown_closed();
-      else if (message_name !== "preferences_apply")
+      else if (
+        message_name !== "preferences_apply" &&
+        message_name !== "view_reset"
+      )
         window.throw_exception_("str_error_internal");
     });
     parent_post({ report_ui: "dark_mode_request" });
@@ -967,7 +1007,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
         ) +
           render_element(
             "span",
-            { class: "page-text-scrollbar- vertical-", "aria-hidden": "true" },
+            { class: "text-scrollbar- vertical-", "aria-hidden": "true" },
             "",
           ),
       );
@@ -984,6 +1024,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       entries_line_number = 0,
       highlight_index = 0,
       is_open = false,
+      is_small = false,
       matches = [],
       search_text = "";
 
@@ -1017,6 +1058,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     function entries_offer(line_number) {
       entries_line_number = line_number;
       entries = pulldown_options.entries(line_number);
+      is_small = entries.length <= MENU_PULLDOWN_SMALL_ENTRY_MAX_COUNT;
       for (const entry_element of entries) {
         entry_element.setAttribute("role", "option");
         entry_element.tabIndex = -1;
@@ -1034,7 +1076,12 @@ window.report_ui_ = window.try_catch_handler_(function () {
         ...(matches.length ? matches : [no_match_note]),
       );
       search_box.textContent =
-        search_text || window.ui_strings_.text("str_pulldown_placeholder");
+        search_text ||
+        window.ui_strings_.text(
+          pulldown_options.on_move
+            ? "str_pulldown_drag_placeholder"
+            : "str_pulldown_placeholder",
+        );
       entry_list.scrollTop = 0;
       highlight_set(0);
       list_scrollbar_handle.refresh();
@@ -1059,10 +1106,13 @@ window.report_ui_ = window.try_catch_handler_(function () {
       search_text = typed_text;
       root_element.classList.add("open-");
       root_element.setAttribute("aria-expanded", "true");
-      label_box.hidden = true;
-      search_box.hidden = false;
       entry_box.hidden = false;
       entries_offer(search_parts(search_text)[1]);
+      // A small pulldown keeps its label, with no search box and no scrollbar.
+      if (is_small) search_text = "";
+      label_box.hidden = !is_small;
+      search_box.hidden = is_small;
+      list_scrollbar.hidden = is_small;
       entries_filter();
       root_focus();
     }
@@ -1078,6 +1128,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
     function pulldown_close() {
       if (!is_open) return;
       closed_show();
+      // Every close leaves the cell unfocused, an Escape or a press away too.
+      root_element.blur();
       pulldown_options.on_close();
     }
     function search_text_set(typed_text) {
@@ -1096,7 +1148,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
           pulldown_close();
           return true;
         case MENU_PULLDOWN_KEY_NAMES.erase:
-          search_text_set([...search_text].slice(0, -1).join(""));
+          if (!is_small)
+            search_text_set([...search_text].slice(0, -1).join(""));
           return true;
         case MENU_PULLDOWN_KEY_NAMES.next:
           highlight_step(1);
@@ -1109,11 +1162,86 @@ window.report_ui_ = window.try_catch_handler_(function () {
           return true;
       }
       if (key_name.length !== 1) return false;
-      search_text_set(search_text + key_name);
+      // A small pulldown takes a typed key and filters nothing.
+      if (!is_small) search_text_set(search_text + key_name);
       return true;
     }
+    function entry_value(entry_element) {
+      return entry_element.getAttribute("data-entry-value-");
+    }
+    // Offers the entries again after a drop, the scroll kept, the line lit.
+    function entries_reoffer(moved_value) {
+      const kept_scroll_top = entry_list.scrollTop;
+      entries_offer(entries_line_number);
+      entries_filter();
+      entry_list.scrollTop = kept_scroll_top;
+      highlight_set(
+        matches.findIndex(
+          (entry_element) => entry_value(entry_element) === moved_value,
+        ),
+      );
+    }
+    // Moves a dragged line among the others, a drop moving it in the list.
+    function entry_drag_press(press_event, dragged_entry) {
+      const start_next_entry = dragged_entry.nextElementSibling;
+      let has_left_box = false,
+        is_dragging = false;
+      const on_pointer_move = window.try_catch_handler_((move_event) => {
+        if (move_event.pointerId !== press_event.pointerId || has_left_box)
+          return;
+        if (!is_dragging) {
+          if (!drag_direction(press_event, move_event)) return;
+          is_dragging = true;
+          highlight_set(matches.indexOf(dragged_entry));
+        }
+        const box_rect = entry_box.getBoundingClientRect();
+        if (
+          move_event.clientX < box_rect.left ||
+          move_event.clientX >= box_rect.right ||
+          move_event.clientY < box_rect.top ||
+          move_event.clientY >= box_rect.bottom
+        ) {
+          // A drag leaving the box closes the pulldown with no change.
+          has_left_box = true;
+          entry_list.insertBefore(dragged_entry, start_next_entry);
+          pulldown_close();
+          return;
+        }
+        const next_entry =
+          [...entry_list.children].find((other_entry) => {
+            if (other_entry === dragged_entry) return false;
+            const entry_rect = other_entry.getBoundingClientRect();
+            return move_event.clientY < entry_rect.top + entry_rect.height / 2;
+          }) || null;
+        if (dragged_entry.nextElementSibling !== next_entry)
+          entry_list.insertBefore(dragged_entry, next_entry);
+      });
+      const on_pointer_release = window.try_catch_handler_((release_event) => {
+        if (release_event.pointerId !== press_event.pointerId) return;
+        listeners_bind(window, on_pointer_move, on_pointer_release, false);
+        if (!is_dragging) return;
+        if (release_event.type === "pointerup") click_swallow_next();
+        if (has_left_box) return;
+        const landed_next_entry = dragged_entry.nextElementSibling;
+        if (
+          release_event.type !== "pointerup" ||
+          landed_next_entry === start_next_entry
+        ) {
+          entry_list.insertBefore(dragged_entry, start_next_entry);
+          return;
+        }
+        const anchor_entry =
+          landed_next_entry || dragged_entry.previousElementSibling;
+        pulldown_options.on_move(
+          entry_value(dragged_entry),
+          entry_value(anchor_entry),
+          !landed_next_entry,
+        );
+        entries_reoffer(entry_value(dragged_entry));
+      });
+      listeners_bind(window, on_pointer_move, on_pointer_release, true);
+    }
 
-    root_element.classList.add("menu-pulldown-");
     root_element.setAttribute("role", "combobox");
     root_element.setAttribute("aria-haspopup", "listbox");
     root_element.tabIndex = 0;
@@ -1161,6 +1289,19 @@ window.report_ui_ = window.try_catch_handler_(function () {
     );
     entry_box.addEventListener("mousedown", default_prevent);
     entry_list.addEventListener(
+      "pointerdown",
+      window.try_catch_handler_((press_event) => {
+        const entry_element = press_event.target.closest('[role="option"]');
+        if (
+          pulldown_options.on_move &&
+          !press_event.button &&
+          entry_element &&
+          entry_element.parentElement === entry_list
+        )
+          entry_drag_press(press_event, entry_element);
+      }),
+    );
+    entry_list.addEventListener(
       "click",
       window.try_catch_handler_((click_event) => {
         const entry_element = click_event.target.closest('[role="option"]');
@@ -1196,7 +1337,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
   function strip_number_text(numbered_index) {
     return String((numbered_index + 1) % MENU_DIGIT_KEY_COUNT);
   }
-  // Answers the text label of an entry as the strip draws it, number included.
+  // Returns the text label of an entry as the strip draws it, number included.
   function strip_label_text(entries, entry_name) {
     const entry = strip_entry(entries, entry_name);
     if (!entry.is_numbered) return entry.label;
@@ -1213,25 +1354,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
       render_element("span", {}, render_html_escape(widget_character)),
     ).join("");
   }
-  function strip_gap_cell_render() {
-    return render_element(
-      "td",
-      { class: "menu-strip-gap-" },
-      render_html_escape(STRIP_GAP_TEXT),
-    );
-  }
-  // Writes a blank line of the strip, one cell across every column.
-  function strip_blank_line_render(column_count) {
-    return render_element(
-      "tr",
-      {},
-      render_element(
-        "td",
-        { class: "menu-strip-blank-line-", colspan: column_count },
-        "",
-      ),
-    );
-  }
   // Writes an entry cell, a title as page emphasis, else a menu button.
   function strip_cell_render(entry, label_markup) {
     if (!STRIP_ENTRY_KIND_NAMES.includes(entry.kind))
@@ -1239,7 +1361,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     const name_attributes = { "data-entry-name-": entry.name };
     if (entry.kind === "text")
       return render_page_emphasis(label_markup, {
-        tag_name: "td",
+        tag_name: "span",
         attributes: name_attributes,
       });
     const shown_markup = entry.kind === "pulldown" ? "" : label_markup;
@@ -1252,7 +1374,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
         )
       : "";
     return render_menu_button(entry.kind, shown_markup + widget_markup, {
-      tag_name: "td",
+      tag_name: "span",
       href: entry.href,
       opens_new_tab: entry.opens_new_tab,
       withholds_tab_stop: entry.withholds_tab_stop,
@@ -1260,27 +1382,13 @@ window.report_ui_ = window.try_catch_handler_(function () {
       attributes: name_attributes,
     });
   }
-  // Writes the status bar row, indented, its links across every column.
-  function strip_status_row_render(status_entries, column_count) {
-    const link_markups = status_entries.map((status_entry) =>
-      render_element(
-        "a",
-        { href: status_entry.href },
-        render_html_escape(status_entry.label),
-      ),
-    );
+  // Writes the status line as text, indented, each label separated.
+  function strip_status_line_render(status_entries) {
     return render_element(
-      "tr",
-      {},
-      render_element(
-        "td",
-        { class: "menu-status-bar-cell-", colspan: column_count },
-        render_element(
-          "div",
-          { class: "menu-status-bar-" },
-          render_html_escape(STRIP_GAP_TEXT) +
-            link_markups.join(render_html_escape(STRIP_STATUS_SEPARATOR_TEXT)),
-        ),
+      "div",
+      { class: "menu-status-bar-" },
+      render_html_escape(
+        STRIP_GAP_TEXT + status_entries.join(STRIP_STATUS_SEPARATOR_TEXT),
       ),
     );
   }
@@ -1292,33 +1400,11 @@ window.report_ui_ = window.try_catch_handler_(function () {
     const cells_by_name = new Map();
     const digit_entries = new Map();
     const entries_by_name = new Map();
-    const has_status_bar = status_entries.length > 0;
     const previous_strip = rendered_strips.get(strip_element);
     const pulldowns_by_name = new Map();
-    const row_markups = [];
-    let strip_row = null;
+    const cell_markups = [];
+    let strip_line = null;
 
-    // Hands a click above the buttons to the button at the same column.
-    function blank_line_click_forward(click_event) {
-      const row_bounds = strip_row.getBoundingClientRect();
-      const pressed_element = document
-        .elementsFromPoint(
-          click_event.clientX,
-          row_bounds.top + row_bounds.height / 2,
-        )
-        .find(
-          (found_element) =>
-            found_element !== strip_row && strip_row.contains(found_element),
-        );
-      if (!pressed_element) window.throw_exception_("str_error_internal");
-      const pressed_cell = pressed_element.closest("td");
-      const clicked_element = pressed_cell.matches(".menu-strip-gap-")
-        ? pressed_cell.previousElementSibling
-        : pressed_element;
-      clicked_element.dispatchEvent(
-        new MouseEvent(click_event.type, click_event),
-      );
-    }
     function strip_cell_named(entry_name) {
       if (!cells_by_name.has(entry_name))
         window.throw_exception_("str_error_internal");
@@ -1333,8 +1419,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
       else entry_cell.click();
     }
     function entry_click_handler(click_event) {
-      const entry_cell = click_event.target.closest("td.menu-button-");
-      if (!entry_cell || entry_cell.parentElement !== strip_row) return;
+      const entry_cell = click_event.target.closest(".menu-button-");
+      if (!entry_cell || entry_cell.parentElement !== strip_line) return;
       const entry = entries_by_name.get(
         entry_cell.getAttribute("data-entry-name-"),
       );
@@ -1347,7 +1433,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     function entry_key_handler(key_event) {
       const entry_cell = key_event.target;
       if (
-        entry_cell.parentElement !== strip_row ||
+        entry_cell.parentElement !== strip_line ||
         !widget_key_activates(widget_key(key_event))
       )
         return;
@@ -1422,53 +1508,33 @@ window.report_ui_ = window.try_catch_handler_(function () {
         entry.label_markup === null
           ? render_html_escape(strip_label_text(entries, entry.name))
           : entry.label_markup;
-      if (row_markups.length) row_markups.push(strip_gap_cell_render());
-      row_markups.push(strip_cell_render(entry, label_markup));
+      if (cell_markups.length)
+        cell_markups.push(render_html_escape(STRIP_GAP_TEXT));
+      cell_markups.push(strip_cell_render(entry, label_markup));
     }
-    const column_count = row_markups.length;
-    const button_row_markup = render_element("tr", {}, row_markups.join(""));
-    const table_row_markups = has_status_bar
-      ? [
-          strip_blank_line_render(column_count),
-          button_row_markup,
-          strip_blank_line_render(column_count),
-          strip_status_row_render(status_entries, column_count),
-          strip_blank_line_render(column_count),
-        ]
-      : [button_row_markup];
     numbered_entries.forEach((entry, numbered_index) => {
       if (entry.is_available && !entry.is_widget)
         digit_entries.set(strip_number_text(numbered_index), entry);
     });
     if (strip_element.contains(document.activeElement))
       document.activeElement.blur();
-    strip_element.innerHTML = render_element(
-      "table",
-      { class: "menu-strip-table-" },
-      render_element("tbody", {}, table_row_markups.join("")),
-    );
-    const strip_table = strip_element.firstElementChild;
-    const table_rows = strip_table.tBodies[0].rows;
-    strip_row = table_rows[table_row_markups.indexOf(button_row_markup)];
-    if (has_status_bar) {
-      table_rows[0].addEventListener("mousedown", default_prevent);
-      table_rows[0].addEventListener(
-        "click",
-        window.try_catch_handler_(blank_line_click_forward),
-      );
-    }
-    for (const entry_cell of strip_row.cells) {
+    strip_element.classList.add("strip-");
+    strip_element.innerHTML =
+      render_element("div", { class: "strip-line-" }, cell_markups.join("")) +
+      (status_entries.length ? strip_status_line_render(status_entries) : "");
+    strip_line = strip_element.firstElementChild;
+    for (const entry_cell of strip_line.children) {
       if (entry_cell.hasAttribute("data-entry-name-"))
         cells_by_name.set(
           entry_cell.getAttribute("data-entry-name-"),
           entry_cell,
         );
     }
-    strip_table.addEventListener(
+    strip_line.addEventListener(
       "click",
       window.try_catch_handler_(entry_click_handler),
     );
-    strip_table.addEventListener(
+    strip_line.addEventListener(
       "keydown",
       window.try_catch_handler_(entry_key_handler),
     );
@@ -1494,9 +1560,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
     };
   }
 
-  function width_total(widths) {
-    return widths.reduce((total, width) => total + width, 0);
-  }
   function column_longest(cell_rows, column_index) {
     let longest = 0;
     for (const row of cell_rows) {
@@ -1504,49 +1567,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
     }
     return longest;
   }
-  function column_extents(columns, cell_rows, grow_index) {
-    return columns.map((column, column_index) => {
-      let content_chars;
-      if (column.width != null) content_chars = column.width;
-      else if (column_index === grow_index) {
-        content_chars = STYLE_TABLE_GROW_COLUMN_NARROWEST_CHARS;
-      } else {
-        content_chars = column_longest(cell_rows, column_index);
-        if (column.clip != null) {
-          content_chars = Math.min(content_chars, column.clip);
-        }
-      }
-      return { heading_chars: column.label.length, content_chars };
-    });
-  }
-  // Answers a column's narrowest and widest widths, each holding the padding.
-  function column_limits(extent) {
-    const widest = Math.max(extent.heading_chars, extent.content_chars);
-    return [
-      extent.content_chars + STYLE_TABLE_COLUMN_EXTRA_WIDTH_CHARS,
-      widest + STYLE_TABLE_COLUMN_EXTRA_WIDTH_CHARS,
-    ];
-  }
-  function column_width_text(limits, column_index, grow_index) {
-    const [narrowest, widest] = limits[column_index];
-    const shared = limits.filter(
-      (limit, other_index) => other_index !== grow_index,
-    );
-    const low_total = width_total(shared.map((limit) => limit[0]));
-    const high_total = width_total(shared.map((limit) => limit[1]));
-    if (column_index === grow_index) {
-      return (
-        `max(${narrowest}ch, 100cqw - clamp(${low_total}ch, ` +
-        `100cqw - ${narrowest}ch, ${high_total}ch))`
-      );
-    }
-    if (narrowest === widest) return narrowest + "ch";
-    const grow_narrowest = grow_index >= 0 ? limits[grow_index][0] : 0;
-    return (
-      `clamp(${narrowest}ch, ${narrowest}ch + (100cqw - ` +
-      `${low_total + grow_narrowest}ch) * ${widest - narrowest} / ` +
-      `${high_total - low_total}, ${widest}ch)`
-    );
+  // Cuts text past a column's limit, the last character kept the ellipsis.
+  function text_clip(text, clip_chars) {
+    if (text.length <= clip_chars) return text;
+    return text.slice(0, clip_chars - 1) + CLIP_ELLIPSIS_TEXT;
   }
 
   const cell_normalize = (value) =>
@@ -1609,25 +1633,21 @@ window.report_ui_ = window.try_catch_handler_(function () {
     );
     return table_markdown(markdown_columns, markdown_rows);
   }
+  // Writes a cell, its text clipped at the column's limit, a link plain.
   function table_cell_render(cell, column) {
     const cell_attributes = {};
-    const class_names = [
-      column.numeric ? "numeric-" : "",
-      column.cls || "",
-      cell.href ? "page-table-link-cell-" : "",
-    ]
+    const class_names = [column.numeric ? "numeric-" : "", column.cls || ""]
       .filter(Boolean)
       .join(" ");
     if (class_names) cell_attributes.class = class_names;
     if (cell.style) cell_attributes.style = cell.style;
+    const shown_text =
+      column.clip != null ? text_clip(cell.text, column.clip) : cell.text;
     let inner_markup =
-      cell.html != null ? cell.html : render_html_escape(cell.text);
+      cell.html != null ? cell.html : render_html_escape(shown_text);
     if (cell.href) {
       if (cell.html != null) window.throw_exception_("str_error_internal");
-      inner_markup = render_menu_button("link", inner_markup, {
-        tag_name: "a",
-        href: cell.href,
-      });
+      inner_markup = render_element("a", { href: cell.href }, inner_markup);
     }
     return render_element("td", cell_attributes, inner_markup);
   }
@@ -1638,10 +1658,20 @@ window.report_ui_ = window.try_catch_handler_(function () {
       return -1;
     }
     const sorted_column_index = table_options.sorted_column_index;
-    if (table_options.omits_column_titles || !columns[sorted_column_index])
+    if (!columns[sorted_column_index])
       window.throw_exception_("str_error_internal");
     table_sort_callbacks.set(table_key, table_options.on_sort);
     return sorted_column_index;
+  }
+  // Keeps the `on_column_move` a column drop calls, needed by a moved column.
+  function table_column_move_register(table_key, columns, table_options) {
+    if (table_options.on_column_move) {
+      table_column_move_callbacks.set(table_key, table_options.on_column_move);
+      return;
+    }
+    if (columns.some((column) => column.move_name))
+      window.throw_exception_("str_error_internal");
+    table_column_move_callbacks.delete(table_key);
   }
   // Writes columns and rows as a table, the one table writer in JS.
   function render_table(table_key, columns, rows, table_options) {
@@ -1651,57 +1681,34 @@ window.report_ui_ = window.try_catch_handler_(function () {
       columns,
       table_options,
     );
-    const grow_index = table_options.fill
-      ? columns.findIndex((column) => column.grow)
-      : -1;
-    const column_limit_list = column_extents(
-      columns,
-      cell_rows,
-      grow_index,
-    ).map(column_limits);
-    const column_markup = column_limit_list
-      .map((limit, column_index) => {
-        const width_text = column_width_text(
-          column_limit_list,
-          column_index,
-          grow_index,
-        );
-        return render_element(
-          "col",
-          { "data-min-": `${limit[0]}ch`, style: `width:${width_text}` },
-          null,
-        );
-      })
-      .join("");
-    const title_markup = table_options.omits_column_titles
-      ? ""
-      : render_element(
-          "thead",
-          {},
-          render_element(
-            "tr",
-            {},
-            columns
-              .map((column, column_index) =>
-                render_element(
-                  "th",
-                  {
-                    ...(column.numeric ? { class: "numeric-" } : {}),
-                    title: column.label,
-                    ...(column_index === sorted_column_index
-                      ? {
-                          "aria-sort": column.numeric
-                            ? "descending"
-                            : "ascending",
-                        }
-                      : {}),
-                  },
-                  render_html_escape(column.label),
-                ),
-              )
-              .join(""),
-          ),
-        );
+    table_column_move_register(table_key, columns, table_options);
+    const title_markup = render_element(
+      "thead",
+      {},
+      render_element(
+        "tr",
+        {},
+        columns
+          .map((column, column_index) =>
+            render_element(
+              "th",
+              {
+                ...(column.numeric ? { class: "numeric-" } : {}),
+                ...(column_index === sorted_column_index
+                  ? {
+                      "aria-sort": column.numeric ? "descending" : "ascending",
+                    }
+                  : {}),
+                ...(column.move_name
+                  ? { "data-column-move-name-": column.move_name }
+                  : {}),
+              },
+              render_html_escape(column.label),
+            ),
+          )
+          .join(""),
+      ),
+    );
     const body_markup = cell_rows
       .map((row, row_index) => {
         const row_href =
@@ -1722,30 +1729,20 @@ window.report_ui_ = window.try_catch_handler_(function () {
         );
       })
       .join("");
-    const table_markup = render_element(
-      "div",
-      { class: "table-columns-" },
-      render_element(
-        "table",
-        {
-          class: ["columns-", table_options.cls || ""]
-            .filter(Boolean)
-            .join(" "),
-          "data-key-": table_key,
-        },
-        render_element("colgroup", {}, column_markup) +
-          title_markup +
-          render_element("tbody", {}, body_markup),
-      ),
+    return render_element(
+      "table",
+      {
+        class: ["table-", table_options.cls || ""].filter(Boolean).join(" "),
+        "data-key-": table_key,
+      },
+      title_markup + render_element("tbody", {}, body_markup),
     );
-    if (table_options.bare) return table_markup;
-    return render_element("div", { class: "table-box-" }, table_markup);
   }
   // Pairs a table column with how its cells are written and its rows sorted.
   function table_sort_column(column, sort_name, sort_value, cell) {
     return { column, sort_name, sort_value, cell };
   }
-  // Answers records ordered by a column, numbers largest first, text A to Z.
+  // Returns records ordered by a column, numbers largest first, text A to Z.
   function table_sort_records(records, sort_column) {
     const keyed_records = records.map((record) => [
       sort_column.sort_value(record),
@@ -1760,42 +1757,26 @@ window.report_ui_ = window.try_catch_handler_(function () {
     );
     return keyed_records.map((keyed_record) => keyed_record[1]);
   }
-  // Writes the title of a sorted table, its row count a span, by its sort.
-  function table_sort_heading_markup(
-    string_id,
-    row_count,
-    sort_column,
-    is_diff,
-  ) {
-    const row_count_markup = render_element(
-      "span",
-      { class: "page-heading-row-count-" },
-      String(row_count),
-    );
-    const column_label = sort_column.column.label;
+  // Lists a sorted table's state: its rows, its sort direction, its measure.
+  function table_sort_heading_labels(row_string_id, sort_column, is_diff) {
+    const column_label =
+      sort_column.column.measure ?? sort_column.column.label;
     const measure_text =
       is_diff && sort_column.column.numeric
         ? window.ui_strings_.text_fill("str_heading_measure_diff", {
             column: column_label,
           })
         : column_label;
-    return window.ui_strings_.text_fill(string_id, {
-      count: row_count_markup,
-      measure: render_html_escape(measure_text),
-    });
+    return [
+      window.ui_strings_.text(row_string_id),
+      window.ui_strings_.text(
+        sort_column.column.numeric
+          ? "str_heading_sort_descending"
+          : "str_heading_sort_ascending",
+      ),
+      measure_text,
+    ];
   }
-  // Fills each marker with its markup, refusing a marker the template lacks.
-  function template_fill(template_text, marker_values) {
-    for (const marker of Object.keys(marker_values)) {
-      if (!template_text.includes(marker))
-        window.throw_exception_("str_error_internal");
-    }
-    let filled_text = template_text;
-    for (const [marker, markup] of Object.entries(marker_values))
-      filled_text = filled_text.replaceAll(marker, () => markup);
-    return filled_text;
-  }
-
   // Binds or unbinds a press's move and every way that press can end.
   function listeners_bind(
     event_target,
@@ -1810,9 +1791,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
     event_target[listener_method]("pointerup", on_pointer_release);
     event_target[listener_method]("pointercancel", on_pointer_release);
     event_target[listener_method]("lostpointercapture", on_pointer_release);
-  }
-  function column_elements(table_element) {
-    return [...table_element.querySelectorAll(":scope > colgroup > col")];
   }
   const default_prevent = window.try_catch_handler_((any_event) => {
     any_event.preventDefault();
@@ -1832,7 +1810,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       }),
     );
   }
-  // Answers sideways or vertical once past the drag direction threshold.
+  // Returns sideways or vertical once past the drag direction threshold.
   function drag_direction(press_event, move_event) {
     const sideways_travel_px = design_px(
       move_event.clientX - press_event.clientX,
@@ -1846,47 +1824,111 @@ window.report_ui_ = window.try_catch_handler_(function () {
       ? "vertical"
       : "sideways";
   }
-  // Answers the cell a column slide takes if this press moves sideways.
-  function slide_cell(press_event) {
-    const pressed_cell = press_event.target.closest("td, th");
-    const is_slidable =
-      !!pressed_cell &&
-      pressed_cell.cellIndex >= 1 &&
-      !!pressed_cell.closest("table").is_slide_attached;
-    return is_slidable ? pressed_cell : null;
-  }
-  function table_slide_press(press_event, table_element) {
-    const pressed_cell = slide_cell(press_event);
+  // Returns the title over the column holding an element of a table, or null.
+  function column_title_of(target_element) {
+    const table_cell = target_element.closest("td, th");
+    if (!table_cell || table_cell.colSpan !== 1) return null;
+    const table_element = table_cell.closest("table");
+    if (!table_element.matches("table.table-")) return null;
+    const title_row = table_element.tHead.rows[0];
+    const cell_row = table_cell.parentElement;
+    if (cell_row === title_row) return table_cell;
+    // A row of another cell count, a detail row among them, has no columns.
     if (
-      press_event.button ||
-      !pressed_cell ||
-      pressed_cell.closest("table") !== table_element
+      cell_row.parentElement !== table_element.tBodies[0] ||
+      cell_row.cells.length !== title_row.cells.length
     )
+      return null;
+    return title_row.cells[table_cell.cellIndex];
+  }
+  // Returns the title of a moved column holding an element, or null.
+  function column_moved_title(target_element) {
+    const title_cell = column_title_of(target_element);
+    return title_cell && title_cell.hasAttribute("data-column-move-name-")
+      ? title_cell
+      : null;
+  }
+  // Returns whether the pointer lies in the grab of an element's right edge.
+  function edge_grab_holds(pointer_event, edge_element) {
+    return (
+      design_px(
+        edge_element.getBoundingClientRect().right - pointer_event.clientX,
+      ) <= DESIGN_COLUMN_EDGE_GRAB_WIDTH_PX
+    );
+  }
+  // Returns the table's cell whose right edge grab holds the pointer, or null.
+  function column_edge_cell(pointer_event, table_element) {
+    if (pointer_event.target.closest(".text-scrollbar-")) return null;
+    const table_cell = pointer_event.target.closest("td, th");
+    if (
+      !table_cell ||
+      table_cell.closest("table") !== table_element ||
+      !column_title_of(table_cell)
+    )
+      return null;
+    return edge_grab_holds(pointer_event, table_cell) ? table_cell : null;
+  }
+  // Marks the cell or pane whose edge grab holds the pointer, unmarks others.
+  function column_edge_hover_set(edge_element) {
+    if (column_press_is_active || edge_element === column_edge_hovered_element)
       return;
-    const column_index = pressed_cell.cellIndex;
-    const left_column = column_elements(table_element)[column_index - 1];
-    const floor_text = left_column.getAttribute("data-min-");
+    if (column_edge_hovered_element)
+      column_edge_hovered_element.classList.remove("column-edge-grab-");
+    column_edge_hovered_element = edge_element;
+    if (edge_element) edge_element.classList.add("column-edge-grab-");
+  }
+  // Names a title for its kept width: its move name, else its column index.
+  function column_width_name(title_cell) {
+    return (
+      title_cell.getAttribute("data-column-move-name-") ??
+      String(title_cell.cellIndex)
+    );
+  }
+  // Keeps a dragged title's width for the next table its table key draws.
+  function column_width_keep(title_cell) {
+    const table_key = title_cell.closest("table").getAttribute("data-key-");
+    if (!kept_column_widths.has(table_key))
+      kept_column_widths.set(table_key, new Map());
+    kept_column_widths
+      .get(table_key)
+      .set(column_width_name(title_cell), title_cell.style.minWidth);
+  }
+  // Gives a drawn table's titles the widths dragged on its table key before.
+  function column_widths_restore(table_element) {
+    const kept_widths = kept_column_widths.get(
+      table_element.getAttribute("data-key-"),
+    );
+    if (!kept_widths) return;
+    for (const title_cell of table_element.tHead.rows[0].cells) {
+      const kept_width = kept_widths.get(column_width_name(title_cell));
+      if (kept_width !== undefined) title_cell.style.minWidth = kept_width;
+    }
+  }
+  // Sizes a column title's min width or a pane's max width by its right edge.
+  function column_edge_drag(
+    press_event,
+    grab_element,
+    sized_element,
+    size_property_name,
+  ) {
     const start_width_px = design_px(
-      pressed_cell.previousElementSibling.getBoundingClientRect().width,
+      sized_element.getBoundingClientRect().width,
     );
     let animation_frame = 0,
-      is_sliding = false;
+      has_travelled = false;
     const on_pointer_move = window.try_catch_handler_((move_event) => {
       if (move_event.pointerId !== press_event.pointerId) return;
-      if (!is_sliding) {
-        const move_direction = drag_direction(press_event, move_event);
-        if (!move_direction) return;
-        if (move_direction === "vertical") {
-          press_end();
-          return;
-        }
-        is_sliding = true;
+      if (!has_travelled) {
+        if (!drag_direction(press_event, move_event)) return;
+        has_travelled = true;
         selection_drop();
         document.addEventListener("selectionchange", selection_drop);
       }
       const wanted_width_px =
         start_width_px + design_px(move_event.clientX - press_event.clientX);
-      left_column.style.width = `max(${floor_text}, ${wanted_width_px}px)`;
+      sized_element.style[size_property_name] =
+        Math.max(0, wanted_width_px) + "px";
+      if (size_property_name === "minWidth") column_width_keep(sized_element);
       if (animation_frame) return;
       animation_frame = requestAnimationFrame(
         window.try_catch_handler_(() => {
@@ -1897,32 +1939,183 @@ window.report_ui_ = window.try_catch_handler_(function () {
     });
     const on_pointer_release = window.try_catch_handler_((release_event) => {
       if (release_event.pointerId !== press_event.pointerId) return;
+      // A capture another element loses ends nothing of this drag.
+      if (
+        release_event.type === "lostpointercapture" &&
+        release_event.target !== grab_element
+      )
+        return;
       press_end();
-      if (!is_sliding) return;
+      if (!has_travelled) return;
       document.removeEventListener("selectionchange", selection_drop);
       if (release_event.type === "pointerup") click_swallow_next();
     });
     function press_end() {
+      column_press_is_active = false;
+      listeners_bind(window, on_pointer_move, on_pointer_release, false);
+      window.removeEventListener("dragstart", default_prevent, true);
+    }
+    column_press_is_active = true;
+    grab_element.setPointerCapture(press_event.pointerId);
+    listeners_bind(window, on_pointer_move, on_pointer_release, true);
+    window.addEventListener("dragstart", default_prevent, true);
+  }
+  // Moves a column's cells in each row spanning the table to another index.
+  function table_column_place(table_element, from_index, to_index) {
+    if (from_index === to_index) return;
+    const title_count = table_element.tHead.rows[0].cells.length;
+    const before_index = to_index < from_index ? to_index : to_index + 1;
+    for (const table_row of table_element.rows) {
+      if (table_row.cells.length !== title_count) continue;
+      table_row.insertBefore(
+        table_row.cells[from_index],
+        table_row.cells[before_index] || null,
+      );
+    }
+  }
+  // Returns the index a moved title lands at by the pointer's place.
+  function column_landing_index(moved_title, pointer_x) {
+    const moved_index = moved_title.cellIndex;
+    const other_titles = [...moved_title.parentElement.cells].filter(
+      (title_cell) =>
+        title_cell !== moved_title &&
+        title_cell.hasAttribute("data-column-move-name-"),
+    );
+    if (!other_titles.length) return moved_index;
+    const next_title = other_titles.find((title_cell) => {
+      const title_rect = title_cell.getBoundingClientRect();
+      return pointer_x < title_rect.left + title_rect.width / 2;
+    });
+    if (next_title)
+      return next_title.cellIndex < moved_index
+        ? next_title.cellIndex
+        : next_title.cellIndex - 1;
+    const last_title = other_titles[other_titles.length - 1];
+    return last_title.cellIndex < moved_index
+      ? last_title.cellIndex + 1
+      : last_title.cellIndex;
+  }
+  // Moves a column among the moved columns while a press in it drags sideways.
+  function table_column_move_press(press_event, moved_title, on_column_move) {
+    const table_element = moved_title.closest("table");
+    const title_row = moved_title.parentElement;
+    const start_index = moved_title.cellIndex;
+    let is_moving = false;
+    const on_pointer_move = window.try_catch_handler_((move_event) => {
+      if (move_event.pointerId !== press_event.pointerId) return;
+      if (!is_moving) {
+        const move_direction = drag_direction(press_event, move_event);
+        if (!move_direction) return;
+        if (move_direction === "vertical") {
+          press_end();
+          return;
+        }
+        is_moving = true;
+        column_edge_hover_set(null);
+        column_press_is_active = true;
+        selection_drop();
+        document.addEventListener("selectionchange", selection_drop);
+      }
+      table_column_place(
+        table_element,
+        moved_title.cellIndex,
+        column_landing_index(moved_title, move_event.clientX),
+      );
+    });
+    const on_pointer_release = window.try_catch_handler_((release_event) => {
+      if (release_event.pointerId !== press_event.pointerId) return;
+      press_end();
+      if (!is_moving) return;
+      document.removeEventListener("selectionchange", selection_drop);
+      if (release_event.type === "pointerup") click_swallow_next();
+      // A release outside the window finds no element, so no title.
+      const released_element = document.elementFromPoint(
+        release_event.clientX,
+        release_event.clientY,
+      );
+      const released_title =
+        released_element && column_moved_title(released_element);
+      if (
+        release_event.type !== "pointerup" ||
+        !released_title ||
+        released_title.parentElement !== title_row ||
+        moved_title.cellIndex === start_index
+      ) {
+        table_column_place(table_element, moved_title.cellIndex, start_index);
+        return;
+      }
+      const next_title = moved_title.nextElementSibling;
+      const lands_after =
+        !next_title || !next_title.hasAttribute("data-column-move-name-");
+      const anchor_title = lands_after
+        ? moved_title.previousElementSibling
+        : next_title;
+      on_column_move(
+        moved_title.getAttribute("data-column-move-name-"),
+        anchor_title.getAttribute("data-column-move-name-"),
+        lands_after,
+      );
+    });
+    function press_end() {
+      column_press_is_active = false;
       listeners_bind(window, on_pointer_move, on_pointer_release, false);
       window.removeEventListener("dragstart", default_prevent, true);
     }
     listeners_bind(window, on_pointer_move, on_pointer_release, true);
     window.addEventListener("dragstart", default_prevent, true);
   }
-  function table_slide_attach(table_element) {
-    if (table_element.is_slide_attached) return;
-    table_element.is_slide_attached = true;
-    for (const column_element of column_elements(table_element)) {
-      column_element.setAttribute(
-        "data-start-width-",
-        column_element.style.width,
-      );
-    }
+  // Hands a press in the table to an edge grab, else to its column's move.
+  function table_column_press_attach(table_element) {
+    if (table_element.is_column_press_attached) return;
+    table_element.is_column_press_attached = true;
+    // Taken while capturing, so an edge grab wins over a press inside a cell.
     table_element.addEventListener(
       "pointerdown",
-      window.try_catch_handler_((press_event) =>
-        table_slide_press(press_event, table_element),
-      ),
+      window.try_catch_handler_((press_event) => {
+        if (
+          press_event.button ||
+          press_event.defaultPrevented ||
+          press_event.target.closest(".text-scrollbar-")
+        )
+          return;
+        const edge_cell = column_edge_cell(press_event, table_element);
+        if (edge_cell) {
+          press_event.preventDefault();
+          column_edge_drag(
+            press_event,
+            edge_cell,
+            column_title_of(edge_cell),
+            "minWidth",
+          );
+          return;
+        }
+        const moved_title = column_moved_title(press_event.target);
+        if (!moved_title || moved_title.closest("table") !== table_element)
+          return;
+        const on_column_move = table_column_move_callbacks.get(
+          table_element.getAttribute("data-key-"),
+        );
+        if (!on_column_move) window.throw_exception_("str_error_internal");
+        table_column_move_press(press_event, moved_title, on_column_move);
+      }),
+      true,
+    );
+    table_element.addEventListener(
+      "pointermove",
+      window.try_catch_handler_((move_event) => {
+        const table_cell = move_event.target.closest("td, th");
+        // A nested table marks its own cells.
+        if (table_cell && table_cell.closest("table") !== table_element)
+          return;
+        column_edge_hover_set(column_edge_cell(move_event, table_element));
+      }),
+    );
+    table_element.addEventListener(
+      "pointerleave",
+      window.try_catch_handler_(() => {
+        if (table_element.contains(column_edge_hovered_element))
+          column_edge_hover_set(null);
+      }),
     );
   }
   // Hands a plain click on a column title to its table's sort callback.
@@ -1941,76 +2134,60 @@ window.report_ui_ = window.try_catch_handler_(function () {
       }),
     );
   }
-  function offsets_align(scroll_container) {
-    let stacked_top_px = 0;
-    for (const band_element of scroll_container.querySelectorAll(
-      ":scope > .band-",
-    )) {
-      band_element.style.top = stacked_top_px + "px";
-      stacked_top_px += design_px(band_element.getBoundingClientRect().height);
-    }
-    for (const header_cell of scroll_container.querySelectorAll("th")) {
-      const owning_table =
-        header_cell.closest(".table-box-") || scroll_container;
-      if (owning_table === scroll_container) {
-        header_cell.style.top = stacked_top_px + "px";
-      }
-    }
-  }
   function layout_refresh(root_element) {
     root_element = root_element || document.body;
-    const band_elements = [...root_element.querySelectorAll(".band-")];
-    new Set(
-      band_elements.map((band_element) => band_element.parentElement),
-    ).forEach(offsets_align);
     for (const bar_element of root_element.querySelectorAll(
-      ".page-text-scrollbar-",
+      ".text-scrollbar-",
     )) {
       const attached_scrollbar = attached_scrollbars.get(bar_element);
       if (attached_scrollbar) attached_scrollbar.refresh();
     }
   }
+  // Attaches each table, heading and bar under the root, a bar by its name.
   function layout_activate(root_element) {
     root_element = root_element || document.body;
-    const table_elements = root_element.querySelectorAll(
-      ".table-columns- > table.columns-",
-    );
-    for (const table_element of table_elements) {
-      table_slide_attach(table_element);
+    for (const table_element of root_element.querySelectorAll(
+      "table.table-",
+    )) {
+      column_widths_restore(table_element);
+      table_column_press_attach(table_element);
       table_sort_attach(table_element);
       if (table_element.tBodies[0].querySelector("a[href]"))
         table_rows_attach(table_element, "tr");
     }
-    const heading_elements = root_element.querySelectorAll(".page-heading-");
-    for (const heading_element of heading_elements) {
+    for (const heading_element of root_element.querySelectorAll(
+      ".page-heading-",
+    )) {
       if (!attached_headings.has(heading_element))
-        page_heading_attach(heading_element, []);
+        page_heading_attach(heading_element);
     }
-    const bar_elements = root_element.querySelectorAll(
-      ":has(> .page-text-scroll-box-) > .page-text-scrollbar-",
-    );
-    for (const bar_element of bar_elements) {
+    for (const bar_element of root_element.querySelectorAll(
+      ".text-scrollbar-[data-scrolls-]",
+    )) {
       if (attached_scrollbars.has(bar_element)) continue;
+      const scrolled_element = document.getElementById(
+        bar_element.getAttribute("data-scrolls-"),
+      );
+      if (!scrolled_element) window.throw_exception_("str_error_internal");
       text_scrollbar_attach(
         bar_element,
-        bar_element.parentElement.querySelector(
-          ":scope > .page-text-scroll-box-",
-        ),
+        scrolled_element,
         text_scrollbar_axis(bar_element),
       );
+      if (bar_element.hasAttribute("data-sizes-"))
+        pane_edge_attach(bar_sized_pane(bar_element));
     }
     layout_refresh(root_element);
     window.report_load_log_.event_render_log();
   }
   function layout_reset(root_element) {
     root_element = root_element || document.body;
-    const column_elements = root_element.querySelectorAll(
-      "col[data-start-width-]",
-    );
-    for (const column_element of column_elements) {
-      column_element.style.width =
-        column_element.getAttribute("data-start-width-");
-    }
+    // A page keeps the widths of its own tables alone, so all are forgotten.
+    kept_column_widths.clear();
+    for (const title_cell of root_element.querySelectorAll(
+      "table.table- > thead > tr > th",
+    ))
+      title_cell.style.minWidth = "";
     for (const pane_entry of registered_panes) {
       if (!root_element.contains(pane_entry.pane_element)) continue;
       pane_entry.pane_width_forget();
@@ -2255,35 +2432,41 @@ window.report_ui_ = window.try_catch_handler_(function () {
       ...entry_fields,
     };
   }
-  // Shows a heading over a table as a strip, its title as page emphasis.
-  function page_heading_attach(heading_element, extra_entries) {
+  // Shows a heading as a strip, any title as page emphasis, state as labels.
+  function page_heading_attach(heading_element) {
     const heading_text = heading_element.textContent;
     if (attached_headings.has(heading_element))
       window.throw_exception_("str_error_internal");
     const title_markup = heading_element.innerHTML;
     const count_key = heading_element.getAttribute("data-row-count-key-");
-    const count_span = () =>
-      heading_element.querySelector(".page-heading-row-count-");
-    const table_box = heading_element.nextElementSibling;
-    const table_element =
-      table_box && table_box.matches(".table-box-")
-        ? table_box.querySelector(":scope > .table-columns- > table.columns-")
-        : null;
-    if (!table_element) window.throw_exception_("str_error_internal");
-    if (count_key !== null && !count_span())
+    const default_count_text = heading_element.getAttribute(
+      "data-row-count-default-",
+    );
+    const state_labels = heading_element.hasAttribute("data-state-labels-")
+      ? JSON.parse(heading_element.getAttribute("data-state-labels-"))
+      : [];
+    const shown_element = heading_element.nextElementSibling;
+    if (!shown_element) window.throw_exception_("str_error_internal");
+    const table_element = shown_element.matches("table.table-")
+      ? shown_element
+      : null;
+    if ((count_key === null) !== (default_count_text === null))
+      window.throw_exception_("str_error_internal");
+    if (count_key !== null && !table_element)
       window.throw_exception_("str_error_internal");
     const default_count =
       count_key === null
         ? 0
-        : row_count_checked(count_key, Number(count_span().textContent));
-    const table_body = table_element.tBodies[0];
-    const all_rows = [...table_body.rows];
+        : row_count_checked(count_key, Number(default_count_text));
+    const table_body = table_element ? table_element.tBodies[0] : null;
+    const all_rows = table_body ? [...table_body.rows] : [];
     const copy_text = window.ui_strings_.text("str_table_heading_copy");
     const row_count_options = {
       box_width_chars: TABLE_HEADING_COUNT_BOX_WIDTH_CHARS,
       entries: row_count_entries,
       keeps_open: false,
       on_close: () => {},
+      on_move: null,
       on_select: row_count_choose,
       reads_line_number: false,
     };
@@ -2292,7 +2475,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
 
     function rows_show(row_count) {
       shown_count = row_count;
-      count_span().textContent = String(row_count);
       all_rows.forEach((table_row, row_index) => {
         if (row_index >= row_count) table_row.remove();
         else if (table_row.parentElement !== table_body)
@@ -2320,30 +2502,74 @@ window.report_ui_ = window.try_catch_handler_(function () {
         pulldown_options: row_count_options,
       });
     }
+    // Writes a layout table a line per row, each cell padded to its column.
+    function layout_table_text(layout_table) {
+      const table_rows = [...layout_table.rows];
+      const column_widths = new Array(
+        Math.max(...table_rows.map((table_row) => table_row.cells.length)),
+      ).fill(0);
+      for (const table_row of table_rows)
+        [...table_row.cells].forEach((table_cell, cell_index) => {
+          column_widths[cell_index] = Math.max(
+            column_widths[cell_index],
+            table_cell.textContent.length,
+          );
+        });
+      return table_rows
+        .map((table_row) =>
+          [...table_row.cells]
+            .map((table_cell, cell_index) =>
+              getComputedStyle(table_cell).textAlign === "right"
+                ? table_cell.textContent.padStart(column_widths[cell_index])
+                : table_cell.textContent.padEnd(column_widths[cell_index]),
+            )
+            .join("")
+            .trimEnd(),
+        )
+        .join("\n");
+    }
+    // Copies tables as markdown or lines, a lone link its address, else text.
     function table_copy() {
+      const lone_link = shown_element.querySelector(":scope > a:only-child");
+      const is_link_line =
+        lone_link !== null &&
+        lone_link.textContent === shown_element.textContent;
       return navigator.clipboard.writeText(
-        table_element_markdown(table_element),
+        table_element
+          ? table_element_markdown(table_element)
+          : shown_element.matches("table")
+            ? layout_table_text(shown_element)
+            : is_link_line
+              ? lone_link.href
+              : shown_element.textContent,
       );
     }
     function heading_render() {
+      const title_entries = heading_text
+        ? [
+            strip_entry_make("title", "text", heading_text, {
+              label_markup: title_markup,
+            }),
+          ]
+        : [];
       const count_entries = count_key === null ? [] : [count_entry()];
+      const state_entries = state_labels.map((state_label, label_index) =>
+        strip_entry_make(`state_${label_index}`, "label", state_label, {}),
+      );
       strip_handle = strip_render(
         heading_element,
         [
-          strip_entry_make("title", "text", heading_text, {
-            label_markup: title_markup,
-          }),
+          ...title_entries,
           ...count_entries,
-          ...extra_entries,
+          ...state_entries,
           strip_entry_make("copy", "action", copy_text, {
             on_activate: table_copy,
           }),
         ],
         [],
       );
-      if (count_key !== null) count_span().textContent = String(shown_count);
     }
-    // Shows the stored count, or the printed one, and renders the cells again.
+    // Shows the stored count, or the default one, and renders the cells again.
     function heading_reset() {
       if (count_key !== null)
         rows_show(row_count_stored(count_key, default_count));
@@ -2357,126 +2583,60 @@ window.report_ui_ = window.try_catch_handler_(function () {
     heading_reset();
   }
 
-  // Stores null in every owned key, each preference one the user never set.
-  function storage_sweep() {
-    for (const storage_key of STORAGE_OWNED_KEYS) {
-      localStorage.setItem(storage_key, JSON.stringify(null));
-    }
-  }
-  function storage_version_check() {
-    if (storage_is_checked) return;
-    storage_is_checked = true;
-    preferences_are_ignored =
-      address_of_hash(location.hash)[SETTINGS_DEBUG_HASH_KEY_NAME] !== null;
-    try {
-      if (preferences_are_ignored) {
-        storage_sweep();
-        return;
-      }
-      if (localStorage.getItem(STORAGE_VERSION_KEY) === STORAGE_VERSION) {
-        return;
-      }
-      storage_sweep();
-      localStorage.setItem(STORAGE_VERSION_KEY, STORAGE_VERSION);
-    } catch (storage_error) {}
-  }
-  const view_storage = {
-    preferences_clear() {
-      storage_version_check();
-      try {
-        storage_sweep();
-      } catch (storage_error) {}
-    },
-    // Answers whether applied settings reset and ignore stored preferences.
-    preferences_ignored() {
-      storage_version_check();
-      return preferences_are_ignored;
-    },
-    value_read(storage_key) {
-      storage_version_check();
-      if (preferences_are_ignored) return null;
-      try {
-        return JSON.parse(localStorage.getItem(storage_key));
-      } catch (storage_error) {
-        return null;
-      }
-    },
-    value_write(storage_key, stored_value) {
-      storage_version_check();
-      if (preferences_are_ignored) return;
-      try {
-        localStorage.setItem(storage_key, JSON.stringify(stored_value));
-      } catch (storage_error) {}
-    },
-  };
-
-  function pane_splitter_attach(
-    handle_bar,
-    pane_element,
-    narrowest_chars,
-    widest_chars,
-  ) {
-    let width_chars = null;
-    const pane_width = (wanted_chars) =>
-      Math.min(widest_chars, Math.max(narrowest_chars, wanted_chars));
-    const pane_width_now = () =>
-      width_chars === null
-        ? pane_element.offsetWidth / DESIGN_CHARACTER_WIDTH_PX
-        : width_chars;
-    function splitter_values_show() {
-      handle_bar.setAttribute("aria-valuemin", String(narrowest_chars));
-      handle_bar.setAttribute("aria-valuemax", String(widest_chars));
-      handle_bar.setAttribute(
-        "aria-valuenow",
-        String(Math.round(pane_width_now())),
-      );
-    }
-    function pane_width_set(wanted_chars) {
-      width_chars = pane_width(wanted_chars);
-      pane_element.style.width = width_chars + "ch";
-    }
-    function pane_width_forget() {
-      width_chars = null;
-      pane_element.style.width = "";
-      splitter_values_show();
-    }
-    registered_panes.push({ pane_element, pane_width_forget });
-    handle_bar.tabIndex = 0;
-    handle_bar.setAttribute("role", "separator");
-    handle_bar.setAttribute("aria-orientation", "vertical");
-    handle_bar.setAttribute("aria-controls", pane_element.id);
-    handle_bar.setAttribute("aria-labelledby", pane_element.id);
-    splitter_values_show();
-    const on_key_down = window.try_catch_handler_((key_event) => {
-      let wanted_chars = 0;
-      switch (widget_key(key_event)) {
-        case WIDGET_KEY_NAMES.first:
-          wanted_chars = narrowest_chars;
-          break;
-        case WIDGET_KEY_NAMES.last:
-          wanted_chars = widest_chars;
-          break;
-        case WIDGET_KEY_NAMES.left:
-          wanted_chars = pane_width_now() - STYLE_PANE_SPLITTER_KEY_STEP_CHARS;
-          break;
-        case WIDGET_KEY_NAMES.right:
-          wanted_chars = pane_width_now() + STYLE_PANE_SPLITTER_KEY_STEP_CHARS;
-          break;
-        default:
-          return;
-      }
-      key_event.preventDefault();
-      pane_width_set(wanted_chars);
-      layout_refresh();
-      splitter_values_show();
+  // Narrows a pane that fills its room by its right edge, until a reset.
+  function pane_edge_attach(pane_element) {
+    if (pane_element.is_pane_edge_attached) return;
+    pane_element.is_pane_edge_attached = true;
+    registered_panes.push({
+      pane_element,
+      pane_width_forget: () => {
+        pane_element.style.maxWidth = "";
+      },
     });
-    handle_bar.addEventListener("keydown", on_key_down);
-    handle_bar.addEventListener(
-      "focus",
-      window.try_catch_handler_(splitter_values_show),
+    const holds_edge_grab = (pointer_event) =>
+      !pointer_event.target.closest(".text-scrollbar-") &&
+      edge_grab_holds(pointer_event, pane_element);
+    // Taken while capturing, so the pane's edge wins over what lies under it.
+    pane_element.addEventListener(
+      "pointerdown",
+      window.try_catch_handler_((press_event) => {
+        if (
+          press_event.button ||
+          press_event.defaultPrevented ||
+          !holds_edge_grab(press_event)
+        )
+          return;
+        press_event.preventDefault();
+        column_edge_drag(press_event, pane_element, pane_element, "maxWidth");
+      }),
+      true,
+    );
+    // Runs after a table inside marks its own cells, then marks the pane.
+    pane_element.addEventListener(
+      "pointermove",
+      window.try_catch_handler_((move_event) => {
+        if (holds_edge_grab(move_event)) column_edge_hover_set(pane_element);
+        else if (column_edge_hovered_element === pane_element)
+          column_edge_hover_set(null);
+      }),
+    );
+    pane_element.addEventListener(
+      "pointerleave",
+      window.try_catch_handler_(() => {
+        if (column_edge_hovered_element === pane_element)
+          column_edge_hover_set(null);
+      }),
     );
   }
 
+  // Returns the pane a bar's `data-sizes-` names, refusing a missing one.
+  function bar_sized_pane(bar_element) {
+    const pane_element = document.getElementById(
+      bar_element.getAttribute("data-sizes-"),
+    );
+    if (!pane_element) window.throw_exception_("str_error_internal");
+    return pane_element;
+  }
   function text_scrollbar_axis(bar_element) {
     const axis_names = Object.keys(TEXT_SCROLLBAR_AXES).filter((axis_name) =>
       bar_element.classList.contains(axis_name + "-"),
@@ -2507,10 +2667,18 @@ window.report_ui_ = window.try_catch_handler_(function () {
     const gutter_text = window.ui_strings_.text("str_text_scrollbar_gutter");
     const thumb_text = window.ui_strings_.text("str_text_scrollbar_thumb");
     const taken_wheel_events = wheel_taken_events[axis_name];
-    let press_state = null;
+    let draw_frame = 0,
+      press_state = null;
     function cell_make() {
       return render_element_of(
         render_element("span", {}, render_html_escape(gutter_text)),
+      );
+    }
+    // Returns whether the target holds more than it shows on the axis.
+    function target_scrolls() {
+      return (
+        target_element[scroll_axis.scroll_size] >
+        target_element[scroll_axis.client_size]
       );
     }
     // Measures in characters, null when the bar is not laid out.
@@ -2545,7 +2713,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
         ),
       );
       const thumb_room = track_length - thumb_length;
-      const is_scrolling = content_size > page_size;
+      const is_scrolling = target_scrolls();
       const unclamped_position = is_scrolling
         ? (thumb_room * (scroll_position - content_min)) / scroll_span
         : 0;
@@ -2569,7 +2737,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
         Math.round(bar_geometry.thumb_position + bar_geometry.thumb_length),
       ];
     }
+    // Hides the bar while its target fits, else draws its track and thumb.
     function scrollbar_draw() {
+      bar_element.classList.toggle("target-fits-", !target_scrolls());
       const bar_geometry = geometry();
       if (!bar_geometry) return;
       const cell_count = Math.max(bar_geometry.track_length, 1);
@@ -2622,6 +2792,32 @@ window.report_ui_ = window.try_catch_handler_(function () {
       target_element[scroll_axis.scroll_offset] +=
         step_chars * bar_geometry.units_per_char;
     }
+    // Returns the column title or pane a sideways drag sizes, or null.
+    function bar_sized_target() {
+      const sized_title = column_title_of(bar_element);
+      if (sized_title)
+        return { element: sized_title, size_property_name: "minWidth" };
+      if (!bar_element.hasAttribute("data-sizes-")) return null;
+      return {
+        element: bar_sized_pane(bar_element),
+        size_property_name: "maxWidth",
+      };
+    }
+    // Moves the thumb to a track press, then returns the grab in the thumb.
+    function thumb_press_offset(press_event, bar_geometry) {
+      if (!bar_geometry.is_scrolling) return 0;
+      const pointer_position = pointer_cells(press_event, bar_geometry);
+      const [thumb_first, thumb_end] = thumb_cells(bar_geometry);
+      const pressed_cell = Math.floor(pointer_position);
+      const is_thumb_press =
+        pressed_cell >= thumb_first && pressed_cell < thumb_end;
+      const centred_position =
+        pointer_position - bar_geometry.thumb_length / 2;
+      const thumb_position = is_thumb_press
+        ? bar_geometry.thumb_position
+        : thumb_place(bar_geometry, centred_position);
+      return pointer_position - thumb_position;
+    }
     const press_handler = window.try_catch_handler_((press_event) => {
       if (press_event.button || press_state) return;
       const bar_geometry = geometry();
@@ -2629,30 +2825,49 @@ window.report_ui_ = window.try_catch_handler_(function () {
       press_event.preventDefault();
       bar_element.setPointerCapture(press_event.pointerId);
       bar_element.classList.add("drag-");
-      let grab_offset = 0;
-      if (bar_geometry.is_scrolling) {
-        const pointer_position = pointer_cells(press_event, bar_geometry);
-        const [thumb_first, thumb_end] = thumb_cells(bar_geometry);
-        const pressed_cell = Math.floor(pointer_position);
-        const is_thumb_press =
-          pressed_cell >= thumb_first && pressed_cell < thumb_end;
-        const centred_position =
-          pointer_position - bar_geometry.thumb_length / 2;
-        const thumb_position = is_thumb_press
-          ? bar_geometry.thumb_position
-          : thumb_place(bar_geometry, centred_position);
-        grab_offset = pointer_position - thumb_position;
-      }
-      press_state = { grab_offset, press_event };
+      // A bar that sizes waits for the axis its drag travels further along.
+      const sized_target = bar_sized_target();
+      press_state = {
+        grab_offset: sized_target
+          ? 0
+          : thumb_press_offset(press_event, bar_geometry),
+        is_sizing: false,
+        press_event,
+        sized_target,
+      };
     });
     const move_handler = window.try_catch_handler_((move_event) => {
       if (
         !press_state ||
+        press_state.is_sizing ||
         move_event.pointerId !== press_state.press_event.pointerId
       )
         return;
       const bar_geometry = geometry();
-      if (!bar_geometry || !bar_geometry.is_scrolling) return;
+      if (!bar_geometry) return;
+      if (press_state.sized_target) {
+        const move_direction = drag_direction(
+          press_state.press_event,
+          move_event,
+        );
+        if (!move_direction) return;
+        if (move_direction === "sideways") {
+          press_state.is_sizing = true;
+          column_edge_drag(
+            press_state.press_event,
+            bar_element,
+            press_state.sized_target.element,
+            press_state.sized_target.size_property_name,
+          );
+          return;
+        }
+        press_state.grab_offset = thumb_press_offset(
+          press_state.press_event,
+          bar_geometry,
+        );
+        press_state.sized_target = null;
+      }
+      if (!bar_geometry.is_scrolling) return;
       thumb_place(
         bar_geometry,
         pointer_cells(move_event, bar_geometry) - press_state.grab_offset,
@@ -2664,6 +2879,16 @@ window.report_ui_ = window.try_catch_handler_(function () {
         end_event.pointerId !== press_state.press_event.pointerId
       )
         return;
+      // A press that waited and never travelled acts as a track press.
+      if (
+        press_state.sized_target &&
+        !press_state.is_sizing &&
+        end_event.type === "pointerup"
+      ) {
+        const bar_geometry = geometry();
+        if (bar_geometry)
+          thumb_press_offset(press_state.press_event, bar_geometry);
+      }
       press_state = null;
       bar_element.classList.remove("drag-");
       click_swallow_next();
@@ -2706,9 +2931,22 @@ window.report_ui_ = window.try_catch_handler_(function () {
       key_event.preventDefault();
       scroll_step(step_direction, bar_geometry);
     });
+    function frame_draw() {
+      draw_frame = 0;
+      scrollbar_draw();
+    }
+    // Draws a bar that shows or hides next frame, so no observed size changes.
+    function resize_draw() {
+      const is_shown = !bar_element.classList.contains("target-fits-");
+      if (is_shown === target_scrolls()) scrollbar_draw();
+      else if (!draw_frame)
+        draw_frame = requestAnimationFrame(
+          window.try_catch_handler_(frame_draw),
+        );
+    }
     bar_element.replaceChildren(cell_make());
     const resize_observer = new ResizeObserver(
-      window.try_catch_handler_(scrollbar_draw),
+      window.try_catch_handler_(resize_draw),
     );
     resize_observer.observe(bar_element);
     resize_observer.observe(target_element);
@@ -2747,7 +2985,15 @@ window.report_ui_ = window.try_catch_handler_(function () {
 
   function drag_scroll_press(press_event, surface_element, target_element) {
     if (press_event.button || press_event.defaultPrevented) return;
-    const pressed_slide_cell = slide_cell(press_event);
+    // A press in a surface nested in this one drags that surface alone.
+    for (
+      let pressed_element = press_event.target;
+      pressed_element !== surface_element;
+      pressed_element = pressed_element.parentElement
+    )
+      if (drag_scroll_surfaces.has(pressed_element)) return;
+    // Yields a sideways drag to a column move, an edge grab already taken.
+    const takes_column_drag = !!column_moved_title(press_event.target);
     const start_scroll_left = target_element.scrollLeft,
       start_scroll_top = target_element.scrollTop;
     let is_dragging = false,
@@ -2756,9 +3002,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
       if (move_event.pointerId !== press_event.pointerId) return;
       if (!is_dragging) {
         const move_direction = drag_direction(press_event, move_event);
-        const is_column_slide =
-          !!pressed_slide_cell && move_direction === "sideways";
-        if (!move_event.buttons || is_column_slide) {
+        const is_column_drag =
+          takes_column_drag && move_direction === "sideways";
+        if (!move_event.buttons || is_column_drag) {
           press_end();
           return;
         }
@@ -2800,6 +3046,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
   }
   // Drags the target's view by the surface, a moved press swallows its click.
   function drag_scroll_attach(surface_element, target_element) {
+    drag_scroll_surfaces.add(surface_element);
     surface_element.addEventListener(
       "pointerdown",
       window.try_catch_handler_((press_event) =>
@@ -2824,8 +3071,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
     for (const settle_callback of resize_settle_callbacks) settle_callback();
   }
   function page_activate() {
-    if (is_scaled)
-      text_scrollbar_attach(page_scrollbar, page_scroll_box, "horizontal");
     layout_activate();
   }
   // Runs the callback after the layout refresh in each window resize frame.
@@ -2839,7 +3084,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
   window.render_menu_button_ = render_menu_button;
   window.render_page_emphasis_ = render_page_emphasis;
   font_fit_apply();
-  dark_mode_stored_apply_();
+  dark_mode_show(window.report_dark_mode_.opening_enabled());
   if (is_scaled) design_scale_stop = design_scale_stored_stop();
   design_scale_apply();
   window.addEventListener(
@@ -2868,9 +3113,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
       settings_cleared_hash: address_settings_cleared_hash,
       top_href: address_top_href,
     },
+    counter_line_move_send,
     dark_mode_enabled_now_,
     dark_mode_set_,
-    dark_mode_show_: dark_mode_show,
     design_character_width_px: DESIGN_CHARACTER_WIDTH_PX,
     design_px,
     design_scale_last_stop: DESIGN_SCALE_LAST_STOP,
@@ -2879,6 +3124,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     diff_share,
     drag_scroll: { attach: drag_scroll_attach },
     fixed_text,
+    focused_path_send,
     heat_cell_style,
     home_panel,
     human_text,
@@ -2887,8 +3133,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
     layout_reset,
     listeners_bind,
     load_log_history_send,
-    page_heading: { attach: page_heading_attach },
-    pane_splitter: { attach: pane_splitter_attach },
     percent_text,
     ramp_channels_at,
     render_table,
@@ -2910,10 +3154,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
     },
     table_sort: {
       column: table_sort_column,
-      heading_markup: table_sort_heading_markup,
+      heading_labels: table_sort_heading_labels,
       records: table_sort_records,
     },
-    template_fill,
     text_scrollbar: { attach: text_scrollbar_attach },
     view_activate,
     view_frame,

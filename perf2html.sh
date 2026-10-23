@@ -46,7 +46,6 @@ PERF2HTML_DIR_="$PWD"
 _REPO="$(cd -P -- ../.. && pwd)"
 
 args_parse() {
-  options_parse "$@"
   local _remaining_argument
   _OUT_DIR=""
   _CMAKE_FLAGS=()
@@ -65,9 +64,7 @@ args_parse() {
   fi
   _OUT_DIR="$(report_path "$_OUT_DIR")"
   artifacts_dir_resolve "$(dirname "$_OUT_DIR")"
-  ARTIFACTS_DIR="$ARTIFACTS_DIR/$(basename "$_OUT_DIR")"
-  [ "$KEEP_ARTIFACTS" = 1 ] || trap artifacts_clean EXIT
-  _HEADER_FILE="$(artifact_path header-rows "")"
+  report_artifacts_dir REPORT_ARTIFACTS_DIR "$_OUT_DIR"
   local _index _seen=0 _split=0 _flag
   _COMPILER_COMMAND="${CC:-cc}"
   for _index in "${!_CMAKE_FLAGS[@]}"; do
@@ -100,38 +97,23 @@ ${_flag#-DCMAKE_C_FLAGS=}"
   [ "$_seen" = 1 ] || _CMAKE_FLAGS+=("-DCMAKE_C_FLAGS=-O2 -g")
   mapfile -t _TESTS < <(sed -n '/^TESTS_C *=/,/^$/p' \
     "$_REPO/tests/perf/Makefile.inc" \
-    | grep -o '[A-Za-z0-9_]*\.c' | sed 's/\.c$//' | sort || true)
+    | grep -o '[A-Za-z0-9_]*\.c' | sed 's/\.c$//' | LC_ALL=C sort || true)
   [ "${#_TESTS[@]}" -gt 0 ] || error_exit 1 \
     "error: no TESTS_C entry in $_REPO/tests/perf/Makefile.inc"
 }
 
-header_row() {
-  sed -n "s/^$1=//p" "$_HEADER_FILE" | head -1
-}
-
-recorded_reuse() {
-  [ -d "$ARTIFACTS_DIR" ] || error_exit 2 \
-    "error: --regenerate: no recordings at $ARTIFACTS_DIR"
-  [ -f "$_HEADER_FILE" ] || error_exit 2 \
-    "error: --regenerate: $ARTIFACTS_DIR is missing $(basename \
-      "$_HEADER_FILE"), the rows of the run to reuse"
-  TIMESTAMP="$(header_row recorded)"
-  TIMESTAMP="${TIMESTAMP%% *}"
-  [ -n "$TIMESTAMP" ] || error_exit 2 \
-    "error: --regenerate: no recorded= row in $_HEADER_FILE"
-  local _test_name _kind _file _missing=()
-  for _test_name in "${_TESTS[@]}"; do
-    for _kind in callgrind valgrind-log timing-csv timing-page trace-log \
-      trace-speedscope; do
-      _file="$(artifact_path "$_kind" "$_test_name")"
-      [ -f "$_file" ] || _missing+=("$_file")
-    done
-  done
-  [ "${#_missing[@]}" != 0 ] || return 0
-  local _lines=("error: --regenerate is missing ${#_missing[@]} file(s)")
-  _lines[0]="${_lines[0]} recorded at $TIMESTAMP in $ARTIFACTS_DIR:"
-  for _file in "${_missing[@]}"; do _lines+=("  $_file"); done
-  error_exit 2 "${_lines[@]}"
+recordings_check() {
+  [ "$REGENERATE" = 1 ] || return 0
+  local _test_list _header_rows
+  [ -d "$REPORT_ARTIFACTS_DIR" ] || error_exit 2 \
+    "error: --regenerate: no recordings at $REPORT_ARTIFACTS_DIR"
+  test_list_read "$REPORT_ARTIFACTS_DIR"
+  artifact_path _test_list "$REPORT_ARTIFACTS_DIR" test-list
+  [ "${TEST_LIST[*]}" = "${_TESTS[*]}" ] || error_exit 2 "error: \
+--regenerate: $_test_list names ${TEST_LIST[*]}, TESTS_C names ${_TESTS[*]}"
+  artifacts_verify recorded
+  artifact_path _header_rows "$REPORT_ARTIFACTS_DIR" header-rows
+  recorded_time_read TIMESTAMP "$_header_rows"
 }
 
 compiler_identify() {
@@ -155,16 +137,18 @@ neither __clang__ nor __GNUC__"
 
 build_manifest() {
   if [ "$REGENERATE" = 1 ]; then
-    _REVISION="$(header_row revision)"
-    _CPU_MODEL="$(header_row cpu)"
-    _MEMORY_USAGE="$(header_row memory)"
-    _OPERATING_SYSTEM="$(header_row os)"
-    _COMPILER_NAME="$(header_row compiler)"
-    _BUILD_DESC="$(header_row build)"
+    local _header_rows
+    artifact_path _header_rows "$REPORT_ARTIFACTS_DIR" header-rows
+    _REVISION="$(manifest_value "$_header_rows" revision)"
+    _CPU_MODEL="$(manifest_value "$_header_rows" cpu)"
+    _MEMORY_USAGE="$(manifest_value "$_header_rows" memory)"
+    _OPERATING_SYSTEM="$(manifest_value "$_header_rows" os)"
+    _COMPILER_NAME="$(manifest_value "$_header_rows" compiler)"
+    _BUILD_DESC="$(manifest_value "$_header_rows" build)"
     if [ -z "$_REVISION" ] || [ -z "$_CPU_MODEL" ] \
       || [ -z "$_MEMORY_USAGE" ] || [ -z "$_OPERATING_SYSTEM" ] \
       || [ -z "$_COMPILER_NAME" ] || [ -z "$_BUILD_DESC" ]; then
-      error_exit 2 "error: --regenerate: $_HEADER_FILE is missing one of its \
+      error_exit 2 "error: --regenerate: $_header_rows is missing one of its \
 revision=, cpu=, memory=, os=, compiler= or build= rows"
     fi
     return
@@ -189,6 +173,21 @@ revision=, cpu=, memory=, os=, compiler= or build= rows"
   compiler_identify
 }
 
+report_prepare() {
+  report_delete "$_OUT_DIR"
+  [ "$REGENERATE" = 1 ] || artifacts_clean
+  local _log_kind=profile-log _log_file
+  if [ "$REGENERATE" = 1 ]; then
+    _log_kind=profile-regenerate-log
+  fi
+  artifact_path _log_file "$REPORT_ARTIFACTS_DIR" "$_log_kind"
+  report_begin "$_OUT_DIR" "$_log_file" \
+    "tests/perf2html/perf2html.sh $TIMESTAMP: ${_CMAKE_FLAGS[*]}: $_OUT_DIR"
+  [ "$REGENERATE" = 1 ] \
+    || test_list_write "$REPORT_ARTIFACTS_DIR" "${_TESTS[@]}"
+  source_cache_fill
+}
+
 tree_build() {
   local _dir="$1"
   shift
@@ -203,7 +202,7 @@ tree_build() {
   command_item_print "${_configure_command[*]}"
   child_capture_noisy "${_configure_command[@]}" || _exit_code=$?
   [ "$_exit_code" = 0 ] \
-    || error_exit "$_exit_code" "error: cmake failed to build $_command_line"
+    || error_exit "$_exit_code" "error: exit $_exit_code from: $_command_line"
   command_run cmake --build "$_dir" --parallel --target perf
 }
 
@@ -219,17 +218,13 @@ build_paths() {
   _TRACE_BIN_REL="$(path_display "$_TRACE_BIN" "$_REPO")"
 }
 
-build_compile() {
-  build_paths
-  local _line
-  _line="$(printf '%-11s%s' build "${_CMAKE_FLAGS[*]}")"
+trees_compile() {
   if [ "$REGENERATE" = 1 ]; then
-    log_verbose "$_line | reused"
+    log_verbose "reused build ${_CMAKE_FLAGS[*]}"
     return
   fi
   heading_print "cmake -B {$BUILD_DIR,$TRACE_BUILD_DIR}/$_TREE_NAME"
-  local _start _flag _trace_flags=()
-  _start="$(clock_microseconds)"
+  local _flag _trace_flags=()
   tree_build "$_BUILD_TREE" "${_CMAKE_FLAGS[@]}"
   for _flag in "${_CMAKE_FLAGS[@]}"; do
     case "$_flag" in
@@ -241,256 +236,18 @@ build_compile() {
   done
   mkdir -p "$_TRACE_TREE"
   command_run "$_COMPILER_COMMAND" -O2 -fcf-protection=none \
+    -DPROFILE_START_FUNCTION_NAME="$PROFILE_START_FUNCTION_NAME" \
     -DTEST_SAMPLES_SIZE="$TEST_SAMPLES_SIZE" \
     -c "$PERF2HTML_DIR_/src/cyg_callback.c" -o "$_TRACE_TREE/cyg_callback.o"
   rm -f "$_TRACE_BIN"
   local _hook="$_TRACE_TREE/cyg_callback.o"
   tree_build "$_TRACE_TREE" "${_trace_flags[@]}" \
     "-DCMAKE_EXE_LINKER_FLAGS=$_hook -Wl,--export-dynamic"
-  log_verbose "$_line | $(duration_format "$_start")"
   _BUILD_DESC="${_CMAKE_FLAGS[*]}"
 }
 
-trace_record() {
-  local _test="$1" _loops="$2" _trace_file="$3" _skip="$4"
-  PERF_TRACE_OUT="$_trace_file" PERF_TRACE_SKIP="$_skip" \
-    taskset -c "$PROFILE_PINNED_CPU" "$_TRACE_BIN" "$_test" "$_loops"
-}
-
-trace_run() {
-  local _test="$1" _loops="$2" _trace_file="$3" _skip="$4" _page="$5"
-  local _name _pinned
-  _name="$(basename "${_trace_file/.$TIMESTAMP/}")"
-  _pinned="PERF_TRACE_SKIP=$_skip taskset -c $PROFILE_PINNED_CPU"
-  echo "\$ PERF_TRACE_OUT=$_name $_pinned $_TRACE_BIN_REL $_test $_loops" \
-    >>"$_page"
-  page_command_run "$_page" \
-    "PERF_TRACE_OUT=$_trace_file $_pinned $_TRACE_BIN $_test $_loops" \
-    trace_record "$_test" "$_loops" "$_trace_file" "$_skip"
-}
-
-trace_convert() {
-  python3 "$PERF2HTML_DIR_/scripts/trace_to_speedscope.py" "$1" -o "$2" \
-    --name "$3" 2>&1 | sed "s#$ARTIFACTS_DIR/##g; s#\\.$TIMESTAMP##g"
-}
-
-flame_graph_profile_write() {
-  local _test="$1"
-  command_run python3 "$PERF2HTML_DIR_/scripts/build_flame_graph.py" \
-    profile --report-dir "$_OUT_DIR" --test "$_test" \
-    --profile-json "$_TRACE_JSON"
-}
-
-flame_app_install() {
-  local _out="$1"
-  local _pattern
-  local -a _found
-  mkdir -p "$_out/$FLAME_GRAPH_APP_DIR_NAME"
-  for _pattern in "${FLAME_GRAPH_APP_FILE_GLOBS[@]}"; do
-    mapfile -t _found < <(find "$SPEEDSCOPE_RELEASE" -maxdepth 1 \
-      -name "$_pattern" | sort)
-    local _reason="error: $_pattern matched ${#_found[@]} files in"
-    [ "${#_found[@]}" = 1 ] || error_exit 1 \
-      "$_reason $SPEEDSCOPE_RELEASE, expected exactly 1"
-    cp "${_found[0]}" "$_out/$FLAME_GRAPH_APP_DIR_NAME"/
-    case "$_pattern" in
-      *.js) _FLAME_APP_JS="$(basename "${_found[0]}")" ;;
-      *.css) _FLAME_APP_CSS="$(basename "${_found[0]}")" ;;
-    esac
-  done
-}
-
-flame_graph_page_write() {
-  heading_print "python3 build_flame_graph.py page"
-  command_run python3 "$PERF2HTML_DIR_/scripts/build_flame_graph.py" page \
-    --report-dir "$_OUT_DIR" --app-js "$_FLAME_APP_JS" \
-    --app-css "$_FLAME_APP_CSS"
-}
-
-trace_render() {
-  local _test="$1" _loops="$2"
-  local _seen _tree_display _name _trace_file
-  _trace_file="$(artifact_path trace-binary "$_test")"
-  _TRACE_LOG="$(artifact_path trace-log "$_test")"
-  _TRACE_JSON="$(artifact_path trace-speedscope "$_test")"
-
-  if [ "$REGENERATE" = 1 ]; then
-    heading_print "python3 build_flame_graph.py profile $_test"
-    flame_graph_profile_write "$_test"
-    return
-  fi
-  _name="$(basename "${_trace_file/.$TIMESTAMP/}")"
-  heading_print "PERF_TRACE_OUT=$_name perf $_test $_loops"
-  _tree_display="$(path_display "$_TRACE_TREE" "$_REPO")"
-  {
-    echo "# $_tree_display = this report's build flags +"
-    echo "# -finstrument-functions, linked with"
-    echo "# tests/perf2html/src/cyg_callback.c, which reads rdtsc at every"
-    echo "# function enter and exit. Run 1 counts events, run 2 keeps up to"
-    echo "# $TEST_SAMPLES_SIZE samples, an enter and exit pair each, right"
-    echo "# after the run's midpoint (TEST_SAMPLES_SIZE in"
-    echo "# tests/perf2html/scripts/settings.sh)."
-  } >"$_TRACE_LOG"
-  trace_run "$_test" "$_loops" "$_trace_file" "$TRACE_SKIP_ALL" "$_TRACE_LOG"
-  _seen="$(python3 "$PERF2HTML_DIR_/scripts/trace_to_speedscope.py" --seen \
-    "$_trace_file")"
-  [ -n "$_seen" ] || error_exit 1 "error: no --seen count for $_trace_file"
-  trace_run "$_test" "$_loops" "$_trace_file" "$((_seen / 2))" "$_TRACE_LOG"
-  local _shown="python3 $PERF2HTML_DIR_/scripts/trace_to_speedscope.py"
-  _shown="$_shown $_trace_file -o $_TRACE_JSON"
-  _shown="$_shown --name \"$_test (loops=$_loops)\""
-  page_command_run "$_TRACE_LOG" "$_shown" \
-    trace_convert "$_trace_file" "$_TRACE_JSON" "$_test (loops=$_loops)"
-  flame_graph_profile_write "$_test"
-}
-
-report_render() {
-  local _name="$1"
-  shift
-
-  heading_print "python3 callgrind_to_heatmap.py data $_name"
-  command_run python3 "$PERF2HTML_DIR_/scripts/callgrind_to_heatmap.py" data \
-    "${_CALLGRIND_FILES[@]}" --report-dir "$_OUT_DIR" --test "$_name" "$@"
-
-  heading_print "python3 build_report.py test $_name"
-  command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" test \
-    "${_CALLGRIND_FILES[@]}" -o "$_OUT_DIR" --test "$_name"
-}
-
-timing_record() {
-  local _counter_value _counter_unit _counter_name _remaining_fields
-  perf stat -x, -o "$2" -e cycles:u,instructions:u \
-    taskset -c "$PROFILE_PINNED_CPU" "$_BIN" "$1" "$TEST_LOOPS" \
-    && while IFS=, read -r _counter_value _counter_unit _counter_name \
-      _remaining_fields; do
-      case "$_counter_name" in
-        *cycles*) printf 'Cycles:    %s\n' "$_counter_value" ;;
-        *instructions*) printf 'Instructions: %s\n' "$_counter_value" ;;
-      esac
-    done <"$2"
-}
-
-run_one() {
-  local _test="$1"
-  local _loops _cg_file _log _start _callgrind_duration _shown _page_words
-  local _stat_file _page _summary_headers _summary_values
-  _stat_file="$(artifact_path timing-csv "$_test")"
-  _page="$(artifact_path timing-page "$_test")"
-  _loops=$TEST_LOOPS
-  _cg_file="$(artifact_path callgrind "$_test")"
-  _log="$(artifact_path valgrind-log "$_test")"
-
-  if [ "$REGENERATE" = 1 ]; then
-    trace_render "$_test" "$_loops"
-    _CALLGRIND_FILES=("$_cg_file")
-    report_render "$_test"
-    log_verbose "$(printf '%-13sloops=%s | reused' "$_test" "$_loops")"
-    return
-  fi
-
-  heading_print "valgrind --tool=callgrind perf $_test $_loops"
-  _start="$(clock_microseconds)"
-  command_run taskset -c "$PROFILE_PINNED_CPU" valgrind --tool=callgrind \
-    --cache-sim=yes --branch-sim=yes --trace-redir=yes \
-    --LL="$CALLGRIND_LAST_LEVEL_CACHE" \
-    --callgrind-out-file="$_cg_file" --log-file="$_log" \
-    "$_BIN" "$_test" "$_loops"
-  _callgrind_duration="$(duration_format "$_start")"
-
-  heading_print "python3 callgrind_symbols.py $_test"
-  command_run python3 "$PERF2HTML_DIR_/scripts/callgrind_symbols.py" \
-    --valgrind-log "$_log" --callgrind-file "$_cg_file"
-
-  heading_print "perf stat -e cycles:u,instructions:u perf $_test" \
-    "$TEST_LOOPS"
-  echo "\$ perf stat -e cycles:u,instructions:u taskset -c" \
-    "$PROFILE_PINNED_CPU $_BIN_REL $_test $TEST_LOOPS" >"$_page"
-  _shown="perf stat -x, -o $_stat_file -e cycles:u,instructions:u taskset"
-  page_command_run "$_page" \
-    "$_shown -c $PROFILE_PINNED_CPU $_BIN $_test $TEST_LOOPS" \
-    timing_record "$_test" "$_stat_file"
-  _summary_headers=(Test Loops Callgrind)
-  _summary_values=("$_test" "$_loops" "$_callgrind_duration")
-  while read -r -a _page_words; do
-    case "${_page_words[0]-}" in
-      Time/*: | Errors:)
-        _summary_headers+=("${_page_words[0]%:}")
-        _summary_values+=("${_page_words[*]:1}")
-        ;;
-    esac
-  done <"$_page"
-  [[ "${_summary_headers[*]}" == *" Time/"* ]] \
-    || error_exit 1 "error: no Time/<unit>: line in $_page"
-  table_print "${#_summary_headers[@]}" "${_summary_headers[@]}" \
-    "${_summary_values[@]}"
-
-  trace_render "$_test" "$_loops"
-  _CALLGRIND_FILES=("$_cg_file")
-  report_render "$_test"
-}
-
-timer_artifacts_write() {
-  local _root_directory _root_name _test_name _member _recording
-  _root_directory="$(artifact_path timer-artifacts "")"
-  _root_name="$(basename "$_root_directory")"
-  _TIMER_ARTIFACTS_ARCHIVE="$_OUT_DIR/$_root_name$REPORT_RAW_ARCHIVE_SUFFIX"
-
-  heading_print "tar $_root_name$REPORT_RAW_ARCHIVE_SUFFIX"
-  rm -rf "$_root_directory"
-  mkdir "$_root_directory"
-  for _test_name in "${_TESTS[@]}"; do
-    _recording="$(artifact_path callgrind "$_test_name")"
-    _member="$_root_directory/$(basename "$_recording")"
-    cp "$_recording" "$_member"
-    sed -i "s#$_REPO/##g" "$_member"
-  done
-  cp "$(artifact_path callgrind-file-data "")" "$_root_directory/"
-  command_run tar --sort=name --mtime=@0 --owner=0 --group=0 \
-    --numeric-owner -cJf "$_TIMER_ARTIFACTS_ARCHIVE" -C "$ARTIFACTS_DIR" \
-    "$_root_name"
-  rm -r "$_root_directory"
-}
-
-run_all() {
-  local _test_name _time_label _time_value _time_suffix _suite_suffix
-  local _remaining_fields _total=0 _row _rows="" _page _test_page
-  local _args _timing_lines=()
-  _page="$(artifact_path timing-page "$REPORT_TEST_SUITE_NAME")"
-  _CALLGRIND_FILES=("$(artifact_path callgrind '*')")
-
-  heading_print "taskset -c $PROFILE_PINNED_CPU perf <test>"
-  for _test_name in "${_TESTS[@]}"; do
-    _test_page="$(artifact_path timing-page "$_test_name")"
-    while read -r _time_label _time_value _time_suffix _remaining_fields; do
-      [ "$_time_label" != Time: ] || break
-    done <"$_test_page"
-    [ "$_time_label" = Time: ] && [ -n "$_time_suffix" ] || error_exit 1 \
-      "error: no Time: <value> <suffix> line in $_test_page"
-    if [ "$_test_name" = "${_TESTS[0]}" ]; then
-      _suite_suffix="$_time_suffix"
-    fi
-    [ "$_time_suffix" = "$_suite_suffix" ] || error_exit 1 \
-      "error: $_test_page Time: suffix $_time_suffix, expected $_suite_suffix"
-    printf -v _row '  %-14s %12s %s\n' "$_test_name:" "$_time_value" \
-      "$_suite_suffix"
-    _rows+="$_row"
-    _timing_lines+=("$_test_name: $_time_value $_suite_suffix")
-    _total=$((_total + _time_value))
-  done
-  {
-    echo "\$ taskset -c $PROFILE_PINNED_CPU $_BIN_REL <test>"
-    echo "#   for every test, one after the other"
-    printf '%s' "$_rows"
-    echo "Time:     $_total $_suite_suffix"
-  } >"$_page"
-  command_item_print "taskset -c $PROFILE_PINNED_CPU $_BIN <test>"
-  item_output_print "${_timing_lines[@]}" "Time: $_total $_suite_suffix"
-
-  report_render "$REPORT_TEST_SUITE_NAME" --paths-output \
-    "$(artifact_path callgrind-file-data "")"
-  timer_artifacts_write
-
-  heading_print "python3 build_report.py overview"
+header_rows_write() {
+  local _header_rows
   _HEADER_ROWS=(
     "revision=$_REVISION"
     "cpu=$_CPU_MODEL"
@@ -501,51 +258,170 @@ run_all() {
     "executable=$_BIN_REL"
     "$(manifest_recorded_row)"
   )
-  printf '%s\n' "${_HEADER_ROWS[@]}" >"$_HEADER_FILE"
-  _args=(-o "$_OUT_DIR/index.html" --header-file "$_HEADER_FILE"
-    --raw-data "$_TIMER_ARTIFACTS_ARCHIVE"
-    --profile "$(artifact_path callgrind '*')"
-    --perf-log "$(artifact_path timing-page '*')")
-  command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" overview \
-    "${_args[@]}"
-  log_verbose "$(printf '%-13s%d profiles merged: %s' \
-    "$REPORT_TEST_SUITE_NAME" "${#_TESTS[@]}" "$_OUT_DIR/index.html")"
+  [ "$REGENERATE" = 0 ] || return 0
+  artifact_path _header_rows "$REPORT_ARTIFACTS_DIR" header-rows
+  printf '%s\n' "${_HEADER_ROWS[@]}" >"$_header_rows"
+}
+
+build_compile() {
+  step_run 1 paths build_paths
+  step_run 2 trees trees_compile
+  step_run 3 "header rows" header_rows_write
+}
+
+flame_app_name_read() {
+  local _variable="$1" _document="$2" _role="$3" _line _rest _name=""
+  local _pattern="${FLAME_GRAPH_APP_NAME_PATTERNS[$_role]}" _found=0
+  while IFS= read -r _line; do
+    _rest="$_line"
+    while [[ "$_rest" =~ $_pattern ]]; do
+      _found=$((_found + 1))
+      _name="${BASH_REMATCH[1]}"
+      _rest="${_rest#*"${BASH_REMATCH[0]}"}"
+    done
+  done <"$_document"
+  [ "$_found" = 1 ] || error_exit 1 "error: $_document names $_found \
+$_role file(s) matching $_pattern, expected exactly 1"
+  printf -v "$_variable" '%s' "$_name"
+}
+
+flame_app_install() {
+  local _out="$1" _font
+  flame_app_name_read _FLAME_APP_JS "$SPEEDSCOPE_RELEASE/index.html" script
+  flame_app_name_read _FLAME_APP_CSS "$SPEEDSCOPE_RELEASE/index.html" \
+    stylesheet
+  flame_app_name_read _font "$SPEEDSCOPE_RELEASE/$_FLAME_APP_CSS" font
+  mkdir -p "$_out/$FLAME_GRAPH_APP_DIR_NAME"
+  cp "$SPEEDSCOPE_RELEASE/$_FLAME_APP_JS" \
+    "$SPEEDSCOPE_RELEASE/$_FLAME_APP_CSS" "$SPEEDSCOPE_RELEASE/$_font" \
+    "$_out/$FLAME_GRAPH_APP_DIR_NAME"/
+}
+
+trace_render() {
+  local _test="$1" _trace_file _trace_log _command
+  artifact_path _trace_file "$REPORT_ARTIFACTS_DIR" trace-binary "$_test"
+  artifact_path _trace_log "$REPORT_ARTIFACTS_DIR" trace-log "$_test"
+
+  heading_print \
+    "$TRACE_OUT_VARIABLE=${_trace_file##*/} perf $_test $TEST_LOOPS"
+  _command=(python3 "$PERF2HTML_DIR_/scripts/perf_measure.py" trace
+    "--artifacts=$ARTIFACTS_DIR" "--report=$_OUT_DIR" "--test=$_test"
+    "--executable=$_TRACE_BIN" "--executable-shown=$_TRACE_BIN_REL")
+  page_command_run "$_trace_log" "$VERBOSE_RAW_LEVEL" "${_command[*]}" \
+    "${_command[@]}"
+}
+
+callgrind_measure() {
+  local _test="$1"
+  heading_print "valgrind --tool=callgrind perf $_test $TEST_LOOPS"
+  command_run python3 "$PERF2HTML_DIR_/scripts/perf_measure.py" callgrind \
+    "--artifacts=$ARTIFACTS_DIR" "--report=$_OUT_DIR" "--test=$_test" \
+    "--executable=$_BIN"
+}
+
+symbols_resolve() {
+  local _test="$1"
+  heading_print "python3 callgrind_symbols.py $_test"
+  command_run python3 "$PERF2HTML_DIR_/scripts/callgrind_symbols.py" \
+    "--artifacts=$ARTIFACTS_DIR" "--report=$_OUT_DIR" "--test=$_test"
+}
+
+timing_measure() {
+  local _test="$1" _command _verbose_args
+  mapfile -t _verbose_args < <(verbose_flags)
+  heading_print "perf stat -j -r $TIMING_PERF_STAT_RUNS perf $_test" \
+    "$TEST_LOOPS"
+  _command=(python3 "$PERF2HTML_DIR_/scripts/perf_measure.py" timing
+    "--artifacts=$ARTIFACTS_DIR" "--report=$_OUT_DIR" "--test=$_test"
+    "--executable=$_BIN" "--executable-shown=$_BIN_REL"
+    "${_verbose_args[@]}")
+  # The timing tool writes its own Markdown table at level 1.
+  page_command_run "" 1 "${_command[*]}" "${_command[@]}"
+}
+
+run_one() {
+  local _test="$1"
+  if [ "$REGENERATE" = 1 ]; then
+    log_verbose "reused $_test loops=$TEST_LOOPS"
+    return
+  fi
+  step_run 1 callgrind callgrind_measure "$_test"
+  step_run 2 symbols symbols_resolve "$_test"
+  step_run 3 timing timing_measure "$_test"
+  step_run 4 trace trace_render "$_test"
+}
+
+tests_record() {
+  local _index
+  for _index in "${!_TESTS[@]}"; do
+    step_run "$((_index + 1))" "${_TESTS[_index]}" run_one "${_TESTS[_index]}"
+  done
+  [ "$REGENERATE" = 1 ] || artifacts_verify recorded
+}
+
+timer_artifacts_write() {
+  local _root_directory _root_name _archive _test_name _kind _member _source
+  printf -v _root_directory "$TIMER_ARTIFACTS_ROOT_FORMAT" \
+    "$REPORT_ARTIFACTS_DIR" "$TIMESTAMP"
+  raw_data_archive_path _archive "$_OUT_DIR" "$TIMESTAMP"
+  _root_name="${_root_directory##*/}"
+
+  heading_print "tar ${_archive##*/}"
+  rm -rf "$_root_directory"
+  mkdir "$_root_directory"
+  for _test_name in "${_TESTS[@]}"; do
+    artifact_path _source "$REPORT_ARTIFACTS_DIR" callgrind "$_test_name"
+    artifact_path _member "$_root_directory" callgrind "$_test_name"
+    cp "$_source" "$_member"
+    sed -i "s#$_REPO/##g" "$_member"
+  done
+  for _kind in file-data test-list; do
+    artifact_path _source "$REPORT_ARTIFACTS_DIR" "$_kind"
+    artifact_path _member "$_root_directory" "$_kind"
+    cp "$_source" "$_member"
+  done
+  command_run tar --sort=name --mtime=@0 --owner=0 --group=0 \
+    --numeric-owner -cJf "$_archive" -C "$REPORT_ARTIFACTS_DIR" "$_root_name"
+  rm -r "$_root_directory"
+}
+
+pages_write() {
+  local _flags=("--artifacts=$ARTIFACTS_DIR" "--report=$_OUT_DIR")
+  step_run 1 "flame graph app" flame_app_install "$_OUT_DIR"
+  step_run 2 "flame graph page" page_tool_run build_flame_graph.py page \
+    "--report=$_OUT_DIR" "--app-js=$_FLAME_APP_JS" \
+    "--app-css=$_FLAME_APP_CSS"
+  step_run 3 "flame graph profiles" page_tool_run build_flame_graph.py \
+    profiles "${_flags[@]}"
+  step_run 4 "heat map data" page_tool_run callgrind_to_heatmap.py data \
+    "${_flags[@]}"
+  step_run 5 database page_tool_run build_report.py database "${_flags[@]}"
+  step_run 6 "call graph" page_tool_run build_report.py call-graph \
+    "${_flags[@]}"
+  step_run 7 "timer artifacts" timer_artifacts_write
+  step_run 8 overview page_tool_run build_report.py overview "${_flags[@]}" \
+    "${README_HTML_FLAGS[@]}"
+  step_run 9 "heat map page" page_tool_run callgrind_to_heatmap.py page \
+    "--report=$_OUT_DIR"
+  step_run 10 finish report_finish "$_OUT_DIR" \
+    "$REPORT_MANIFEST_VERSION_FULL" "${_HEADER_ROWS[@]}"
 }
 
 main() {
-  args_parse "$@"
+  options_parse "$@"
   verbose_begin
   title_print "$_SCRIPT" "$@"
-  if [ "$REGENERATE" = 1 ]; then recorded_reuse; fi
-  toolchain_check
-  source_cache_sync
-  build_manifest
-  report_delete "$_OUT_DIR"
-  [ "$REGENERATE" = 1 ] || artifacts_clean
-  _HEADER_ROWS=()
-  local _log_kind=profile-log _log_file
-  if [ "$REGENERATE" = 1 ]; then
-    _log_kind=profile-regenerate-log
-  fi
-  _log_file="$(artifact_path "$_log_kind" "")"
-  report_begin "$_OUT_DIR" "$_log_file" \
-    "tests/perf2html/perf2html.sh $TIMESTAMP: ${_CMAKE_FLAGS[*]}: $_OUT_DIR"
-  source_cache_fill
-  build_compile
-  flame_app_install "$_OUT_DIR"
-  flame_graph_page_write
-
-  local _test_name
-  for _test_name in "${_TESTS[@]}"; do
-    run_one "$_test_name"
-  done
-  run_all
-  heading_print "python3 callgrind_to_heatmap.py page"
-  command_run python3 "$PERF2HTML_DIR_/scripts/callgrind_to_heatmap.py" page \
-    --report-dir "$_OUT_DIR"
-
-  report_finish "$_OUT_DIR" "$REPORT_MANIFEST_VERSION_FULL" \
-    "${_HEADER_ROWS[@]}"
+  args_parse
+  recordings_check
+  step_run 1 toolchain toolchain_check
+  step_run 2 "source cache" source_cache_sync
+  step_run 3 manifest build_manifest
+  step_run 4 report report_prepare
+  step_run 5 build build_compile
+  step_run 6 tests tests_record
+  step_run 7 pages pages_write
+  heading_print "$_SCRIPT, after ${#STEP_NAMES[@]} steps"
+  table_print "${#STEP_NAMES[@]}" "${STEP_NAMES[@]}" "${STEP_SECONDS[@]}"
 }
 
 main "$@"

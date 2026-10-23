@@ -5,13 +5,15 @@
 window.ui_strings_ = (function () {
   "use strict";
   const STRINGS = {
-    str_callers_cell_entry: "{function} ({share})",
     str_caret_down: "▼",
     str_caret_right: "►",
+    str_clip_ellipsis: "…",
     str_column_baseline_share: "vs baseline",
+    str_column_branch_miss_percent: "branch miss %",
     str_column_call_count: "call count",
     str_column_called_at: "called at",
     str_column_callee: "callee",
+    str_column_callees: "callees",
     str_column_caller: "caller",
     str_column_callers: "callers",
     str_column_calls: "calls",
@@ -20,20 +22,19 @@ window.ui_strings_ = (function () {
     str_column_counter: "counter",
     str_column_defined_at: "defined at",
     str_column_file: "file",
-    str_column_file_share: "file %",
     str_column_function: "function",
     str_column_function_share: "function %",
     str_column_functions_changed: "functions changed in {counter}",
-    str_column_global_share: "global %",
-    str_column_inclusive: "incl",
+    str_column_instructions_per_cycle: "instructions/cycle",
+    str_column_l1d_miss_percent: "L1D miss %",
     str_column_line: "line",
-    str_column_rank: "#",
+    str_column_loads_per_instruction: "loads / instruction",
     str_column_report: "report",
     str_column_report_per_test: "one report per test",
     str_column_self: "self",
-    str_column_share_of_total: "% of total",
     str_column_source: "source",
-    str_column_symbol: "symbol",
+    str_column_test_share: "test %",
+    str_column_time_per_loop: "Time/loop",
     str_counter_bc: "conditional branches executed",
     str_counter_bcm: "conditional branches mispredicted",
     str_counter_bi: "indirect branches executed",
@@ -52,21 +53,17 @@ window.ui_strings_ = (function () {
     str_counter_ilmr: "last level instruction cache misses",
     str_counter_ir: "instructions executed",
     str_counter_l1m: "L1 cache misses, all",
-    str_counter_label: "{description} / {counter}",
+    str_counter_label: "{description} ({counter})",
     str_counter_llm: "last level cache misses, all",
-    str_debug_tip_none: "(none)",
-    str_debug_tip_text: "<{tag}> class={class}\nid={id}\nfg={fg}\nbg={bg}",
-    str_error_dark_mode_unusable:
-      "the dark mode choice came out as {0}, naming neither state",
     str_error_hash_file_missing: "url names line {0} but no file",
     str_error_hash_file_unknown:
       "url encodes a file this report never profiled: {0}",
-    str_error_hash_flame_graph_missing:
-      "url encodes a test this report has no flame graph for: {0}",
     str_error_hash_function_conflicting:
       "url names function {0} together with a file or line",
     str_error_hash_function_unknown:
       "url encodes a function address this report never recorded: {0}",
+    str_error_hash_heat_map_parts_missing:
+      "heat map requires test and file or function",
     str_error_hash_line_unusable:
       "url encodes a line that is not a line number: {0}",
     str_error_hash_part_misplaced: "url part {0} is not one view {1} reads",
@@ -76,11 +73,13 @@ window.ui_strings_ = (function () {
       "url names no local profile path, which the flame graph needs to start",
     str_error_hash_setting_unknown:
       "url encodes a setting this report does not have: {0}",
-    str_error_hash_test_missing: "url names no test",
+    str_error_hash_test_missing: "No test selected.",
     str_error_hash_test_unknown:
       "url encodes a test this report does not have: {0}",
     str_error_hash_value_empty: "url part {0} holds no value",
-    str_error_hash_view_missing: "url names test {0} but no view",
+    str_error_hash_view_missing: "url names {0} but no view",
+    str_error_hash_view_page_missing:
+      "url encodes a view this diff report has no page for: {0}",
     str_error_hash_view_unknown:
       "url encodes a view this report does not have: {0}",
     str_error_held_script_unframed:
@@ -88,6 +87,8 @@ window.ui_strings_ = (function () {
     str_error_internal: "internal error: halted and caught fire",
     str_error_report_incomplete:
       "report incomplete, scripts/debug.js not written.",
+    str_error_screenshot_label_query_unusable:
+      "the {0} query value came out as {1}, expected {2}",
     str_error_setting_choice_unknown:
       "setting {0} names a choice this report does not offer: {1}",
     str_error_setting_unknown: "no such setting: {0}",
@@ -98,16 +99,15 @@ window.ui_strings_ = (function () {
     str_error_strip_number_unusable:
       "no available strip entry is numbered {0}",
     str_flame_graph_page_title: "speedscope",
+    str_function_list_cell_entry: "{function} ({share})",
     str_function_name_unknown: "?",
-    str_heading_files_by_counter: "top {count} files by {measure}",
-    str_heading_functions_by_counter: "top {count} functions by {measure}",
-    str_heading_lines_by_counter: "top {count} lines by {measure}",
+    str_heading_functions: "functions",
     str_heading_manifest: "manifest",
     str_heading_measure_diff: "change in {column}",
+    str_heading_raw_data: "raw data",
+    str_heading_sort_ascending: "ascending",
+    str_heading_sort_descending: "descending",
     str_heading_tests: "tests",
-    str_heat_map_home_kind_files: "files",
-    str_heat_map_home_kind_functions: "functions",
-    str_heat_map_home_kind_lines: "lines",
     str_heat_map_main_label: "heat map view",
     str_heat_map_tree_label: "files",
     str_in_function: " in {function}",
@@ -122,9 +122,7 @@ window.ui_strings_ = (function () {
       "{function} by call count: self {self}, total {total}.",
     str_information_line_link: "{path} self {share} info",
     str_line_self: "line self",
-    str_load_log_script_entry: "[{time}ms] {page} loaded {asset}",
-    str_load_log_scripts_entry:
-      "[{time}ms] {page} loaded {count} scripts in {span}ms, the last {asset}",
+    str_load_log_asset_entry: "[{time}ms] {page} loaded {asset}",
     str_load_log_frame_entry:
       "[{time}ms] {page} long frame {span}ms, {render}ms rendering",
     str_load_log_input_entry:
@@ -138,11 +136,13 @@ window.ui_strings_ = (function () {
       "[{time}ms] {page} script {span}ms, {invoker}, {source}",
     str_load_log_script_function_entry:
       "[{time}ms] {page} script {span}ms, {invoker}, {function} in {source}",
+    str_load_log_scripts_entry:
+      "[{time}ms] {page} loaded {count} scripts in {span}ms, the last {asset}",
     str_menu_button: "{number} {label}",
     str_menu_counter_entry: "{mark}{label}",
     str_menu_counter_selected_mark: " ◼ ",
     str_menu_counter_unselected_mark: "   ",
-    str_menu_counters: "{count} counters",
+    str_menu_counters: "counters",
     str_menu_dark_mode_enabled: "dark",
     str_menu_file: "file",
     str_menu_function: "function",
@@ -153,22 +153,18 @@ window.ui_strings_ = (function () {
     str_menu_scale_cell_after_stop: "▓",
     str_menu_scale_cell_before_stop: "▒",
     str_menu_status_line: "line {line}",
-    str_menu_status_separator: "/",
+    str_menu_status_separator: " / ",
     str_menu_test: "test",
-    str_menu_test_suite_name: "all",
     str_no_caller: "(no recorded caller)",
     str_no_match: "(no match)",
     str_no_samples: "no samples",
     str_no_samples_in_test: "This test recorded no samples for {name}.",
     str_not_in_repo: "not in this repo ({path})",
+    str_pulldown_drag_placeholder: "[search or drag]",
     str_pulldown_placeholder: "[search]",
-    str_raw_data_link: "raw data: {name}",
     str_report_name: "perf2html",
     str_scale_curve_linear: "linear scale",
     str_scale_curve_log: "log scale",
-    str_scale_entry: "{curve}, {scope}",
-    str_scope_file: "per file",
-    str_scope_function: "per function",
     str_settings_apply: "apply",
     str_settings_copy: "copy",
     str_settings_debug_query: "{name}={value}",
@@ -182,13 +178,13 @@ window.ui_strings_ = (function () {
     str_table_heading_copy: "copy",
     str_text_scrollbar_gutter: "▒",
     str_text_scrollbar_thumb: "▓",
-    str_ticker_tape_entry: "{line}{share}",
+    str_ticker_tape_entry: "{line} {share}",
     str_ticker_tape_heading_diff: "most changed lines",
     str_ticker_tape_heading_self: "hottest lines",
     str_title_part_separator: " / ",
-    str_view_callers: "callers",
+    str_view_call_graph: "call graph",
+    str_view_database: "database",
     str_view_flame_graph: "flame graph",
-    str_view_frame_title: "report page",
     str_view_heat_map: "heat map",
     str_view_overview: "overview",
     str_view_settings: "settings",
@@ -197,14 +193,13 @@ window.ui_strings_ = (function () {
     const template = text(string_id);
     return template.replace(/\{(\w+)\}/g, (marker, field_name) => {
       if (!Object.prototype.hasOwnProperty.call(replacements, field_name))
-        return "error (and missing ui string): " + string_id + " " + marker;
+        window.ui_error_throw_(`${string_id} ${marker}`);
       return String(replacements[field_name]);
     });
   }
   function text(string_id) {
-    if (!Object.prototype.hasOwnProperty.call(STRINGS, string_id)) {
-      return "error (and missing ui string): " + string_id;
-    }
+    if (!Object.prototype.hasOwnProperty.call(STRINGS, string_id))
+      window.ui_error_throw_(string_id);
     return STRINGS[string_id];
   }
   return { text_fill, text };

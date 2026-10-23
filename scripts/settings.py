@@ -9,8 +9,9 @@ from collections.abc import Sequence
 from typing import NoReturn, get_origin, get_type_hints
 
 
-ASSET_CALLERS_SCRIPT_NAME = "callers.js"
+ASSET_CALL_GRAPH_SCRIPT_NAME = "call_graph.js"
 ASSET_DARK_MODE_STYLESHEET_NAME = "dark_mode.css"
+ASSET_DATABASE_SCRIPT_NAME = "database.js"
 ASSET_ERROR_OVERLAY_SCRIPT_NAME = "error_overlay.js"
 ASSET_FLAME_GRAPH_SCRIPT_NAME = "flame_graph.js"
 ASSET_FRAME_SCRIPT_NAME = "frame.js"
@@ -18,46 +19,61 @@ ASSET_HEAT_MAP_SCRIPT_NAME = "heat_map.js"
 ASSET_HEAT_MAP_STYLESHEET_NAME = "heat_map.css"
 ASSET_LIGHT_MODE_STYLESHEET_NAME = "light_mode.css"
 ASSET_MENU_SCRIPT_NAME = "menu.js"
-ASSET_MENU_STYLESHEET_NAME = "menu.css"
 ASSET_OVERVIEW_SCRIPT_NAME = "overview.js"
 ASSET_PREFERENCES_SCRIPT_NAME = "preferences.js"
-ASSET_PULLDOWN_TEXT_SCRIPT_NAME = "pulldown_text.js"
 ASSET_SETTINGS_PAGE_SCRIPT_NAME = "settings_page.js"
 ASSET_SETTINGS_SCRIPT_NAME = "settings.js"
-ASSET_TEMPLATE_CALLERS_PAGE_NAME = "callers.html"
+ASSET_SOURCE_DATABASE_SCRIPT_NAME = "source_database.js"
+ASSET_TEMPLATE_CALL_GRAPH_PAGE_NAME = "call_graph.html"
+ASSET_TEMPLATE_DATABASE_PAGE_NAME = "database.html"
 ASSET_TEMPLATE_FLAME_GRAPH_PAGE_NAME = "flame_graph.html"
-ASSET_TEMPLATE_HEAT_MAP_MAIN_NAME = "heat_map_main.html"
 ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME = "heat_map.html"
 ASSET_TEMPLATE_OVERVIEW_PAGE_NAME = "overview.html"
+ASSET_TEMPLATE_README_PAGE_NAME = "readme_page.html"
 ASSET_TEMPLATE_SETTINGS_PAGE_NAME = "settings_page.html"
 ASSET_THEME_SCRIPT_NAME = "theme.js"
 ASSET_THEME_STYLESHEET_NAME = "theme.css"
 ASSET_UI_STRINGS_SCRIPT_NAME = "ui_strings.js"
 ASSET_UTILITY_SCRIPT_NAME = "utility.js"
 
-CALLERS_CELL_SEPARATOR_TEXT = ", "
-CALLERS_PAGE_DIR_NAME = "callers"
-CALLERS_TIME_SUFFIX_SECONDS: dict[str, float] = {"ns": 1e-9, "usecs": 1e-6}
-CALLERS_TOP_FUNCTION_ROWS = 50
-CALLERS_VIEW_KEY = "callers"
+CALL_GRAPH_BRANCH_LAST_TEXT = "└ "
+CALL_GRAPH_BRANCH_MIDDLE_TEXT = "├ "
+CALL_GRAPH_BRANCH_OPEN_TEXT = "┬─"
+CALL_GRAPH_BRANCH_PASS_TEXT = "│ "
+CALL_GRAPH_LINE_TEXT = "─"
+CALL_GRAPH_PAGE_DIR_NAME = "call-graph"
+CALL_GRAPH_REVEAL_CLEARANCE_CHARS = 1
+CALL_GRAPH_REVEAL_CLEARANCE_LINES = 0.5
+CALL_GRAPH_VIEW_KEY = "call-graph"
 
 CALLGRIND_FILE_DATA_ERROR_CODE = "err"
 CALLGRIND_FILE_DATA_GIT_CODE = "git"
 CALLGRIND_FILE_DATA_INDENT_CHARS = 2
 CALLGRIND_FILE_DATA_REPO_CODE = "repo"
 CALLGRIND_FILE_DATA_SYSTEM_CODE = "sys"
+CALLGRIND_UNKNOWN_NAME = "???"
 
-COUNTER_SELECTION_CALLS_SHOWN_DEFAULT = True
-COUNTER_SELECTION_DEFAULT_NAMES: tuple[str, ...] = ("D1m", "DLm", "Bcm")
+COUNTER_LIST_CALLEES_LINE_NAME = "callees"
+COUNTER_LIST_CALLERS_LINE_NAME = "callers"
+COUNTER_LIST_CALLS_LINE_NAME = "calls"
 
 DARK_MODE_ATTRIBUTE_NAME = "data-dark-mode-"
 DARK_MODE_DISABLED_VALUE = "disabled"
 DARK_MODE_ENABLED_DEFAULT = True
 DARK_MODE_ENABLED_VALUE = "enabled"
-DARK_MODE_QUERY_KEY_NAME = "screenshot-mode"
-DARK_MODE_QUERY_VALUES: dict[str, str] = {"disabled": "0", "enabled": "1"}
+DARK_MODE_FRAME_QUERY_KEY_NAME = "dark-mode"
+DARK_MODE_TOGGLE_QUERY_KEY_NAME = "toggle-dark"
 
-DEBUG_TIP_IDLE_DELAY_MS = 2000
+DATABASE_CELL_SEPARATOR_TEXT = ", "
+DATABASE_COUNTER_LIST_DEFAULT_SHOWN_NAMES: tuple[str, ...] = (
+    "CEst",
+    COUNTER_LIST_CALLS_LINE_NAME,
+    COUNTER_LIST_CALLERS_LINE_NAME,
+)
+DATABASE_PAGE_DIR_NAME = "database"
+DATABASE_TIME_SUFFIX_SECONDS: dict[str, float] = {"ns": 1e-9, "usecs": 1e-6}
+DATABASE_TOP_FUNCTION_ROWS = 50
+DATABASE_VIEW_KEY = "database"
 
 DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {
     "D1m": {"D1mr": 1, "D1mw": 1},
@@ -79,16 +95,16 @@ DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {
 DRAG_DIRECTION_THRESHOLD_PX = 5
 
 FLAME_GRAPH_COLOR_SCHEME_KEY_NAME = "speedscope-color-scheme"
-FLAME_GRAPH_COLOR_SCHEME_VALUES: dict[str, str] = {
-    "disabled": "LIGHT",
-    "enabled": "DARK",
-}
 FLAME_GRAPH_EXPORTER_NAME = "tests/perf2html/scripts/trace_to_speedscope.py"
+FLAME_GRAPH_FILE_FORMAT_SCHEMA_URL = (
+    "https://www.speedscope.app/file-format-schema.json"
+)
 FLAME_GRAPH_LOCAL_PROFILE_PATH = "profile"
 FLAME_GRAPH_LOCAL_PROFILE_URL_PREFIX = "file:///"
 FLAME_GRAPH_MAX_RECORDED_CALLS = 200
 FLAME_GRAPH_PROFILE_DIR_NAME = "profiles"
 FLAME_GRAPH_PROFILE_GLOBAL_NAME = "report_flame_graph_profiles_"
+FLAME_GRAPH_PROFILE_NAME_FORMAT = "%s (loops=%s)"
 FLAME_GRAPH_STARTUP_POLL_DELAY_MS = 50
 FLAME_GRAPH_STARTUP_POLL_MAX_ATTEMPTS = 200
 FLAME_GRAPH_VIEW_ENTRY: tuple[str, str] = (
@@ -97,19 +113,20 @@ FLAME_GRAPH_VIEW_ENTRY: tuple[str, str] = (
 )
 
 HEAT_MAP_COUNTER_DESCRIPTION_STRING_ID_PREFIX = "str_counter_"
-HEAT_MAP_HOME_LINES_LOCATION_MAX_CHARS = 28
-HEAT_MAP_HOME_LINES_SOURCE_COLUMN_MAX_CHARS = 36
-HEAT_MAP_HOME_LINES_SOURCE_SNIPPET_MAX_CHARS = 110
-HEAT_MAP_HOME_TABLE_DEFAULT_KIND = "functions"
-HEAT_MAP_HOME_TABLE_DEFAULT_ROWS = 20
+HEAT_MAP_COUNTER_LIST_DEFAULT_SHOWN_NAMES: tuple[str, ...] = (
+    COUNTER_LIST_CALLS_LINE_NAME,
+    "Bcm",
+    "D1m",
+    "DLm",
+)
 HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX = 8
 HEAT_MAP_MODEL_DIR_NAME = "data"
 HEAT_MAP_MODEL_GLOBAL_NAME = "report_heat_map_models_"
-HEAT_MAP_SCALE_DEFAULT_VALUE = "log/global"
-HEAT_MAP_SCALE_DIFF_DEFAULT_VALUE = "log/line"
+HEAT_MAP_SCALE_DEFAULT_VALUE = "log"
 HEAT_MAP_SORT_DEFAULT_MODE = "heat"
 HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE = 0.01
 HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_MAX_COUNT = 10
+HEAT_MAP_SOURCE_TAB_SIZE_CHARS = 4
 HEAT_MAP_SOURCE_VIEW_WIDTH_CHARS = 80
 HEAT_MAP_TREE_ALWAYS_LISTED_DIRS = ("lib", "include", "src", "tests/perf")
 HEAT_MAP_TREE_AUTO_EXPAND_ABOVE_SHARE = 0.05
@@ -119,6 +136,16 @@ HEAT_MAP_VIEW_ENTRY: tuple[str, str] = (
 )
 
 MENU_DIGIT_KEY_COUNT = 10
+MENU_ENTRY_NEEDS: dict[str, list[str]] = {
+    "counters": ["counter_list"],
+    "heat_scale": ["view"],
+    "heat_sort": ["view"],
+    "str_menu_file": ["test"],
+    "str_menu_function": ["test"],
+    "str_view_call_graph": ["test", "view_page"],
+    "str_view_database": ["test", "view_page"],
+    "str_view_flame_graph": ["test", "view_page"],
+}
 MENU_FLASH_DURATION_MS = 500
 MENU_PULLDOWN_KEY_NAMES: dict[str, str] = {
     "close": "Escape",
@@ -130,14 +157,32 @@ MENU_PULLDOWN_KEY_NAMES: dict[str, str] = {
 MENU_PULLDOWN_LINE_NUMBER_PATTERN = "^(.*):([0-9]+)$"
 MENU_PULLDOWN_OPENING_KEY_PATTERN = "^[a-zA-Z]$"
 MENU_PULLDOWN_SKIPPED_KEY_NAMES: tuple[str, ...] = (" ",)
+MENU_PULLDOWN_SMALL_ENTRY_MAX_COUNT = 3
 MENU_SCALE_KEY_STEPS: dict[str, int] = {"+": 1, "=": 1, "-": -1}
 
 NUMBER_FRACTION_DIGITS = 2
 NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES = 999.99
 
+PERF_TOOL_TIME_LABEL = "Time"
+
+PROFILE_START_FUNCTION_UNRECORDED_CALLS = 1
+
 RANKING_COUNTER_NAME = "CEst"
 
-SCREENSHOT_LABEL_TITLE_TEXT = "click to copy"
+README_PAGE_BODY_MARKER = "__README_BODY__"
+README_PAGE_CONVERTER_EXTENSION_ARGUMENTS: tuple[str, ...] = ("-e", "table")
+README_PAGE_HEADING_ANCHOR_DROPPED_PATTERN = r"[^\w\- ]"
+README_PAGE_HEADING_PATTERN = r"(?s)<h([1-6])>(.*?)</h\1>"
+README_PAGE_HEADING_TEXT_DROPPED_PATTERN = r"<[^>]*>|&\w+;"
+README_PAGE_ROOT_VALUES_MARKER = "__ROOT_VALUES__"
+
+REGULAR_REPORT_VIEW_KEYS: list[str] = [
+    CALL_GRAPH_VIEW_KEY,
+    FLAME_GRAPH_VIEW_ENTRY[0],
+]
+
+SCREENSHOT_LABEL_QUERY_KEY_NAME = "screenshot"
+SCREENSHOT_LABEL_QUERY_VALUE = "1"
 SCREENSHOT_MENU_KEY_NUMBER = "screenshot-menu"
 
 SETTINGS_DEBUG_ENABLED = False
@@ -152,76 +197,75 @@ SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES: tuple[int, ...] = (0, 10, 20, 50, 100)
 SETTINGS_LOAD_LOG_HISTORY_MAX_LINES = 100
 SETTINGS_VIEW_ENTRY: tuple[str, str] = ("settings", "settings/index.html")
 
-STORAGE_KEY_CALLERS_ROWS = "callers.rows"
-STORAGE_KEY_HEAT_ROWS = "heat.rows"
-STORAGE_KEY_HEAT_SCALE = "heat.scale"
-STORAGE_KEY_HEAT_SORT = "heat.sort"
-STORAGE_KEY_SETTINGS_HISTORY = "settings.history"
-STORAGE_KEY_VIEW_CALLS = "view.calls"
-STORAGE_KEY_VIEW_COUNTERS = "view.counters"
+SIGNAL_EXIT_CODE_BASE = 128
+
+STORAGE_KEY_DATABASE_COUNTER_LIST = "database.counter_list"
+STORAGE_KEY_DATABASE_FUNCTION_ROWS = "database.function_rows"
+STORAGE_KEY_HEATMAP_COUNTER_LIST = "heatmap.counter_list"
+STORAGE_KEY_HEATMAP_SCALE = "heatmap.scale"
+STORAGE_KEY_HEATMAP_SORT = "heatmap.sort"
+STORAGE_KEY_LOG_DISPLAY_LENGTH = "log.display_length"
 STORAGE_KEY_VIEW_DARK_MODE = "view.dark_mode"
 STORAGE_KEY_VIEW_SCALE = "view.scale"
 STORAGE_OWNED_KEYS: tuple[str, ...] = (
-    STORAGE_KEY_CALLERS_ROWS,
-    STORAGE_KEY_HEAT_ROWS,
-    STORAGE_KEY_HEAT_SCALE,
-    STORAGE_KEY_HEAT_SORT,
-    STORAGE_KEY_SETTINGS_HISTORY,
-    STORAGE_KEY_VIEW_CALLS,
-    STORAGE_KEY_VIEW_COUNTERS,
+    FLAME_GRAPH_COLOR_SCHEME_KEY_NAME,
+    STORAGE_KEY_DATABASE_COUNTER_LIST,
+    STORAGE_KEY_DATABASE_FUNCTION_ROWS,
+    STORAGE_KEY_HEATMAP_COUNTER_LIST,
+    STORAGE_KEY_HEATMAP_SCALE,
+    STORAGE_KEY_HEATMAP_SORT,
+    STORAGE_KEY_LOG_DISPLAY_LENGTH,
     STORAGE_KEY_VIEW_DARK_MODE,
     STORAGE_KEY_VIEW_SCALE,
 )
-STORAGE_VERSION = "perf2html v1"
+STORAGE_VERSION = "perf2html v0"
 STORAGE_VERSION_KEY = "perf2html.version"
 
 STYLE_COLOR_DARK_MODE: dict[str, list[str]] = {
-    "#1AB6FF": [
+    "#effdff": [
         "dark-mode-menu-normal-fg-",
         "dark-mode-menu-normal-outline-",
-        "dark-mode-page-link-fg-",
-    ],
-    "#0E4F6E": ["dark-mode-menu-normal-bg-", "dark-mode-status-bar-bg-"],
-    "#F5F6FA": [
         "dark-mode-menu-focus-bg-",
-        "dark-mode-page-emphasis-fg-",
-        "dark-mode-page-fg-",
+    ],
+    "#D2691E": [
         "dark-mode-status-bar-fg-",
     ],
-    "#DCDDE1": ["dark-mode-page-dim-fg-"],
-    "#273C75": ["dark-mode-page-emphasis-bg-"],
-    "#192A56": ["dark-mode-menu-focus-fg-", "dark-mode-panel-bg-"],
-    "#353B48": ["dark-mode-table-panel-even-bg-"],
-    "#2F3640": ["dark-mode-page-bg-", "dark-mode-table-panel-odd-bg-"],
-    "#FFFFFF": ["dark-mode-debug-tip-fg-", "dark-mode-screenshot-label-fg-"],
-    "#000000": [
-        "dark-mode-debug-tip-bg-",
-        "dark-mode-debug-tip-border-",
-        "dark-mode-screenshot-label-bg-",
+    "#20354a": [
+        "dark-mode-panel-bg-",
+        "dark-mode-status-bar-bg-",
     ],
+    "#295987": [
+        "dark-mode-menu-normal-bg-",
+        "dark-mode-menu-focus-fg-",
+    ],
+    "#9fd9ff": [
+        "dark-mode-page-fg-",
+        "dark-mode-page-emphasis-bg-",
+    ],
+    "#0e171e": [
+        "dark-mode-page-bg-",
+        "dark-mode-page-emphasis-fg-",
+    ],
+    "#FFFFFF": ["dark-mode-screenshot-fg-"],
+    "#000000": ["dark-mode-screenshot-bg-"],
 }
 STYLE_COLOR_DARK_MODE_ROLE_PREFIX = "dark-mode-"
 
 STYLE_COLOR_LIGHT_MODE: dict[str, list[str]] = {
     "#000000": [
-        "light-mode-debug-tip-bg-",
-        "light-mode-debug-tip-border-",
         "light-mode-menu-focus-bg-",
         "light-mode-menu-normal-fg-",
         "light-mode-menu-normal-outline-",
         "light-mode-page-emphasis-bg-",
         "light-mode-page-fg-",
-        "light-mode-screenshot-label-bg-",
+        "light-mode-screenshot-bg-",
     ],
     "#FFFFFF": [
-        "light-mode-debug-tip-fg-",
         "light-mode-menu-focus-fg-",
         "light-mode-page-emphasis-fg-",
         "light-mode-page-bg-",
-        "light-mode-screenshot-label-fg-",
+        "light-mode-screenshot-fg-",
         "light-mode-status-bar-fg-",
-        "light-mode-table-panel-even-bg-",
-        "light-mode-table-panel-odd-bg-",
     ],
     "#AAAAAA": [
         "light-mode-menu-normal-bg-",
@@ -232,12 +276,11 @@ STYLE_COLOR_LIGHT_MODE: dict[str, list[str]] = {
 }
 STYLE_COLOR_LIGHT_MODE_ROLE_PREFIX = "light-mode-"
 STYLE_DESIGN_COORDINATES_WIDTH_PX = 1920
-STYLE_DESIGN_DEVICE_PIXEL_WIDEST_PROPERTY = "--design-device-pixel-widest-px-"
 STYLE_DESIGN_FONT_CHARACTER_WIDTH_SHARE = 0.6
 STYLE_DESIGN_FONT_FIT_PROPERTY = "--design-font-fit-"
 STYLE_DESIGN_FONT_FIT_START_MULTIPLE = 1
 STYLE_DESIGN_FONT_SIZE_PROPERTY = "--design-font-size-px-"
-STYLE_DESIGN_FONT_SIZE_PX = 24
+STYLE_DESIGN_FONT_SIZE_PX = 20
 STYLE_DESIGN_MINIMUM_WINDOW_WIDTH_PX = 1280
 STYLE_DESIGN_SCALE_DEFAULT_MULTIPLE = 1
 STYLE_DESIGN_SCALE_DEFAULT_STOP = 6
@@ -270,33 +313,33 @@ STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_PROPERTY = (
     "--heat-map-source-table-line-number-cell-callee-marker-width-"
 )
 STYLE_HEAT_MAP_TREE_INDENT_PER_LEVEL_CHARS = 2
-STYLE_HEAT_MAP_TREE_PANE_NARROWEST_CHARS = 17
-STYLE_HEAT_MAP_TREE_PANE_WIDEST_CHARS = 40
 STYLE_MENU_LOGO_START_SHARE = 0.5
 STYLE_MENU_PULLDOWN_EXTRA_WIDTH_CHARS = 2
+STYLE_PAGE_BACKGROUND_DARK_MODE_ROLE = "dark-mode-page-bg-"
+STYLE_PAGE_BACKGROUND_EARLY_FILL_ENABLED = True
+STYLE_PAGE_BACKGROUND_LIGHT_MODE_ROLE = "light-mode-page-bg-"
 STYLE_PAGE_FONT_FAMILY = (
     'Monaco, Menlo, "DejaVu Sans Mono", "Liberation Mono", Consolas, monospace'
 )
 STYLE_PAGE_FONT_FAMILY_PROPERTY = "--page-font-family-"
-STYLE_PANE_SPLITTER_KEY_STEP_CHARS = 5
-STYLE_TABLE_COLUMN_EXTRA_WIDTH_CHARS = 2
-STYLE_TABLE_FUNCTION_NAME_WIDTH_CHARS = 20
-STYLE_TABLE_GROW_COLUMN_NARROWEST_CHARS = 20
+STYLE_README_PAGE_VALUE_ENTRIES: dict[str, str] = {
+    "readme-page-bg-": "#D8C9A3",
+    "readme-page-fg-": "#3A2A14",
+    "readme-page-font-family-": "Arial",
+}
+STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS = 0.5
+STYLE_TABLE_FUNCTION_LIST_COLUMN_MAX_CHARS = 48
+STYLE_TABLE_FUNCTION_NAME_MAX_CHARS = 20
 STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS = 48
 STYLE_TEXT_SCROLLBAR_THUMB_SHORTEST_CHARS = 4
 STYLE_VALUE_ENTRIES: dict[str, str] = {
-    "debug-tip-border-width-": "1ch",
-    "debug-tip-font-size-": "1.5em",
-    "debug-tip-z-index-": "2147483647",
+    "call-graph-border-width-": "1ch",
     "heat-map-band-z-index-": "2",
     "heat-map-minimap-width-": "110px",
-    "heat-map-overview-home-border-block-": "1lh",
-    "heat-map-overview-home-border-inline-": "2ch",
-    "heat-map-source-table-code-cell-tab-size-": "4",
+    "heat-map-source-band-height-": "1lh",
     "heat-map-source-table-line-number-cell-callee-marker-text-": '"►"',
     "heat-map-source-ticker-tape-gap-": "1ch",
-    "heat-map-tree-node-caret-width-": "2ch",
-    "heat-map-tree-node-gap-": "1ch",
+    "heat-map-tree-node-hover-z-index-": "1",
     "heat-map-tree-node-padding-right-": "1ch",
     "heat-map-tree-node-share-percent-width-": "10ch",
     "heat-map-tree-width-": "39ch",
@@ -305,16 +348,20 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "menu-pulldown-entry-list-z-index-": "3",
     "menu-pulldown-entry-padding-inline-": "1ch",
     "menu-pulldown-search-box-min-width-": "13ch",
-    "menu-status-bar-cell-padding-left-": "2ch",
+    "menu-status-bar-padding-left-": "1ch",
+    "menu-status-bar-padding-right-": "1ch",
     "menu-strip-blank-line-height-": "0.5lh",
+    "menu-strip-padding-right-": "1ch",
     "page-body-line-height-": "1.1",
     "page-emphasis-padding-inline-": "1ch",
-    "page-line-width-": "0.125ch",
+    "page-inset-block-": "1lh",
+    "page-inset-inline-": "2ch",
+    "page-line-width-": "0.1em",
     "page-table-cell-padding-inline-": "1ch",
-    "page-table-column-title-z-index-": "1",
+    "page-table-title-z-index-": "1",
     "page-text-scrollbar-horizontal-height-": "1lh",
     "page-text-scrollbar-vertical-width-": "1ch",
-    "screenshot-label-z-index-": "3",
+    "screenshot-z-index-": "3",
 }
 
 TABLE_MARKDOWN_COLUMN_NARROWEST_CHARS = 3
@@ -341,6 +388,31 @@ THEME_TIME_UNIT_ENTRIES: tuple[tuple[str, float], ...] = (
     ("ns", 1e-9),
     ("ps", 1e-12),
 )
+
+TIMING_COLUMN_STRING_ID_PREFIX = "str_column_"
+TIMING_COUNTER_RATIOS: tuple[tuple[str, str, str], ...] = (
+    ("loads_per_instruction", "L1-dcache-loads", "instructions"),
+)
+TIMING_PERF_STAT_METRICS: tuple[tuple[str, str, str], ...] = (
+    ("instructions_per_cycle", "instructions", "insn per cycle"),
+    ("branch_miss_percent", "branch-misses", "of all branches"),
+    ("l1d_miss_percent", "L1-dcache-load-misses", "of all L1-dcache accesses"),
+)
+TIMING_PERF_STAT_METRIC_FRACTION_DIGITS = 6
+TIMING_PERF_STAT_NUMBER_PATTERN = r"[0-9]+(?:\.[0-9]+)?"
+TIMING_PERF_STAT_UNCOUNTED_VALUES: tuple[str, ...] = (
+    "<not counted>",
+    "<not supported>",
+)
+TIMING_TIME_PER_LOOP_NAME = "time_per_loop"
+
+TRACE_BUILDID_KEYWORD = "buildid"
+TRACE_BUILDID_LABEL = "Build ID"
+TRACE_FUNCTION_EXIT_BIT = 1 << 63
+# Uses json compatible precision.
+TRACE_HEADER_MAGIC = 0xABCDEF0123456000
+TRACE_HEADER_WORDS = 8
+TRACE_RECORD_WORDS = 2
 
 VALGRIND_DEBUG_LINE_PATTERN = "^--[0-9]+--"
 
@@ -428,9 +500,7 @@ class SettingsReader:
         raise NameError(
             f"error: constant doesn't match any setting: "
             f"{module_name}.{name} asks for the setting {setting}, which "
-            "neither settings.py nor settings.sh defines. Define it in one "
-            "of them, correct the spelling here, or -- if this is the "
-            "file's own constant -- move it below the load_into() call."
+            "neither settings.py nor settings.sh defines"
         )
 
     def sentinel_check(
@@ -444,18 +514,13 @@ class SettingsReader:
             raise NameError(
                 f"error: settings must have sentinels "
                 f"{_SENTINEL_TEXT}: {module_name}.{name} is assigned with "
-                "no annotation, so it declares no type. Write it as an "
-                "annotation naming the type plus an empty sentinel of that "
-                "type."
+                "no annotation"
             )
         if self.is_sentinel(written):
             return
         raise TypeError(
             f"error: settings must have sentinels {_SENTINEL_TEXT}: "
-            f"{module_name}.{name} is written with {written!r}. The value "
-            "comes from settings.py and overwrites whatever is here, so a "
-            "declaration carries an empty sentinel of its own type and "
-            "nothing else."
+            f"{module_name}.{name} is written with {written!r}"
         )
 
     def shell_name_check(
@@ -607,8 +672,7 @@ class SettingsReader:
             f"error: settings must not be coerced to another type: "
             f"{module_name}.{name} is annotated "
             f"{getattr(wanted, '__name__', wanted)}, but the setting is "
-            f"{found.__name__}. Correct the annotation, or change the value "
-            "in settings.py."
+            f"{found.__name__}"
         )
 
     def value(self, name: str) -> object:
@@ -621,6 +685,15 @@ class SettingsWriter:
         return {name: scope[name] for name in sorted(_SETTING_NAMES)}
 
     def manifest_table(self, lines: Sequence[str]) -> str:
+        return "\n".join(
+            label_cell + value_cell
+            for label_cell, value_cell in self.manifest_table_rows(lines)
+        )
+
+    # Splits each manifest row into its padded label and its gapped value.
+    def manifest_table_rows(
+        self, lines: Sequence[str]
+    ) -> list[tuple[str, str]]:
         for line in lines:
             if "=" not in line:
                 raise ValueError(
@@ -629,13 +702,28 @@ class SettingsWriter:
         rows = [line.partition("=") for line in lines]
         label_width = max(len(label) for label, _, _ in rows)
         column_gap = " " * _MANIFEST_TABLE_COLUMN_GAP_CHARS
-        return "\n".join(
-            f"{label.ljust(label_width)}{column_gap}{value}"
+        return [
+            (label.ljust(label_width), f"{column_gap}{value}")
             for label, _, value in rows
-        )
+        ]
+
+    # Refuses a settings number the page's 64 bit float would round.
+    def number_exact_check(self, name: str, value: object) -> None:
+        if isinstance(value, int) and int(float(value)) != value:
+            raise ValueError(
+                f"error: a 64 bit float rounds the setting {name}: {value}"
+            )
+        if isinstance(value, (tuple, list)):
+            for item in value:
+                self.number_exact_check(name, item)
+        if isinstance(value, dict):
+            for item in value.values():
+                self.number_exact_check(name, item)
 
     def script_write(self) -> str:
         values = self.all_named()
+        for name, value in values.items():
+            self.number_exact_check(name, value)
         data = json.dumps(values, indent=2, sort_keys=True, ensure_ascii=False)
         path = os.path.join(_SETTINGS_DIRECTORY, ASSET_SETTINGS_SCRIPT_NAME)
         with open(path, encoding="utf-8") as handle:
@@ -663,6 +751,10 @@ def load_into(module_name: str) -> None:
 
 def manifest_table(lines: Sequence[str]) -> str:
     return _writer.manifest_table(lines)
+
+
+def manifest_table_rows(lines: Sequence[str]) -> list[tuple[str, str]]:
+    return _writer.manifest_table_rows(lines)
 
 
 def settings_script_write() -> str:

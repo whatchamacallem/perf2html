@@ -3,6 +3,12 @@
 `perf2html` is a collection of scripts that profile `perf` and generate html
 reports about the results.
 
+- [Using A Report](#using-a-report)
+- [Running the Generator Scripts](#running-the-generator-scripts)
+- [Callgrind Counters](#callgrind-counters)
+- [Reading A Diff Report](#reading-a-diff-report)
+- [Flame Graph (speedscope)](#flame-graph-speedscope)
+
 ## Using A Report
 
 The main menu can be operated with the keyboard using the numbers each button
@@ -91,9 +97,9 @@ itself.
 ## Callgrind Counters
 
 These are the raw counters `callgrind` records and the derived ones this report
-adds up from them. They show up as column headers on the callers page and in
-the heat map, and as choices in the menu's counters pulldown, under these same
-names.
+adds up from them. They show up as column headers in the heat map, the raw ones
+on the database page too, and as choices in the menu's counters pulldown, under
+these same names.
 
 | Counter | Meaning                             | Derived from            |
 | ------- | ----------------------------------- | ----------------------- |
@@ -174,11 +180,10 @@ as long is `▲100.00%`, and smaller is better.
 The flame graph is a recording, not a model: every box is one call that
 happened, as wide as it took. The test runs in a build with
 `-finstrument-functions`, where a hook (`tests/perf2html/src/cyg_callback.c`)
-reads the CPU's time stamp counter at every function entry and exit. "Time
-Order" is the order the calls were made in.
+reads the CPU's time stamp counter at every function entry and exit from the
+entry of `main` on. "Time Order" is the order the calls were made in.
 
-The merged "all" report and a diff have no flame graph: a trace neither adds up
-nor subtracts.
+A diff has no flame graph: a trace neither adds up nor subtracts.
 
 Scroll to pan and pinch or Cmd/Ctrl+scroll to zoom, on both the minimap and the
 main view. Click a frame for its stats.

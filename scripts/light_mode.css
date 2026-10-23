@@ -9,20 +9,16 @@ a:focus-visible {
   background: var(--light-mode-menu-focus-bg-);
   color: var(--light-mode-menu-focus-fg-);
 }
-table.columns- th {
-  color: var(--light-mode-page-fg-);
-  background: var(--light-mode-page-bg-);
+.table- th {
+  background: var(--light-mode-menu-normal-bg-);
 }
-table.columns- > tbody > tr:focus-visible > td,
-table.columns- > tbody > tr:focus-visible .menu-button- {
+.table- > tbody > tr:focus-visible > td,
+.table- > tbody > tr:focus-visible a {
   background: var(--light-mode-menu-focus-bg-) !important;
   color: var(--light-mode-menu-focus-fg-) !important;
 }
 
 .menu-button- a {
-  color: inherit;
-}
-.menu-status-bar- a:not(:focus-visible) {
   color: inherit;
 }
 
@@ -32,32 +28,8 @@ table.columns- > tbody > tr:focus-visible .menu-button- {
 .heat-map-source-information-box- {
   background: var(--light-mode-page-bg-);
 }
-.heat-map-source-information-box-action-bar-separator- {
-  color: var(--light-mode-page-fg-);
-}
-.heat-map-source-information-box-function-name- {
-  color: var(--light-mode-page-fg-);
-}
-.heat-map-source-information-box-heading- {
-  color: var(--light-mode-page-fg-);
-}
-.heat-map-source-information-box-note- {
-  color: var(--light-mode-page-fg-);
-}
-.heat-map-source-information-box- .table-box- {
+.heat-map-source-information-box- .table- {
   background: var(--light-mode-page-bg-);
-}
-table.heat-map-source-table- > thead > tr > th {
-  background: var(--light-mode-page-bg-);
-  color: var(--light-mode-page-fg-);
-}
-td.heat-map-source-table-self-cell-,
-td.heat-map-source-table-calls-cell-,
-td.heat-map-source-table-secondary-counter-cell- {
-  color: var(--light-mode-page-fg-);
-}
-table.heat-map-source-table- td.heat-map-source-table-line-number-cell- {
-  color: var(--light-mode-page-fg-);
 }
 tr.has-callee- td.heat-map-source-table-line-number-cell-::before {
   color: var(--light-mode-page-fg-);
@@ -68,96 +40,39 @@ table.heat-map-source-table- > tbody > tr:focus-visible > td {
 }
 .heat-map-source-ticker-tape- {
   background: var(--light-mode-page-bg-);
-  color: var(--light-mode-page-fg-);
 }
 .heat-map-source-ticker-tape-entry-:focus-visible {
   background: var(--light-mode-menu-focus-bg-) !important;
   color: var(--light-mode-menu-focus-fg-) !important;
 }
-.heat-map-source-ticker-tape- .heat-map-source-ticker-tape-label- {
-  color: var(--light-mode-page-fg-);
-}
-.heat-map-source-unavailable-note- {
-  color: var(--light-mode-page-fg-);
-}
 .heat-map-tree-node-.selected- {
   background: var(--light-mode-page-bg-);
-  color: var(--light-mode-page-fg-);
 }
 .heat-map-tree-node-:focus-visible {
   background: var(--light-mode-menu-focus-bg-) !important;
   color: var(--light-mode-menu-focus-fg-) !important;
 }
-.heat-map-tree-node- .heat-map-tree-node-caret- {
-  color: var(--light-mode-page-fg-);
-}
-.heat-map-tree-node-.cold- .heat-map-tree-node-name- {
-  color: var(--light-mode-page-fg-);
-}
-.heat-map-tree-node-.more- .heat-map-tree-node-name- {
-  color: var(--light-mode-page-fg-);
-}
-.heat-map-tree-node- .heat-map-tree-node-share-percent- {
-  color: var(--light-mode-page-fg-);
-}
-.heat-map-tree-node-.heat- .heat-map-tree-node-share-percent-,
-.heat-map-tree-node-.heat- .heat-map-tree-node-caret- {
-  color: inherit;
+.heat-map-tree-track- {
+  background: var(--light-mode-page-bg-);
 }
 
 body {
   background: var(--light-mode-page-bg-);
   color: var(--light-mode-page-fg-);
 }
+#overview-raw-data- > a:not(:focus-visible) {
+  background: var(--light-mode-menu-normal-bg-);
+}
+/* Sets the view's preferred color scheme, which speedscope follows. */
 #overview-view-frame- {
   background: var(--light-mode-page-bg-);
+  color-scheme: light;
 }
 .page-emphasis- {
   background: var(--light-mode-page-emphasis-bg-);
   color: var(--light-mode-page-emphasis-fg-);
 }
 
-.menu-button-:not([data-entry-name-="str_report_name"], .columns- td > *) {
-  border: var(--page-line-width-) solid;
-  border-color: var(--light-mode-menu-normal-outline-);
-}
-td.page-table-link-cell- > .menu-button- {
-  outline: var(--page-line-width-) solid;
-  outline-color: var(--light-mode-menu-normal-outline-);
-}
-
-.columns-:not(.heat-map-source-table-) {
-  border-collapse: collapse;
-  border: var(--page-line-width-) solid var(--light-mode-page-fg-);
-}
-.columns-:not(.heat-map-source-table-) th,
-.columns-:not(.heat-map-source-table-) td {
-  border-inline: var(--page-line-width-) solid var(--light-mode-page-fg-);
-}
-.columns-:not(.heat-map-source-table-) th,
-.columns-:not(.heat-map-source-table-) td,
-td.page-table-link-cell- > .menu-button- {
-  padding-inline: calc(
-    var(--page-table-cell-padding-inline-) -
-      max(var(--page-line-width-), var(--design-device-pixel-widest-px-)) / 2
-  );
-}
-.columns-:not(.heat-map-source-table-) td.page-table-link-cell- {
-  padding-inline: 0;
-}
-table.columns- col:nth-child(odd) {
-  background: var(--light-mode-table-panel-odd-bg-);
-}
-table.columns- col:nth-child(even) {
-  background: var(--light-mode-table-panel-even-bg-);
-}
-
-.menu-strip-,
-.page-heading-:has(> .menu-strip-table-) {
-  background: var(--light-mode-page-bg-);
-  color: var(--light-mode-page-fg-);
-  padding-top: calc(var(--page-line-width-) / 2);
-}
 .menu-button-,
 .menu-pulldown-entry-box- {
   background: var(--light-mode-menu-normal-bg-);
@@ -186,41 +101,109 @@ table.columns- col:nth-child(even) {
   background: var(--light-mode-page-bg-);
 }
 #heat-map-minimap-viewport- {
-  border: var(--page-line-width-) solid;
+  border-width: var(--page-line-width-);
   border-color: var(--light-mode-menu-normal-outline-);
 }
 .heat-map-source-information-line- {
   background: var(--light-mode-page-emphasis-bg-);
   color: var(--light-mode-page-emphasis-fg-);
 }
+.heat-map-source-information-line- a:not(:focus-visible) {
+  color: inherit;
+}
 tr.heat-map-source-information-box-synthetic-row- > td {
   background: var(--light-mode-status-bar-bg-);
   color: var(--light-mode-status-bar-fg-);
 }
-.heat-map-tree-node-.selected- {
-  outline: var(--page-line-width-) solid;
-  outline-color: var(--light-mode-menu-normal-outline-);
-}
 
-.page-text-scrollbar- {
+.text-scrollbar- {
   background: var(--light-mode-menu-normal-bg-);
   color: var(--light-mode-menu-normal-fg-);
 }
-#heat-map-tree-scrollbar-:focus-visible,
-.page-text-scrollbar-.drag- {
+.text-scrollbar-.drag- {
   background: var(--light-mode-menu-focus-bg-);
   color: var(--light-mode-menu-focus-fg-);
 }
 
-.debug-tip- {
-  background: var(--light-mode-debug-tip-bg-);
-  color: var(--light-mode-debug-tip-fg-);
-  border-color: var(--light-mode-debug-tip-border-);
+.screenshot- {
+  background: var(--light-mode-screenshot-bg-);
+  color: var(--light-mode-screenshot-fg-);
 }
 
-.screenshot-label- {
-  background: var(--light-mode-screenshot-label-bg-);
-  color: var(--light-mode-screenshot-label-fg-);
+/* Light mode alone draws lines, each on the top of the slot below its own. */
+:where(:root[data-dark-mode-="disabled"]) {
+  /* A framed box: its top line in the room of a clear top border. */
+  .page- a:not(.row-link- a),
+  .heat-map-source- a,
+  .heat-map-tree-node- {
+    position: relative;
+  }
+  .page- a:not(.row-link- a),
+  .heat-map-source- a,
+  .menu-button-,
+  .heat-map-tree-node- {
+    border-top: var(--page-line-width-) solid transparent;
+  }
+  /* The frame, over its box, passing each press to what lies under it. */
+  .page- a:not(.row-link- a)::after,
+  .heat-map-source- a::after,
+  .menu-button-:not([data-entry-name-="str_report_name"])::after,
+  .heat-map-tree-node-.selected-::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    outline: var(--page-line-width-) solid
+      var(--light-mode-menu-normal-outline-);
+  }
+  /* A node frame keeps its sides inside the tree, which cuts what crosses. */
+  .heat-map-tree-node-.selected-::after {
+    inset: 0 var(--page-line-width-);
+  }
+  /* A table's lines: its sides, the titles' top and bottom, its own bottom. */
+  table.table- {
+    overflow-x: clip;
+    overflow-clip-margin: border-box;
+  }
+  table.table-,
+  .table- th,
+  .table- td {
+    border-inline: var(--page-line-width-) solid var(--light-mode-page-fg-);
+  }
+  table.table-::after,
+  .table- th::before,
+  .table- th::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    border-top: var(--page-line-width-) solid var(--light-mode-page-fg-);
+  }
+  .table- th::before {
+    top: 0;
+  }
+  .table- th::after {
+    top: 100%;
+  }
+  table.table-::after {
+    top: 100%;
+    left: calc(-1 * var(--page-line-width-));
+    right: calc(-1 * var(--page-line-width-));
+  }
+  /* A hovered row's frame, its sides on the side lines, its bottom below. */
+  table.table-::before {
+    left: calc(anchor(left) - var(--page-line-width-) / 2);
+    right: calc(anchor(right) - var(--page-line-width-) / 2);
+    bottom: calc(anchor(bottom) - var(--page-line-width-));
+    border-width: var(--page-line-width-);
+    border-color: var(--light-mode-menu-normal-outline-);
+  }
+  /* A hovered node's frame, drawn the way the selected node's frame is. */
+  .heat-map-tree-node-:not(.cold-):hover::before {
+    inset: 0 var(--page-line-width-);
+    outline: var(--page-line-width-) solid
+      var(--light-mode-menu-normal-outline-);
+  }
 }
 
 .settings-value-box- {

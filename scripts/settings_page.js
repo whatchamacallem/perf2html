@@ -67,7 +67,7 @@ window.try_catch_handler_(function () {
   const debug_box = document.getElementById("settings-debug-");
   const load_log_box = document.getElementById("settings-load-log-");
   const load_log_menu = document.getElementById("settings-load-log-menu-");
-  const page_scroll_box = document.querySelector("main.page-text-scroll-box-");
+  const page_scroll_box = document.getElementById("settings-page-");
   const settings_list = document.getElementById("settings-list-");
   const setting_boxes = new Map();
   const setting_titles = new Map();
@@ -275,6 +275,7 @@ window.try_catch_handler_(function () {
                 ),
               keeps_open: false,
               on_close: () => {},
+              on_move: null,
               on_select: (value_text) =>
                 window.report_ui_.load_log_history_send(Number(value_text)),
               reads_line_number: false,
@@ -338,7 +339,6 @@ window.try_catch_handler_(function () {
   );
   document.title = window.ui_strings_.text("str_view_settings");
   window.report_ui_.view_activate({
-    dark_mode_apply: null,
     forwards_input: false,
     load_log_show,
     recenter: address_setting_show,

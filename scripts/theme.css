@@ -14,151 +14,314 @@
 [hidden] {
   display: none !important;
 }
-pre {
-  margin: 0;
-  white-space: pre;
-  overflow-x: auto;
-}
-
-html,
-body {
-  height: 100%;
-  margin: 0;
-}
-body {
-  font-family: var(--page-font-family-);
-  font-size: calc(var(--design-font-size-px-) * var(--design-font-fit-));
-  line-height: var(--page-body-line-height-);
-}
-html:has(body.frame-) {
-  overflow: hidden;
-}
-body.frame- {
-  height: var(--design-viewport-height-);
-}
-body.frame-,
-:has(> .page-text-scroll-box-) {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: minmax(0, 1fr) auto;
-}
-#overview-page-scroll-box- {
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-#overview-page- {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-#overview-home-,
-#overview-view-frame- {
-  flex: 1;
-  min-height: 0;
-}
-#overview-view-frame- {
-  width: 100%;
-}
-
 * {
   scrollbar-width: none;
 }
 ::-webkit-scrollbar {
   display: none;
 }
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+body {
+  font-family: var(--page-font-family-);
+  font-size: calc(var(--design-font-size-px-) * var(--design-font-fit-));
+  line-height: var(--page-body-line-height-);
+  height: var(--design-viewport-height-);
+}
+pre {
+  margin: 0;
+  white-space: pre;
+}
 
-#overview-page-scroll-box-,
-.page-text-scroll-box- {
-  grid-column: 1;
-  grid-row: 1;
+/* The top page: the page column, scrolled sideways, over its bar. */
+#overview- {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
-.page-text-scroll-box- {
-  overflow: auto;
+#overview-page-scroll-box- {
+  overflow-x: auto;
+  overflow-y: hidden;
 }
-main.page-text-scroll-box- {
+/* The menu's two lines, the preference strip beside the status line. */
+#overview-page- {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+}
+#overview-home- {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+#overview-home-text- {
   overflow-x: hidden;
+  overflow-y: auto;
 }
-.page-text-scrollbar- {
+/* The home page column, as wide as its widest line, centred in its box. */
+#overview-home-text- > .page- {
+  width: max-content;
+  margin-inline: auto;
+}
+#overview-view-frame- {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 100%;
+}
+
+/* A view: the scrolled page beside its bar. */
+.view- {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.view- > main {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* The call graph: its page beside its bar, over its sideways bar. */
+#call-graph- {
+  grid-template-rows: minmax(0, 1fr) [sideways-bar-] auto;
+}
+/* The sideways bar keeps its row while the bar beside the page hides. */
+#call-graph- > .text-scrollbar-.horizontal- {
+  grid-row: sideways-bar-;
+}
+/* The call graph table, as wide as its longest row, in its clear border. */
+#call-graph-table- {
+  width: max-content;
+  border: var(--call-graph-border-width-) solid transparent;
+  border-collapse: separate;
+  border-spacing: 0;
+  white-space: pre;
+}
+#call-graph-table- td {
+  padding: 0;
+}
+/* A share or tail sits right: shares line up and a line meets its branch. */
+#call-graph-table- :is(.call-graph-share-, .call-graph-tail-) {
+  text-align: right;
+}
+/* A symbol button has no room of its own, its template's spaces around it. */
+#call-graph-table- .menu-button- {
+  padding: 0;
+}
+
+/* The heat map: the main box, then the minimap and its bar following it. */
+#heat-map- {
+  display: flex;
+}
+/* The main box fills the row until its edge narrows it, sizing the tree. */
+#heat-map-main- {
+  flex: 1;
+  container-type: size;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+/* The tree's title is as wide as the tree, which hangs below it in view. */
+.heat-map-source-table- > thead > tr > th:first-child {
+  min-width: var(--heat-map-tree-width-);
+}
+/* The tree beside its bar, down to the main box bottom while titles stick. */
+.heat-map-tree-track- {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
+  height: calc(100cqh - 100%);
+}
+/* Under the information line the titles stick a band lower. */
+.heat-map-source- .heat-map-tree-track- {
+  height: calc(100cqh - 100% - var(--heat-map-source-band-height-));
+}
+#heat-map-tree- {
+  overflow-x: hidden;
+  overflow-y: scroll;
+}
+
+/* No top inset: the status bar's half line gap is the room over a page. */
+.page- {
+  padding: 0 var(--page-inset-inline-) var(--page-inset-block-);
+}
+.page-emphasis- {
+  display: inline-block;
+  padding: 0 var(--page-emphasis-padding-inline-);
+  white-space: pre;
+}
+
+/* A strip: a line of buttons, a status line under the menu's. */
+.strip-line- {
+  white-space: pre;
+}
+#menu- {
+  display: contents;
+}
+/* The menu line: the logo at the left, the other buttons at the right. */
+#menu- > .strip-line- {
+  grid-column: 1 / -1;
+  margin-top: var(--menu-strip-blank-line-height-);
+  padding-right: var(--menu-strip-padding-right-);
+  text-align: right;
+}
+/* Its buttons keep their own text, pulldowns among them, left aligned. */
+#menu- > .strip-line- > .menu-button- {
+  text-align: left;
+}
+#menu- .menu-status-bar-,
+#menu-preference- {
+  margin-block: var(--menu-strip-blank-line-height-);
+}
+#menu-preference- {
+  padding-right: var(--menu-strip-padding-right-);
+}
+/* The status line, cut at its column, so a long one never widens the page. */
+#menu- .menu-status-bar- {
+  overflow: hidden;
+}
+/* A button: its pulldown hung from the box, side line room inside. */
+.menu-button- {
+  position: relative;
+  border-inline: var(--page-line-width-) solid transparent;
+  padding: 0 var(--menu-button-padding-inline-);
+  white-space: pre;
+}
+[data-entry-name-="str_report_name"] {
+  float: left;
+  padding-inline-end: 0;
+}
+.menu-button-[tabindex],
+.menu-button-widget- {
+  cursor: pointer;
+}
+/* A widget's glyphs, taller than a line, clipped to its button. */
+.menu-button-widget- {
+  display: inline-block;
+  vertical-align: top;
+  height: inherit;
+  overflow: clip;
+}
+.menu-status-bar- {
+  margin-left: var(--menu-status-bar-padding-left-);
+  margin-right: var(--menu-status-bar-padding-right-);
+  white-space: pre;
+}
+.menu-pulldown-search-box- {
+  display: inline-block;
+  min-width: var(--menu-pulldown-search-box-min-width-);
+}
+.menu-pulldown-entry-box- {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--menu-pulldown-entry-list-z-index-);
+  display: flex;
+  min-width: 100%;
+  max-height: calc(
+    var(--menu-pulldown-entry-list-max-height-share-) *
+      var(--design-viewport-height-)
+  );
+}
+.menu-pulldown-entry-list- {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+}
+/* An entry clips its text box that overhangs its line, so a fit list fits. */
+.menu-pulldown-entry-list- > * {
+  flex: none;
+  overflow-y: clip;
+  padding: 0 var(--menu-pulldown-entry-padding-inline-);
+}
+
+/* A table: each column as wide as its text or a drag, titles in view. */
+table.table- {
+  position: relative;
+  border-collapse: collapse;
+}
+.table- th,
+.table- td {
+  padding: 0 var(--page-table-cell-padding-inline-);
+  white-space: pre;
+  text-align: left;
+  vertical-align: top;
+}
+.table- th {
+  position: sticky;
+  top: 0;
+  z-index: var(--page-table-title-z-index-);
+}
+.table- .numeric- {
+  text-align: right;
+}
+tr.row-link- {
+  cursor: pointer;
+}
+/* A cell or pane whose right edge the pointer may drag shows the cursor. */
+.table- :is(th, td).column-edge-grab-,
+.table- :is(th, td).column-edge-grab- *,
+#heat-map-main-.column-edge-grab-,
+#heat-map-main-.column-edge-grab- * {
+  cursor: col-resize;
+}
+/* A hovered row a click acts on anchors the frame its table draws over it. */
+.table- > tbody > :is(tr.row-link-, tr.clickable-):hover {
+  anchor-name: --table-hover-row-;
+}
+table.table-:has(> tbody > :is(tr.row-link-, tr.clickable-):hover)::before {
+  content: "";
+  position: absolute;
+  position-anchor: --table-hover-row-;
+  top: anchor(top);
+  pointer-events: none;
+  border-style: solid;
+}
+
+/* A link or button is one line high, its text set on the box bottom. */
+.page- a,
+.heat-map-source- a,
+.menu-button- {
+  display: inline-block;
+  height: 1lh;
+  align-content: unsafe end;
+}
+
+/* A text scrollbar: one cell per character of its track. */
+.text-scrollbar- {
   contain: size;
   overflow: hidden;
   white-space: pre;
   user-select: none;
   touch-action: none;
 }
-.page-text-scrollbar-.horizontal- {
-  grid-column: 1;
-  grid-row: 2;
+.text-scrollbar-.horizontal- {
   height: var(--page-text-scrollbar-horizontal-height-);
 }
-.page-text-scrollbar-.vertical- {
-  grid-column: 2;
-  grid-row: 1;
+.text-scrollbar-.vertical- {
   width: var(--page-text-scrollbar-vertical-width-);
 }
-.page-text-scrollbar-.vertical- > span {
+.text-scrollbar-.vertical- > span {
   display: block;
 }
-
-.page- {
-  container-type: inline-size;
-}
-.page-emphasis- {
-  padding: 0 var(--page-emphasis-padding-inline-);
-  white-space: pre;
-}
-#overview-home- .page- {
-  padding: var(--heat-map-overview-home-border-block-)
-    var(--heat-map-overview-home-border-inline-);
-}
-.table-box- {
-  position: relative;
-  width: fit-content;
-}
-.band- {
-  position: sticky;
-  top: 0;
-  z-index: var(--heat-map-band-z-index-);
-}
-.table-columns- {
-  width: fit-content;
-}
-table.columns- {
-  table-layout: fixed;
-  border-collapse: separate;
-  border-spacing: 0;
-  width: 0;
-}
-table.columns- th,
-table.columns- td {
-  padding: 0 var(--page-table-cell-padding-inline-);
-  white-space: pre;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: top;
-}
-table.columns- th {
-  position: sticky;
-  top: 0;
-  z-index: var(--page-table-column-title-z-index-);
-  text-align: left;
-}
-table.columns- .numeric- {
-  text-align: right;
-}
-
-.debug-tip- {
-  position: fixed;
-  z-index: var(--debug-tip-z-index-);
-  white-space: pre;
+/* A bar whose target shows all it holds takes no room. */
+.text-scrollbar-.target-fits- {
   display: none;
-  font-size: var(--debug-tip-font-size-);
-  border: var(--debug-tip-border-width-) solid;
 }
 
-.screenshot-label- {
+.screenshot- {
   position: fixed;
   left: 0;
   bottom: 0;
-  z-index: var(--screenshot-label-z-index-);
+  z-index: var(--screenshot-z-index-);
   user-select: none;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: pre;
 }

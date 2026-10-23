@@ -91,7 +91,7 @@ window.try_catch_handler_(function () {
     load_log_kept_line_count = line_count;
     load_log_trim();
   }
-  // Answers the newest entries kept, up to the count asked for.
+  // Returns the newest entries kept, up to the count asked for.
   function load_log_newest_entries(line_count) {
     return load_log_entries.slice(
       Math.max(load_log_entries.length - line_count, 0),
@@ -226,7 +226,7 @@ window.try_catch_handler_(function () {
       after_paint_run(() => {
         load_log_append(
           pending_scripts.asset_count === 1
-            ? "str_load_log_script_entry"
+            ? "str_load_log_asset_entry"
             : "str_load_log_scripts_entry",
           pending_scripts.start_milliseconds,
           {

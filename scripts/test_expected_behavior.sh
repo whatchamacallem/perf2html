@@ -48,9 +48,21 @@ _WHITELIST_FILE=test_whitelist.txt
 . ./test_utility.sh
 
 _BATCH_SCRIPT_NAME=perf2html_batch.sh
+_README_PAGE_SCRIPT_NAME=build_readme_page.py
+_ROWS_FILE_NAME=perf2html.txt
+# Chrome for Testing's headless shell, headless without a switch.
+_SCREENSHOT_BROWSER_NAME=chrome-headless-shell
+_SCREENSHOT_BROWSER_PATH=/opt/chrome-headless-shell-linux64
+_SCREENSHOT_BROWSER_PATH+="/$_SCREENSHOT_BROWSER_NAME"
+_SCREENSHOT_BROWSER_URL=https://storage.googleapis.com
+_SCREENSHOT_BROWSER_URL+=/chrome-for-testing-public/156.0.8078.47/linux64
+_SCREENSHOT_BROWSER_URL+=/chrome-headless-shell-linux64.zip
+_SCREENSHOT_BROWSER_ZIP=/tmp/chrome-headless-shell-linux64.zip
 _SCREENSHOT_DIFF_DIR="$_DIR_PERF2HTML/screenshots-diff"
 _SCREENSHOT_GOLD_DIR="$_DIR_PERF2HTML/screenshots-gold"
 _SCREENSHOT_SCRIPT_NAME=test_screenshot.py
+_TEST_LIST_FILE_NAME=test_list.txt
+_TIMING_FILE_SUFFIX=.perf-stat.json
 
 _DEFAULT_REPORTS=(
   "$_DIR_PERF2HTML/$REPORT_BASELINE_DIR_NAME"
@@ -65,12 +77,19 @@ tools_resolve() {
   _CLANG_FORMAT="$(tool_find clang-format)" || _missing+=(clang-format)
   _PRETTIER="$(tool_find prettier)" || _missing+=(prettier)
   _PYRIGHT="$(tool_find pyright)" || _missing+=(pyright)
+  _CMARK_GFM="$(tool_find cmark-gfm)" || _missing+=(cmark-gfm)
+  _SCREENSHOT_BROWSER="$(tool_find "$_SCREENSHOT_BROWSER_NAME")" \
+    || _missing+=("$_SCREENSHOT_BROWSER_NAME")
   [ "${#_missing[@]}" = 0 ] || error_exit 127 \
     "error: ${#_missing[@]} tool(s) missing, so nothing is verified:" \
     "${_missing[*]}" \
-    "  sudo apt-get install -y shfmt clang-format" \
+    "  sudo apt-get install -y shfmt clang-format cmark-gfm" \
     "  pip3 install --user --break-system-packages ruff" \
-    "  npm install -g prettier pyright"
+    "  npm install -g prettier pyright" \
+    "  sudo apt-get install -y libasound2t64 unzip" \
+    "  curl -fsSLo $_SCREENSHOT_BROWSER_ZIP $_SCREENSHOT_BROWSER_URL" \
+    "  sudo unzip -q -o $_SCREENSHOT_BROWSER_ZIP -d /opt" \
+    "  sudo ln -sf $_SCREENSHOT_BROWSER_PATH /usr/local/bin"
 }
 
 subprocess_run() {
@@ -266,6 +285,7 @@ report_version() {
 test_expected_report_check_run() {
   local _path _args _flags=()
   mapfile -t _flags < <(verbose_flags)
+  _flags+=("${_README_HTML_FLAGS[@]}")
 
   heading_print test_report.py
   for _path in "${_DEFAULT_REPORTS[@]}"; do
@@ -359,8 +379,10 @@ screenshots_run() {
 
   heading_print "$_SCREENSHOT_SCRIPT_NAME"
   for _name in "$REPORT_MODIFIED_DIR_NAME" "$REPORT_DIFF_DIR_NAME"; do
-    screenshot_command_set "$_name"
-    subprocess_run "${_SCREENSHOT_COMMAND[@]}"
+    screenshot_command_set "$_name" "--browser=$_SCREENSHOT_BROWSER"
+    # The verbose lines go to the Markdown log on stderr, as blocks of text.
+    subprocess_run "${_SCREENSHOT_COMMAND[@]}" >&2
+    VERBOSE_BLOCK_PRINTED=loose
   done
 
   # A measuring run changes the recorded values the golden screenshots show.
@@ -391,6 +413,27 @@ screenshots_run() {
   fi
 }
 
+# Sets `_README_HTML_FLAGS` to what the batch's reports show of the README.
+readme_html_flags_set() {
+  _README_HTML_FLAGS=()
+  if [ "$_DIR_PERF2HTML/$README_HTML_BUILD_PATH" \
+    -nt "$_DIR_PERF2HTML/$README_MARKDOWN_NAME" ]; then
+    _README_HTML_FLAGS=(--readme-html)
+  fi
+}
+
+readme_html_build() {
+  local _converter _flags=()
+  mapfile -t _flags < <(verbose_flags)
+  _converter="$(command -v "$_CMARK_GFM")"
+
+  heading_print "$_README_PAGE_SCRIPT_NAME"
+  subprocess_run python3 "$_SCRIPT_DIR/$_README_PAGE_SCRIPT_NAME" \
+    "${_flags[@]}" "--converter=$_converter" \
+    "--markdown=$_DIR_PERF2HTML/$README_MARKDOWN_NAME" \
+    "--out=$_DIR_PERF2HTML/$README_HTML_BUILD_PATH"
+}
+
 regenerate_refuse() {
   error_exit 2 "error: --regenerate cannot reuse the recordings: $1"
 }
@@ -407,14 +450,14 @@ regenerate_check() {
     regenerate_refuse "no recordings at $_artifacts"
   fi
 
-  local _name _report_artifacts _rows _recorded _binary _newest
-  local _timing_files=() _recorded_times=()
+  local _name _report_artifacts _rows _recorded _binary _newest _test_list
+  local _test _timing _tests=() _recorded_times=()
   for _name in "$REPORT_BASELINE_DIR_NAME" "$REPORT_MODIFIED_DIR_NAME"; do
     _report_artifacts="$_artifacts/$_name"
     if [ ! -d "$_report_artifacts" ]; then
       regenerate_refuse "$_name has no recordings at $_report_artifacts"
     fi
-    _rows="$_report_artifacts/$PROFILE_TOOL_NAME.txt"
+    _rows="$_report_artifacts/$_ROWS_FILE_NAME"
     if [ ! -f "$_rows" ]; then
       regenerate_refuse "$_name has no recordings, $_rows is missing"
     fi
@@ -425,11 +468,21 @@ regenerate_check() {
       regenerate_refuse "$_name records no recorded= row in $_rows"
     fi
 
-    mapfile -t _timing_files < <(find "$_report_artifacts" -maxdepth 1 \
-      -type f -name "*.$PROFILE_TIMING_TOOL_NAME.$_recorded.csv" | sort)
-    if [ "${#_timing_files[@]}" = 0 ]; then
-      regenerate_refuse "$_name has no recordings left from $_recorded"
+    _test_list="$_report_artifacts/$_TEST_LIST_FILE_NAME"
+    if [ ! -s "$_test_list" ]; then
+      regenerate_refuse "$_name lists no test in $_test_list"
     fi
+    mapfile -t _tests <"$_test_list"
+    _newest="$_report_artifacts/${_tests[0]}$_TIMING_FILE_SUFFIX"
+    for _test in "${_tests[@]}"; do
+      _timing="$_report_artifacts/$_test$_TIMING_FILE_SUFFIX"
+      if [ ! -f "$_timing" ]; then
+        regenerate_refuse "$_name has no recording $_timing"
+      fi
+      if [ "$_timing" -nt "$_newest" ]; then
+        _newest="$_timing"
+      fi
+    done
     _recorded_times+=("$_recorded")
 
     _binary="$(header_row "$_rows" executable)"
@@ -441,11 +494,7 @@ regenerate_check() {
       regenerate_refuse "$_name has no executable at $_binary"
     fi
 
-    _newest="$(find "$_report_artifacts" -maxdepth 1 -type f \
-      -name "*.$PROFILE_TIMING_TOOL_NAME.$_recorded.csv" \
-      -printf '%T@ %p\n' | sort -rn | head -1)"
-    _newest="${_newest#* }"
-    if [ -n "$(find "$_binary" -newer "$_newest" -print -quit)" ]; then
+    if [ "$_binary" -nt "$_newest" ]; then
       regenerate_refuse "$_name: perf was re-linked after its recordings"
     fi
   done
@@ -520,10 +569,12 @@ main() {
   long_lines_report
   test_source_scan_run
   lint_run
+  readme_html_flags_set
   batch_run
   test_expected_report_check_run
   test_expected_archive_check_run
   screenshots_run
+  readme_html_build
 }
 
 main "$@"
