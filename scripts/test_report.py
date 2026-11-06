@@ -5,13 +5,13 @@
 
 from __future__ import annotations
 
-import argparse, base64, html, json, os, re, subprocess, sys, tarfile
-import urllib.parse
+import argparse, base64, contextlib, html, io, json, math, os, re
+import subprocess, sys, tarfile, urllib.parse
 from collections.abc import Sequence
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import callgrind, settings
+import callgrind, callgrind_diff, callgrind_to_heatmap, settings, test_settings
 
 _FLAME_GRAPH_APP_DIR_NAME: str = ""
 _FLAME_GRAPH_EXPORTER_NAME: str = ""
@@ -30,6 +30,12 @@ settings.load_into(__name__)
 
 
 class TestReport:
+    class RawData(NamedTuple):
+        archive_name: str
+        path: str
+        texts: dict[str, str]
+        build_tree: str
+
     class ReportLayout(NamedTuple):
         is_regular_report: bool
         table_diff_value: str
@@ -48,13 +54,12 @@ class TestReport:
     class TestArgs(NamedTuple):
         out_dir: str
         diff: bool
+        baseline: str
+        modified: str
         readme_html: bool
         verbose: bool
 
-    def __init__(self) -> None:
-        self.errors: list[str] = []
-
-    # Checks the rows, costs and window of a call graph.
+    # Checks the rows, costs, total and window of a call graph.
     def call_graph_model_check(
         self,
         call_graph_model: dict[str, Any],
@@ -62,64 +67,87 @@ class TestReport:
         path: str,
     ) -> None:
         function_names: list[str] = []
+        self_total = 0
         for function_row in call_graph_model["functions"]:
-            if len(function_row) != _TEST_CALL_GRAPH_FUNCTION_FIELDS:
+            if (
+                len(function_row)
+                != test_settings.TEST_CALL_GRAPH_FUNCTION_FIELDS
+            ):
                 self.fail(
                     f"{label}'s call graph has a function of"
                     f" {len(function_row)} fields, expected"
-                    f" {_TEST_CALL_GRAPH_FUNCTION_FIELDS}: {path}"
+                    f" {test_settings.TEST_CALL_GRAPH_FUNCTION_FIELDS}: {path}"
                 )
-                return
-            function_name = function_row[_TEST_CALL_GRAPH_FUNCTION_NAME_FIELD]
-            self_value = function_row[_TEST_CALL_GRAPH_FUNCTION_SELF_FIELD]
+            function_name = function_row[
+                test_settings.TEST_CALL_GRAPH_FUNCTION_NAME_FIELD
+            ]
+            self_value = function_row[
+                test_settings.TEST_CALL_GRAPH_FUNCTION_SELF_FIELD
+            ]
             if not isinstance(self_value, int) or self_value < 0:
                 self.fail(
                     f"{label}'s call graph gives {function_name!r} the self"
                     f" cost {self_value!r}, expected an integer of 0 or more:"
                     f" {path}"
                 )
-                return
             function_names.append(function_name)
+            self_total += self_value
+        # A test's total holds the self costs of its functions.
+        test_total = call_graph_model["test_total"]
+        if (
+            not isinstance(test_total, int)
+            or test_total <= 0
+            or test_total < self_total
+        ):
+            self.fail(
+                f"{label}'s call graph gives the test total {test_total!r},"
+                " expected an integer above 0 and of at least its functions'"
+                f" summed self cost {self_total}: {path}"
+            )
         function_count = len(function_names)
         caller_indexes: set[int] = set()
         called_indexes: set[int] = set()
         for edge_row in call_graph_model["edges"]:
-            if len(edge_row) != _TEST_CALL_GRAPH_EDGE_FIELDS:
+            if len(edge_row) != test_settings.TEST_CALL_GRAPH_EDGE_FIELDS:
                 self.fail(
                     f"{label}'s call graph has an edge of {len(edge_row)}"
-                    f" fields, expected {_TEST_CALL_GRAPH_EDGE_FIELDS}:"
+                    " fields, expected"
+                    f" {test_settings.TEST_CALL_GRAPH_EDGE_FIELDS}:"
                     f" {path}"
                 )
-                return
             if not all(
                 0 <= edge_row[field] < function_count
-                for field in _TEST_CALL_GRAPH_EDGE_FUNCTION_FIELDS
+                for field in test_settings.TEST_CALL_GRAPH_EDGE_FUNCTION_FIELDS
             ):
                 self.fail(
                     f"{label}'s call graph edge {edge_row} names a function"
                     f" past its {function_count} functions: {path}"
                 )
-                return
-            inclusive_value = edge_row[_TEST_CALL_GRAPH_EDGE_INCLUSIVE_FIELD]
+            inclusive_value = edge_row[
+                test_settings.TEST_CALL_GRAPH_EDGE_INCLUSIVE_FIELD
+            ]
             if not isinstance(inclusive_value, int) or inclusive_value < 0:
                 self.fail(
                     f"{label}'s call graph edge {edge_row} gives the inclusive"
                     f" cost {inclusive_value!r}, expected an integer of 0 or"
                     f" more: {path}"
                 )
-                return
-            caller_indexes.add(edge_row[_TEST_CALL_GRAPH_EDGE_CALLER_FIELD])
-            called_indexes.add(edge_row[_TEST_CALL_GRAPH_EDGE_CALLEE_FIELD])
+            caller_indexes.add(
+                edge_row[test_settings.TEST_CALL_GRAPH_EDGE_CALLER_FIELD]
+            )
+            called_indexes.add(
+                edge_row[test_settings.TEST_CALL_GRAPH_EDGE_CALLEE_FIELD]
+            )
         for root_row in call_graph_model["roots"]:
-            if len(root_row) != _TEST_CALL_GRAPH_ROOT_FIELDS:
+            if len(root_row) != test_settings.TEST_CALL_GRAPH_ROOT_FIELDS:
                 self.fail(
                     f"{label}'s call graph has a root of {len(root_row)}"
-                    f" fields, expected {_TEST_CALL_GRAPH_ROOT_FIELDS}:"
+                    " fields, expected"
+                    f" {test_settings.TEST_CALL_GRAPH_ROOT_FIELDS}:"
                     f" {path}"
                 )
-                return
         root_indexes = [
-            root_row[_TEST_CALL_GRAPH_ROOT_FUNCTION_FIELD]
+            root_row[test_settings.TEST_CALL_GRAPH_ROOT_FUNCTION_FIELD]
             for root_row in call_graph_model["roots"]
         ]
         uncalled_indexes = sorted(caller_indexes - called_indexes)
@@ -128,33 +156,40 @@ class TestReport:
                 f"{label}'s call graph roots {root_indexes} are"
                 f" not its uncalled callers {uncalled_indexes}: {path}"
             )
-            return
         for root_row in call_graph_model["roots"]:
             root_name = function_names[
-                root_row[_TEST_CALL_GRAPH_ROOT_FUNCTION_FIELD]
+                root_row[test_settings.TEST_CALL_GRAPH_ROOT_FUNCTION_FIELD]
             ]
             # A root is uncalled, so only the start function counts calls.
             root_calls = (
-                _TEST_CALL_GRAPH_START_FUNCTION_CALLS
-                if root_name == _TEST_CALL_GRAPH_START_FUNCTION_NAME
+                test_settings.TEST_CALL_GRAPH_START_FUNCTION_CALLS
+                if root_name
+                == test_settings.TEST_CALL_GRAPH_START_FUNCTION_NAME
                 else 0
             )
-            counted_calls = root_row[_TEST_CALL_GRAPH_ROOT_CALLS_FIELD]
+            counted_calls = root_row[
+                test_settings.TEST_CALL_GRAPH_ROOT_CALLS_FIELD
+            ]
             if counted_calls != root_calls:
                 self.fail(
                     f"{label}'s call graph root {root_name} counts the calls"
                     f" {counted_calls}, expected {root_calls}: {path}"
                 )
-        if _TEST_CALL_GRAPH_START_FUNCTION_NAME not in function_names:
+        if (
+            test_settings.TEST_CALL_GRAPH_START_FUNCTION_NAME
+            not in function_names
+        ):
             self.fail(
                 f"{label}'s call graph names no"
-                f" {_TEST_CALL_GRAPH_START_FUNCTION_NAME}, the function the"
+                f" {test_settings.TEST_CALL_GRAPH_START_FUNCTION_NAME}, the"
+                " function the"
                 f" recording starts at: {path}"
             )
-        if _TEST_CALL_GRAPH_STOP_FUNCTION_NAME in function_names:
+        if test_settings.TEST_CALL_GRAPH_STOP_FUNCTION_NAME in function_names:
             self.fail(
                 f"{label}'s call graph names"
-                f" {_TEST_CALL_GRAPH_STOP_FUNCTION_NAME}, the function the"
+                f" {test_settings.TEST_CALL_GRAPH_STOP_FUNCTION_NAME}, the"
+                " function the"
                 f" recording stops at: {path}"
             )
 
@@ -165,7 +200,9 @@ class TestReport:
         test_name: str,
         layout: TestReport.ReportLayout,
     ) -> None:
-        label = f"{_TEST_CALL_GRAPH_PAGE_DIR_NAME}/{test_name}.html"
+        label = (
+            f"{test_settings.TEST_CALL_GRAPH_PAGE_DIR_NAME}/{test_name}.html"
+        )
         path = os.path.join(out_dir, label)
         if not layout.is_regular_report:
             if os.path.lexists(path):
@@ -174,41 +211,43 @@ class TestReport:
                     f" {path}"
                 )
             return
-        text = self.page_check(
-            path, label, _TEST_CALL_GRAPH_PAGE_LEAST_BYTES, test_name
+        self.page_check(
+            path,
+            label,
+            test_settings.TEST_CALL_GRAPH_PAGE_LEAST_BYTES,
+            test_name,
         )
-        if not text:
-            return
         with open(path, encoding="utf-8") as handle:
             page_text = handle.read()
         attributes = self.element_attributes(
-            page_text, _TEST_CALL_GRAPH_TABLE_ID
+            page_text, test_settings.TEST_CALL_GRAPH_TABLE_ID
         )
         if attributes is None:
-            self.fail(f"{label} has no {_TEST_CALL_GRAPH_TABLE_ID}: {path}")
-            return
+            self.fail(
+                f"{label} has no {test_settings.TEST_CALL_GRAPH_TABLE_ID}:"
+                f" {path}"
+            )
         try:
             call_graph_model = json.loads(attributes.get("data-model-", ""))
         except ValueError as error:
             self.fail(f"{label} holds no JSON call graph: {error}: {path}")
-            return
         found_keys = (
             sorted(call_graph_model)
             if isinstance(call_graph_model, dict)
             else []
         )
-        if found_keys != sorted(_TEST_CALL_GRAPH_MODEL_KEYS):
+        if found_keys != sorted(test_settings.TEST_CALL_GRAPH_MODEL_KEYS):
             self.fail(
                 f"{label}'s call graph holds the keys {found_keys},"
-                f" expected {sorted(_TEST_CALL_GRAPH_MODEL_KEYS)}: {path}"
+                " expected"
+                f" {sorted(test_settings.TEST_CALL_GRAPH_MODEL_KEYS)}: {path}"
             )
-            return
         self.call_graph_model_check(call_graph_model, label, path)
 
     def checksum_compute(self, out_dir: str) -> str:
         try:
             done = subprocess.run(
-                ["sh", "-c", _REPORT_CHECKSUM_COMMAND],
+                ["sh", "-c", test_settings.REPORT_CHECKSUM_COMMAND],
                 cwd=out_dir,
                 capture_output=True,
                 text=True,
@@ -216,19 +255,24 @@ class TestReport:
             )
         except OSError as error:
             self.fail(f"cannot checksum {out_dir}: {error}")
-            return ""
         if done.returncode != 0:
             self.fail(
                 f"cannot checksum {out_dir}: cksum exited"
                 f" {done.returncode}: {done.stderr.strip()}"
             )
-            return ""
         return done.stdout.split(" ", 1)[0]
+
+    # Returns costs without their trailing zeros, as a page model holds them.
+    def costs_trimmed(self, costs: Sequence[int]) -> list[int]:
+        trimmed = list(costs)
+        while trimmed and not trimmed[-1]:
+            trimmed.pop()
+        return trimmed
 
     # Checks the derived counter names and each term's recorded counter.
     def database_derived_check(
         self, database_model: dict[str, Any], label: str, path: str
-    ) -> bool:
+    ) -> None:
         counter_count = len(database_model["counterNames"])
         derived_names: list[Any] = []
         for derived_name, terms in database_model["derivedCounters"]:
@@ -244,35 +288,30 @@ class TestReport:
                         f" {counter_index!r}, expected an integer of one of"
                         f" its {counter_count} counters: {path}"
                     )
-                    return False
-        if derived_names != list(_TEST_DERIVED_COUNTER_NAMES):
+        if derived_names != list(test_settings.TEST_DERIVED_COUNTER_NAMES):
             self.fail(
                 f"{label}'s database model derives {derived_names}, expected"
-                f" {list(_TEST_DERIVED_COUNTER_NAMES)}: {path}"
+                f" {list(test_settings.TEST_DERIVED_COUNTER_NAMES)}: {path}"
             )
-            return False
-        return True
 
     # Checks each call between listed functions shows in both of their rows.
     def database_edges_check(
         self, function_rows: list[list[Any]], label: str, path: str
-    ) -> bool:
+    ) -> None:
         caller_edges, callee_edges = (
             self.database_side_edges(function_rows, rows_field)
             for rows_field in (
-                _TEST_DATABASE_CALLER_ROWS_FIELD,
-                _TEST_DATABASE_CALLEE_ROWS_FIELD,
+                test_settings.TEST_DATABASE_CALLER_ROWS_FIELD,
+                test_settings.TEST_DATABASE_CALLEE_ROWS_FIELD,
             )
         )
         one_sided_edges = sorted(caller_edges ^ callee_edges)
-        if not one_sided_edges:
-            return True
-        self.fail(
-            f"{label}'s database model lists {len(one_sided_edges)} calls"
-            " between listed functions in the callers or the callees alone,"
-            f" first {one_sided_edges[0]}: {path}"
-        )
-        return False
+        if one_sided_edges:
+            self.fail(
+                f"{label}'s database model lists {len(one_sided_edges)} calls"
+                " between listed functions in the callers or the callees"
+                f" alone, first {one_sided_edges[0]}: {path}"
+            )
 
     # Checks every database link opens the test's heat map at what it names.
     def database_links_check(
@@ -283,30 +322,14 @@ class TestReport:
         label: str,
         path: str,
     ) -> None:
-        model_label = f"{_HEAT_MAP_MODEL_DIR_NAME}/{test_name}.js"
-        model_path = os.path.join(
-            out_dir,
-            _HEAT_MAP_VIEW_KEY,
-            _HEAT_MAP_MODEL_DIR_NAME,
-            f"{test_name}.js",
-        )
-        script = self.size_check(
-            model_path, _TEST_HEAT_MAP_MODEL_LEAST_BYTES, model_label
-        )
-        if not script:
-            return
-        heat_map_model: Any = self.script_value(
-            script, _HEAT_MAP_MODEL_GLOBAL_NAME, test_name, model_path
-        )
-        if heat_map_model is None:
-            return
+        heat_map_model = self.heat_map_model_read(out_dir, test_name)
         function_start = (
             f"#test={test_name}&view={_HEAT_MAP_VIEW_KEY}&function="
         )
         function_links = [
             function_link
             for function_link in database_model["functions"]
-            if function_link[_TEST_DATABASE_FUNCTION_HREF_FIELD]
+            if function_link[test_settings.TEST_DATABASE_FUNCTION_HREF_FIELD]
         ]
         if not function_links:
             self.fail(
@@ -314,8 +337,12 @@ class TestReport:
                 f" ({function_start}...): {path}"
             )
         for function_link in function_links:
-            name = function_link[_TEST_DATABASE_FUNCTION_NAME_FIELD]
-            href = function_link[_TEST_DATABASE_FUNCTION_HREF_FIELD]
+            name = function_link[
+                test_settings.TEST_DATABASE_FUNCTION_NAME_FIELD
+            ]
+            href = function_link[
+                test_settings.TEST_DATABASE_FUNCTION_HREF_FIELD
+            ]
             linked_name = urllib.parse.unquote(
                 href.removeprefix(function_start)
             )
@@ -324,17 +351,18 @@ class TestReport:
                     f"{label} links {name} as {href!r}, expected"
                     f" {function_start} followed by the name: {path}"
                 )
-                return
         function_names = [
-            function_link[_TEST_DATABASE_FUNCTION_NAME_FIELD]
+            function_link[test_settings.TEST_DATABASE_FUNCTION_NAME_FIELD]
             for function_link in database_model["functions"]
         ]
         listed_names = {
-            function_names[function_row[_TEST_DATABASE_ROW_FUNCTION_FIELD]]
+            function_names[
+                function_row[test_settings.TEST_DATABASE_ROW_FUNCTION_FIELD]
+            ]
             for function_row in database_model["functionRows"]
         }
         linked_names = {
-            function_link[_TEST_DATABASE_FUNCTION_NAME_FIELD]
+            function_link[test_settings.TEST_DATABASE_FUNCTION_NAME_FIELD]
             for function_link in function_links
         }
         heat_map_names = {
@@ -345,16 +373,17 @@ class TestReport:
         called_names = {
             function_entry["name"]
             for function_entry in heat_map_model["functions"]
-            if function_entry["name"] == _TEST_CALL_GRAPH_START_FUNCTION_NAME
+            if function_entry["name"]
+            == test_settings.TEST_CALL_GRAPH_START_FUNCTION_NAME
             or any(
-                caller_row[_TEST_HEAT_MAP_CALLER_COUNT_FIELD] > 0
+                caller_row[test_settings.TEST_HEAT_MAP_CALL_ROW_COUNT_FIELD]
+                > 0
                 for caller_row in function_entry["callers"]
             )
         }
         listed_files = {
-            function_row[_TEST_DATABASE_ROW_FILE_FIELD]
+            function_row[test_settings.TEST_DATABASE_ROW_FILE_FIELD]
             for function_row in database_model["functionRows"]
-            if function_row[_TEST_DATABASE_ROW_FILE_FIELD]
         }
         for problem, names in (
             (
@@ -383,16 +412,16 @@ class TestReport:
         label: str,
         page_text: str,
         layout: TestReport.ReportLayout,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         attributes = self.element_attributes(
-            page_text, _TEST_DATABASE_MODEL_ID
+            page_text, test_settings.TEST_DATABASE_MODEL_ID
         )
         if attributes is None:
             self.fail(
-                f"{label} has no {_TEST_DATABASE_MODEL_ID} model element:"
+                f"{label} has no {test_settings.TEST_DATABASE_MODEL_ID} model"
+                " element:"
                 f" {path}"
             )
-            return None
         if attributes.get("data-diff-") != layout.table_diff_value:
             self.fail(
                 f"{label}'s model element holds data-diff-"
@@ -401,14 +430,12 @@ class TestReport:
             )
         if "data-model-" not in attributes:
             self.fail(f"{label}'s model element holds no data-model-: {path}")
-            return None
         try:
             database_model = json.loads(attributes["data-model-"])
         except ValueError as error:
             self.fail(
                 f"{label}'s model element holds no JSON model: {error}: {path}"
             )
-            return None
         found_keys = (
             sorted(database_model) if isinstance(database_model, dict) else []
         )
@@ -417,9 +444,7 @@ class TestReport:
                 f"{label}'s database model holds the keys {found_keys},"
                 f" expected {sorted(layout.database_model_keys)}: {path}"
             )
-            return None
-        if not self.database_rows_check(database_model, layout, label, path):
-            return None
+        self.database_rows_check(database_model, layout, label, path)
         return database_model
 
     def database_page_check(
@@ -427,33 +452,39 @@ class TestReport:
         out_dir: str,
         test_name: str,
         layout: TestReport.ReportLayout,
+        regular_data: Sequence[TestReport.RawData],
     ) -> None:
         label = self.database_page_path(test_name)
         path = os.path.join(out_dir, label)
-        text = self.page_check(
-            path, label, _TEST_OVERVIEW_PAGE_LEAST_BYTES, test_name
+        self.page_check(
+            path,
+            label,
+            test_settings.TEST_OVERVIEW_PAGE_LEAST_BYTES,
+            test_name,
         )
-        if not text:
-            return
         with open(path, encoding="utf-8") as handle:
             page_text = handle.read()
         if '<nav id="menu-"' in page_text:
             self.fail(f"{label} draws the overview's menu: {path}")
-        if _TEST_OVERVIEW_RAW_DATA_MARKUP in page_text:
+        if test_settings.TEST_OVERVIEW_RAW_DATA_MARKUP in page_text:
             self.fail(
                 f"{label} has a 'raw data' section, but it should not: {path}"
             )
         database_model = self.database_model_check(
             path, label, page_text, layout
         )
-        if database_model is not None:
-            self.database_links_check(
-                out_dir, test_name, database_model, label, path
+        self.function_names_check(database_model, label, path)
+        self.database_links_check(
+            out_dir, test_name, database_model, label, path
+        )
+        if layout.has_baselines:
+            self.diff_functions_check(
+                out_dir, test_name, database_model, regular_data
             )
 
     # Returns the report relative path of a test's database page.
     def database_page_path(self, test_name: str) -> str:
-        return f"{_TEST_DATABASE_PAGE_DIR_NAME}/{test_name}.html"
+        return f"{test_settings.TEST_DATABASE_PAGE_DIR_NAME}/{test_name}.html"
 
     # Checks a function row holds its fields, its place, a call and counters.
     def database_row_check(
@@ -463,26 +494,24 @@ class TestReport:
         counter_count: int,
         label: str,
         path: str,
-    ) -> bool:
+    ) -> None:
         row_label = (
-            f"{label}'s function row"
-            f" {function_row[_TEST_DATABASE_ROW_FUNCTION_FIELD]!r}"
+            f"{label}'s function row "
+            f"{function_row[test_settings.TEST_DATABASE_ROW_FUNCTION_FIELD]!r}"
         )
         if len(function_row) != layout.database_function_fields:
             self.fail(
                 f"{row_label} holds {len(function_row)} fields, expected"
                 f" {layout.database_function_fields}: {path}"
             )
-            return False
         for field_index in layout.database_function_value_fields:
             if len(function_row[field_index]) != counter_count:
                 self.fail(
                     f"{row_label} gives {len(function_row[field_index])}"
                     f" counter values, expected {counter_count}: {path}"
                 )
-                return False
-        file_path = function_row[_TEST_DATABASE_ROW_FILE_FIELD]
-        line_number = function_row[_TEST_DATABASE_ROW_LINE_FIELD]
+        file_path = function_row[test_settings.TEST_DATABASE_ROW_FILE_FIELD]
+        line_number = function_row[test_settings.TEST_DATABASE_ROW_LINE_FIELD]
         if (
             not isinstance(file_path, str)
             or not isinstance(line_number, int)
@@ -494,12 +523,11 @@ class TestReport:
                 f" {line_number!r}, expected a file path and a line of 0 or"
                 f" more, 0 for no path: {path}"
             )
-            return False
-        calls = function_row[_TEST_DATABASE_ROW_CALLS_FIELD]
+        calls = function_row[test_settings.TEST_DATABASE_ROW_CALLS_FIELD]
         side_calls = [calls]
         if layout.has_baselines:
             baseline_calls = function_row[
-                _TEST_DATABASE_ROW_BASELINE_CALLS_FIELD
+                test_settings.TEST_DATABASE_ROW_BASELINE_CALLS_FIELD
             ]
             side_calls = [baseline_calls, baseline_calls + calls]
         if max(side_calls) <= 0:
@@ -507,8 +535,6 @@ class TestReport:
                 f"{row_label} lists an uncalled function, its calls on each"
                 f" side {side_calls}: {path}"
             )
-            return False
-        return True
 
     # Checks the derived counters, then each function row and the row order.
     def database_rows_check(
@@ -517,7 +543,7 @@ class TestReport:
         layout: TestReport.ReportLayout,
         label: str,
         path: str,
-    ) -> bool:
+    ) -> None:
         counter_count = len(database_model["counterNames"])
         if "counterTotals" in layout.database_model_keys:
             totals_count = len(database_model["counterTotals"])
@@ -526,20 +552,17 @@ class TestReport:
                     f"{label}'s database model totals {totals_count}"
                     f" counters, expected {counter_count}: {path}"
                 )
-                return False
-        if not self.database_derived_check(database_model, label, path):
-            return False
+        self.database_derived_check(database_model, label, path)
         function_count = len(database_model["functions"])
         function_rows = database_model["functionRows"]
         named_indexes: set[int] = set()
         for function_row in function_rows:
-            if not self.database_row_check(
+            self.database_row_check(
                 function_row, layout, counter_count, label, path
-            ):
-                return False
+            )
             call_rows = [
-                *function_row[_TEST_DATABASE_CALLER_ROWS_FIELD],
-                *function_row[_TEST_DATABASE_CALLEE_ROWS_FIELD],
+                *function_row[test_settings.TEST_DATABASE_CALLER_ROWS_FIELD],
+                *function_row[test_settings.TEST_DATABASE_CALLEE_ROWS_FIELD],
             ]
             for call_row in call_rows:
                 if len(call_row) != layout.database_call_fields:
@@ -548,16 +571,16 @@ class TestReport:
                         f" row of {len(call_row)} fields, expected"
                         f" {layout.database_call_fields}: {path}"
                     )
-                    return False
             for indexed_row in (function_row, *call_rows):
-                function_index = indexed_row[_TEST_DATABASE_ROW_FUNCTION_FIELD]
+                function_index = indexed_row[
+                    test_settings.TEST_DATABASE_ROW_FUNCTION_FIELD
+                ]
                 if not 0 <= function_index < function_count:
                     self.fail(
                         f"{label}'s database model names the function"
                         f" {function_index} past its {function_count}"
                         f" functions: {path}"
                     )
-                    return False
                 named_indexes.add(function_index)
         if len(named_indexes) != function_count:
             self.fail(
@@ -565,17 +588,18 @@ class TestReport:
                 f" {function_count - len(named_indexes)} functions that no"
                 f" row, caller or callee names: {path}"
             )
-            return False
         function_names = [
-            function_link[_TEST_DATABASE_FUNCTION_NAME_FIELD]
+            function_link[test_settings.TEST_DATABASE_FUNCTION_NAME_FIELD]
             for function_link in database_model["functions"]
         ]
         row_places = [
             (
-                function_row[_TEST_DATABASE_ROW_FILE_FIELD],
-                function_row[_TEST_DATABASE_ROW_LINE_FIELD],
+                function_row[test_settings.TEST_DATABASE_ROW_FILE_FIELD],
+                function_row[test_settings.TEST_DATABASE_ROW_LINE_FIELD],
                 function_names[
-                    function_row[_TEST_DATABASE_ROW_FUNCTION_FIELD]
+                    function_row[
+                        test_settings.TEST_DATABASE_ROW_FUNCTION_FIELD
+                    ]
                 ],
             )
             for function_row in function_rows
@@ -585,31 +609,82 @@ class TestReport:
                 f"{label}'s database model lists its function rows out of"
                 f" file, line and name order: {path}"
             )
-            return False
-        return self.database_edges_check(function_rows, label, path)
+        self.database_edges_check(function_rows, label, path)
 
     # Returns the calls one side of each function row lists, among the rows.
     def database_side_edges(
         self, function_rows: list[list[Any]], rows_field: int
     ) -> set[tuple[Any, ...]]:
         listed_indexes = {
-            function_row[_TEST_DATABASE_ROW_FUNCTION_FIELD]
+            function_row[test_settings.TEST_DATABASE_ROW_FUNCTION_FIELD]
             for function_row in function_rows
         }
         side_edges: set[tuple[Any, ...]] = set()
         for function_row in function_rows:
-            row_index = function_row[_TEST_DATABASE_ROW_FUNCTION_FIELD]
+            row_index = function_row[
+                test_settings.TEST_DATABASE_ROW_FUNCTION_FIELD
+            ]
             for call_row in function_row[rows_field]:
-                partner_index = call_row[_TEST_DATABASE_ROW_FUNCTION_FIELD]
+                partner_index = call_row[
+                    test_settings.TEST_DATABASE_ROW_FUNCTION_FIELD
+                ]
                 if partner_index not in listed_indexes:
                     continue
-                call_counts = call_row[_TEST_DATABASE_CALL_COUNTS_START_FIELD:]
+                call_counts = call_row[
+                    test_settings.TEST_DATABASE_CALL_COUNTS_START_FIELD :
+                ]
                 side_edges.add(
                     (partner_index, row_index, *call_counts)
-                    if rows_field == _TEST_DATABASE_CALLER_ROWS_FIELD
+                    if rows_field
+                    == test_settings.TEST_DATABASE_CALLER_ROWS_FIELD
                     else (row_index, partner_index, *call_counts)
                 )
         return side_edges
+
+    # Checks a delta homes a function whose changed lines lie in a header.
+    def delta_home_check(self) -> None:
+        delta = callgrind.LineProfile()
+        delta.function_home[test_settings.TEST_DELTA_HOME_FUNCTION_NAME] = (
+            test_settings.TEST_DELTA_HOME_FILE
+        )
+        delta.function_lines[test_settings.TEST_DELTA_HOME_FUNCTION_NAME][
+            callgrind.SourceLine(*test_settings.TEST_DELTA_HOME_INLINED_LINE)
+        ] = [1]
+        home_image = test_settings.TEST_DELTA_HOME_IMAGE
+        delta.file_image.update(
+            {
+                test_settings.TEST_DELTA_HOME_FILE: home_image,
+                test_settings.TEST_DELTA_HOME_INLINED_LINE[0]: home_image,
+            }
+        )
+        handle = io.StringIO()
+        handle.write(test_settings.TEST_DELTA_HOME_RECORDING_HEADER)
+        callgrind_diff.CallgrindDiff.write_function(
+            handle, delta, test_settings.TEST_DELTA_HOME_FUNCTION_NAME, ""
+        )
+        try:
+            profile = callgrind.Callgrind().parse(
+                handle.getvalue(), test_settings.TEST_DELTA_HOME_RECORDING_NAME
+            )
+        except SystemExit as error:
+            self.fail(
+                "the parser refuses"
+                f" {test_settings.TEST_DELTA_HOME_RECORDING_NAME},"
+                f" the delta writer's: {error}"
+            )
+        found_home = profile.function_home[
+            test_settings.TEST_DELTA_HOME_FUNCTION_NAME
+        ]
+        if found_home != test_settings.TEST_DELTA_HOME_FILE:
+            self.fail(
+                f"{test_settings.TEST_DELTA_HOME_RECORDING_NAME} homes"
+                f" {test_settings.TEST_DELTA_HOME_FUNCTION_NAME} at"
+                f" {found_home!r},"
+                f" expected {test_settings.TEST_DELTA_HOME_FILE!r}, its"
+                " changed line"
+                f" lying in {test_settings.TEST_DELTA_HOME_INLINED_LINE[0]!r}:"
+                f" {handle.getvalue()!r}"
+            )
 
     def diff_baseline_check(self, filed_model: Any, label: str) -> None:
         width = len(filed_model["heatMapTotals"]["counters"])
@@ -637,7 +712,131 @@ class TestReport:
                         f"{label}: {place} falls {moved} past its baseline"
                         f" of {count} in counter slot {slot}"
                     )
-                    return
+
+    # Checks a diff lists every function its reports' function data list.
+    def diff_functions_check(
+        self,
+        out_dir: str,
+        test_name: str,
+        database_model: dict[str, Any],
+        regular_data: Sequence[TestReport.RawData],
+    ) -> None:
+        file_name = (
+            f"{test_name}{test_settings.TEST_FUNCTION_DATA_FILE_SUFFIX}"
+        )
+        sides: list[tuple[dict[str, Any], list[tuple[str, str]]]] = []
+        for raw_data in regular_data:
+            file_entries = self.paths_document_check(
+                raw_data.texts.get(test_settings.TEST_PATHS_DOCUMENT_NAME),
+                raw_data.archive_name,
+                test_settings.TEST_PATHS_DOCUMENT_NAME,
+                raw_data.path,
+            )
+            document = self.function_data_document_check(
+                raw_data, file_name, len(file_entries)
+            )
+            sides.append((document, file_entries))
+        side_names = self.function_data_pair_names(
+            [document for document, _ in sides],
+            [raw_data.build_tree for raw_data in regular_data],
+            f"{test_name}{test_settings.TEST_FUNCTION_DATA_FILE_SUFFIX}",
+        )
+        places: dict[str, tuple[str, int]] = {}
+        side_costs: list[dict[str, list[int]]] = []
+        side_calls: list[dict[str, int]] = []
+        count_field = test_settings.TEST_FUNCTION_DATA_CALL_COUNT_FIELD
+        file_field = test_settings.TEST_FUNCTION_DATA_ROW_FILE_FIELD
+        image_field = test_settings.TEST_FUNCTION_DATA_ROW_IMAGE_FIELD
+        pair_fields = test_settings.TEST_FUNCTION_DATA_CALL_PAIR_FIELDS
+        # The modified report, read last, places a function both list.
+        for (document, file_entries), names in zip(
+            sides, side_names, strict=True
+        ):
+            images = document["images"]
+            side_costs.append({})
+            side_calls.append({})
+            for name, function_row in zip(
+                names, document["functions"], strict=True
+            ):
+                places[name] = (
+                    self.function_data_display(
+                        file_entries[function_row[file_field]],
+                        images[function_row[image_field]],
+                    ),
+                    function_row[
+                        test_settings.TEST_FUNCTION_DATA_ROW_LINE_FIELD
+                    ],
+                )
+                side_costs[-1][name] = function_row[
+                    test_settings.TEST_FUNCTION_DATA_ROW_SELF_FIELD
+                ]
+                side_calls[-1][name] = sum(
+                    function_row[
+                        test_settings.TEST_FUNCTION_DATA_ROW_CALLERS_FIELD
+                    ][count_field::pair_fields]
+                )
+        zeros = [0] * len(sides[0][0]["counters"])
+        wanted_functions: dict[str, Any] = {}
+        for name, place in places.items():
+            baseline_costs = side_costs[0].get(name, zeros)
+            modified_costs = side_costs[1].get(name, zeros)
+            wanted_functions[name] = (
+                place,
+                self.costs_trimmed(
+                    [
+                        modified_value - baseline_value
+                        for baseline_value, modified_value in zip(
+                            baseline_costs, modified_costs, strict=True
+                        )
+                    ]
+                ),
+                self.costs_trimmed(baseline_costs),
+            )
+        heat_map_model = self.heat_map_model_read(out_dir, test_name)
+        self.mappings_compare(
+            {
+                function_entry["name"]: (
+                    (function_entry["file"], function_entry["line"]),
+                    function_entry["self"],
+                    function_baseline,
+                )
+                for function_entry, function_baseline in zip(
+                    heat_map_model["functions"],
+                    heat_map_model["functionBaseline"],
+                    strict=True,
+                )
+            },
+            wanted_functions,
+            f"{_HEAT_MAP_MODEL_DIR_NAME}/{test_name}.js's place, self change"
+            " and baseline",
+            out_dir,
+        )
+        function_names = [
+            function_link[test_settings.TEST_DATABASE_FUNCTION_NAME_FIELD]
+            for function_link in database_model["functions"]
+        ]
+        # The start function is called, though no caller of it is recorded.
+        self.mappings_compare(
+            {
+                function_names[
+                    function_row[
+                        test_settings.TEST_DATABASE_ROW_FUNCTION_FIELD
+                    ]
+                ]: (
+                    function_row[test_settings.TEST_DATABASE_ROW_FILE_FIELD],
+                    function_row[test_settings.TEST_DATABASE_ROW_LINE_FIELD],
+                )
+                for function_row in database_model["functionRows"]
+            },
+            {
+                name: place
+                for name, place in places.items()
+                if name == test_settings.TEST_CALL_GRAPH_START_FUNCTION_NAME
+                or any(calls.get(name, 0) for calls in side_calls)
+            },
+            f"{self.database_page_path(test_name)}'s row place",
+            out_dir,
+        )
 
     # Returns the attributes of the element the id names, none without one.
     def element_attributes(
@@ -655,22 +854,21 @@ class TestReport:
             )
         }
 
-    def fail(self, message: str) -> None:
-        self.errors.append(message)
+    def fail(self, message: str) -> NoReturn:
+        sys.exit(f"error: {message}")
 
     # Checks the speedscope bundle holds the files its page links, no other.
     def flame_app_check(self, out_dir: str) -> None:
         app_dir = os.path.join(out_dir, _FLAME_GRAPH_APP_DIR_NAME)
         if not os.path.isdir(app_dir):
             self.fail(f"no shared speedscope bundle: {app_dir}")
-            return
         page_label = f"{_FLAME_GRAPH_VIEW_KEY}/index.html"
         page_path = os.path.join(out_dir, page_label)
         page_text = self.size_check(
-            page_path, _TEST_FLAME_GRAPH_PAGE_LEAST_BYTES, page_label
+            page_path,
+            test_settings.TEST_FLAME_GRAPH_PAGE_LEAST_BYTES,
+            page_label,
         )
-        if not page_text:
-            return
         app_href = re.escape(f"../{_FLAME_GRAPH_APP_DIR_NAME}/")
         script_names = re.findall(
             rf'<script[^>]*\ssrc="{app_href}([^"/]+)"', page_text
@@ -685,7 +883,6 @@ class TestReport:
                 f" {_FLAME_GRAPH_APP_DIR_NAME}/, expected one of each:"
                 f" {page_path}"
             )
-            return
         stylesheet_label = f"{_FLAME_GRAPH_APP_DIR_NAME}/{stylesheet_names[0]}"
         stylesheet_path = os.path.join(out_dir, stylesheet_label)
         try:
@@ -693,14 +890,12 @@ class TestReport:
                 stylesheet = handle.read()
         except OSError as error:
             self.fail(f"{stylesheet_label}: {stylesheet_path}: {error}")
-            return
         font_names = re.findall(r'url\("\./([^"/]+\.woff2)"\)', stylesheet)
         if len(font_names) != 1:
             self.fail(
                 f"{stylesheet_label} loads the fonts {font_names}, expected"
                 f" one: {stylesheet_path}"
             )
-            return
         wanted_names = sorted([*script_names, *stylesheet_names, *font_names])
         found_names = sorted(os.listdir(app_dir))
         if found_names != wanted_names:
@@ -725,18 +920,17 @@ class TestReport:
             return
         if not os.path.isdir(flame_dir):
             self.fail(f"no {_FLAME_GRAPH_VIEW_KEY}/ directory: {flame_dir}")
-            return
         page = self.page_check(
             os.path.join(flame_dir, "index.html"),
             f"{_FLAME_GRAPH_VIEW_KEY}/index.html",
-            _TEST_FLAME_GRAPH_PAGE_LEAST_BYTES,
+            test_settings.TEST_FLAME_GRAPH_PAGE_LEAST_BYTES,
         )
-        if page and f"{_FLAME_GRAPH_APP_DIR_NAME}/" not in page:
+        if f"{_FLAME_GRAPH_APP_DIR_NAME}/" not in page:
             self.fail(
                 f"{_FLAME_GRAPH_VIEW_KEY}/index.html does not load the shared "
                 f"{_FLAME_GRAPH_APP_DIR_NAME}/ bundle: {flame_dir}/index.html"
             )
-        if page and "loadFileFromBase64" not in page:
+        if "loadFileFromBase64" not in page:
             self.fail(
                 f"{_FLAME_GRAPH_VIEW_KEY}/index.html and its scripts never"
                 f" call loadFileFromBase64: {flame_dir}/index.html"
@@ -748,7 +942,6 @@ class TestReport:
                 f"{_FLAME_GRAPH_VIEW_KEY}/ holds {found_names}, expected"
                 f" {wanted_names}: {flame_dir}"
             )
-            return
         profile_dir = os.path.join(flame_dir, _FLAME_GRAPH_PROFILE_DIR_NAME)
         found_names = sorted(os.listdir(profile_dir))
         wanted_names = sorted(f"{test_name}.js" for test_name in traced_tests)
@@ -767,27 +960,21 @@ class TestReport:
         path = os.path.join(profile_dir, f"{test_name}.js")
         label = f"{_FLAME_GRAPH_PROFILE_DIR_NAME}/{test_name}.js"
         script = self.size_check(
-            path, _TEST_FLAME_GRAPH_SCRIPT_LEAST_BYTES, label
+            path, test_settings.TEST_FLAME_GRAPH_SCRIPT_LEAST_BYTES, label
         )
-        if not script:
-            return
         filed_profile = self.script_value(
             script, _FLAME_GRAPH_PROFILE_GLOBAL_NAME, test_name, path
         )
-        if filed_profile is None:
-            return
         encoded_profile = filed_profile.get("base64")
         base64_text = (
             encoded_profile if isinstance(encoded_profile, str) else ""
         )
         if not re.fullmatch(r"[A-Za-z0-9+/=]+", base64_text):
             self.fail(f"{label} files no base64 profile: {path}")
-            return
         try:
             document = json.loads(base64.b64decode(base64_text))
         except ValueError as error:
             self.fail(f"{label} base64 is not JSON: {error}: {path}")
-            return
         kinds = [
             profile.get("type") for profile in document.get("profiles", [])
         ]
@@ -800,6 +987,595 @@ class TestReport:
                 f" {document.get('exporter')!r}, profiles {kinds}): {path}"
             )
 
+    # Checks a golden recording's function data document.
+    def function_data_builder_check(self) -> None:
+        heat_map = callgrind_to_heatmap.CallgrindToHeatmap(0)
+        try:
+            profile = callgrind.Callgrind().parse(
+                test_settings.TEST_FUNCTION_DATA_RECORDING,
+                test_settings.TEST_FUNCTION_DATA_RECORDING_NAME,
+            )
+            document = heat_map.function_data(
+                profile,
+                heat_map.profile_path_infos(profile, None),
+                {
+                    file_path: file_index
+                    for file_index, file_path in enumerate(
+                        test_settings.TEST_FUNCTION_DATA_FILE_PATHS
+                    )
+                },
+            )
+        except SystemExit as error:
+            self.fail(
+                "the function data of"
+                f" {test_settings.TEST_FUNCTION_DATA_RECORDING_NAME}"
+                f" is refused: {error}"
+            )
+        found = json.loads(json.dumps(document))
+        if found != test_settings.TEST_FUNCTION_DATA_DOCUMENT:
+            self.fail(
+                "the function data of"
+                f" {test_settings.TEST_FUNCTION_DATA_RECORDING_NAME} is"
+                f" {found}, expected"
+                f" {test_settings.TEST_FUNCTION_DATA_DOCUMENT}"
+            )
+
+    # Checks a test's function data names and places as its heat map does.
+    def function_data_check(
+        self,
+        raw_data: TestReport.RawData,
+        file_entries: Sequence[tuple[str, str]],
+        out_dir: str,
+        test_name: str,
+    ) -> None:
+        file_name = (
+            f"{test_name}{test_settings.TEST_FUNCTION_DATA_FILE_SUFFIX}"
+        )
+        document = self.function_data_document_check(
+            raw_data, file_name, len(file_entries)
+        )
+        heat_map_model = self.heat_map_model_read(out_dir, test_name)
+        if document["counters"] != heat_map_model["heatMapTotals"]["counters"]:
+            self.fail(
+                f"{raw_data.archive_name}'s {file_name} records the counters"
+                f" {document['counters']}, its heat map model"
+                f" {heat_map_model['heatMapTotals']['counters']}:"
+                f" {raw_data.path}"
+            )
+        images = document["images"]
+        names = self.function_data_names(document)
+        file_field = test_settings.TEST_FUNCTION_DATA_ROW_FILE_FIELD
+        image_field = test_settings.TEST_FUNCTION_DATA_ROW_IMAGE_FIELD
+        self.mappings_compare(
+            {
+                name: (
+                    self.function_data_display(
+                        file_entries[function_row[file_field]],
+                        images[function_row[image_field]],
+                    ),
+                    function_row[
+                        test_settings.TEST_FUNCTION_DATA_ROW_LINE_FIELD
+                    ],
+                    self.costs_trimmed(
+                        function_row[
+                            test_settings.TEST_FUNCTION_DATA_ROW_SELF_FIELD
+                        ]
+                    ),
+                )
+                for name, function_row in zip(
+                    names, document["functions"], strict=True
+                )
+            },
+            {
+                function_entry["name"]: (
+                    function_entry["file"],
+                    function_entry["line"],
+                    function_entry["self"],
+                )
+                for function_entry in heat_map_model["functions"]
+            },
+            f"{raw_data.archive_name}'s {file_name}, against the heat map"
+            " model's place and self,",
+            raw_data.path,
+        )
+
+    # Returns the path a report shows of a function data row's file.
+    def function_data_display(
+        self, file_entry: tuple[str, str], image_path: str
+    ) -> str:
+        file_path, code = file_entry
+        if code != test_settings.TEST_PATHS_DOCUMENT_ERROR_CODE:
+            return file_path
+        return f"{os.path.basename(image_path)}/{file_path}"
+
+    # Returns a function data document, its indexes and calls checked.
+    def function_data_document_check(
+        self, raw_data: TestReport.RawData, file_name: str, file_count: int
+    ) -> dict[str, Any]:
+        label = f"{raw_data.archive_name}'s {file_name}"
+        text = raw_data.texts.get(file_name)
+        if text is None:
+            self.fail(f"{raw_data.archive_name} holds no {file_name}")
+        try:
+            document = json.loads(text)
+        except ValueError as error:
+            self.fail(f"{label} holds no JSON: {error}: {raw_data.path}")
+        found_keys = sorted(document) if isinstance(document, dict) else []
+        if found_keys != sorted(
+            test_settings.TEST_FUNCTION_DATA_DOCUMENT_KEYS
+        ):
+            self.fail(
+                f"{label} holds the keys {found_keys}, expected"
+                f" {sorted(test_settings.TEST_FUNCTION_DATA_DOCUMENT_KEYS)}:"
+                f" {raw_data.path}"
+            )
+        counter_count = len(document["counters"])
+        image_count = len(document["images"])
+        function_rows = document["functions"]
+        side_edges: list[set[tuple[int, int, int]]] = []
+        for rows_field in (
+            test_settings.TEST_FUNCTION_DATA_ROW_CALLERS_FIELD,
+            test_settings.TEST_FUNCTION_DATA_ROW_CALLEES_FIELD,
+        ):
+            side_edges.append(set())
+            for row_index, function_row in enumerate(function_rows):
+                if (
+                    len(function_row)
+                    != test_settings.TEST_FUNCTION_DATA_ROW_FIELDS
+                    or not 0
+                    <= function_row[
+                        test_settings.TEST_FUNCTION_DATA_ROW_IMAGE_FIELD
+                    ]
+                    < image_count
+                    or not 0
+                    <= function_row[
+                        test_settings.TEST_FUNCTION_DATA_ROW_FILE_FIELD
+                    ]
+                    < file_count
+                    or len(
+                        function_row[
+                            test_settings.TEST_FUNCTION_DATA_ROW_SELF_FIELD
+                        ]
+                    )
+                    != counter_count
+                ):
+                    self.fail(
+                        f"{label} holds the row {function_row}, expected"
+                        f" {test_settings.TEST_FUNCTION_DATA_ROW_FIELDS}"
+                        " fields, an image"
+                        f" of its {image_count}, a file of the {file_count}"
+                        f" of {test_settings.TEST_PATHS_DOCUMENT_NAME} and"
+                        f" {counter_count} counters: {raw_data.path}"
+                    )
+                call_numbers = function_row[rows_field]
+                pair_fields = test_settings.TEST_FUNCTION_DATA_CALL_PAIR_FIELDS
+                if len(call_numbers) % pair_fields:
+                    self.fail(
+                        f"{label} gives the row {row_index} the"
+                        f" {len(call_numbers)} call numbers {call_numbers},"
+                        f" expected pairs of {pair_fields}: {raw_data.path}"
+                    )
+                for pair_start in range(0, len(call_numbers), pair_fields):
+                    call_pair = call_numbers[
+                        pair_start : pair_start + pair_fields
+                    ]
+                    partner_index, call_count = call_pair
+                    if (
+                        not 0 <= partner_index < len(function_rows)
+                        or call_count <= 0
+                    ):
+                        self.fail(
+                            f"{label} gives the row {row_index} the call"
+                            f" {call_pair}, expected one of its"
+                            f" {len(function_rows)} functions and a call:"
+                            f" {raw_data.path}"
+                        )
+                    side_edges[-1].add(
+                        (partner_index, row_index, call_count)
+                        if rows_field
+                        == test_settings.TEST_FUNCTION_DATA_ROW_CALLERS_FIELD
+                        else (row_index, partner_index, call_count)
+                    )
+        one_sided_edges = sorted(side_edges[0] ^ side_edges[1])
+        if one_sided_edges:
+            self.fail(
+                f"{label} lists {len(one_sided_edges)} calls in the callers or"
+                f" the callees alone, first {one_sided_edges[0]}:"
+                f" {raw_data.path}"
+            )
+        return document
+
+    # Returns the name a report gives each row of function data documents.
+    def function_data_names(self, document: dict[str, Any]) -> list[str]:
+        images = document["images"]
+        base_paths: dict[str, set[str]] = {}
+        for image_path in images:
+            base_paths.setdefault(os.path.basename(image_path), set()).add(
+                image_path
+            )
+        image_names = {
+            image_path: base_name if len(paths) == 1 else image_path
+            for base_name, paths in base_paths.items()
+            for image_path in paths
+        }
+        image_paths: dict[str, set[str]] = {}
+        for function_row in document["functions"]:
+            image_paths.setdefault(
+                function_row[test_settings.TEST_FUNCTION_DATA_ROW_NAME_FIELD],
+                set(),
+            ).add(
+                images[
+                    function_row[
+                        test_settings.TEST_FUNCTION_DATA_ROW_IMAGE_FIELD
+                    ]
+                ]
+            )
+        names: list[str] = []
+        for function_row in document["functions"]:
+            name = function_row[
+                test_settings.TEST_FUNCTION_DATA_ROW_NAME_FIELD
+            ]
+            image_path = images[
+                function_row[test_settings.TEST_FUNCTION_DATA_ROW_IMAGE_FIELD]
+            ]
+            names.append(
+                f"{image_names[image_path]}/{name}"
+                if len(image_paths[name]) > 1
+                else name
+            )
+        return names
+
+    # Returns each report's names of a diff's functions, paired by image.
+    def function_data_pair_names(
+        self,
+        documents: Sequence[dict[str, Any]],
+        build_trees: Sequence[str],
+        label: str,
+    ) -> list[list[str]]:
+        side_rows: dict[str, tuple[dict[str, int], dict[str, int]]] = {}
+        for side, (document, build_tree) in enumerate(
+            zip(documents, build_trees, strict=True)
+        ):
+            for row_index, function_row in enumerate(document["functions"]):
+                image_path = document["images"][
+                    function_row[
+                        test_settings.TEST_FUNCTION_DATA_ROW_IMAGE_FIELD
+                    ]
+                ]
+                side_rows.setdefault(
+                    function_row[
+                        test_settings.TEST_FUNCTION_DATA_ROW_NAME_FIELD
+                    ],
+                    ({}, {}),
+                )[side][image_path.removeprefix(f"{build_tree}/")] = row_index
+        # Each diff function's name, shown image and row in each report.
+        functions: list[tuple[str, str, tuple[int | None, int | None]]] = []
+        for name, (baseline_rows, modified_rows) in side_rows.items():
+            functions.extend(
+                (name, location, (baseline_rows[location], row_index))
+                for location, row_index in modified_rows.items()
+                if location in baseline_rows
+            )
+            baseline_left = [
+                location
+                for location in baseline_rows
+                if location not in modified_rows
+            ]
+            modified_left = [
+                location
+                for location in modified_rows
+                if location not in baseline_rows
+            ]
+            if len(baseline_left) == 1 and len(modified_left) == 1:
+                functions.append(
+                    (
+                        name,
+                        modified_left[0],
+                        (
+                            baseline_rows[baseline_left[0]],
+                            modified_rows[modified_left[0]],
+                        ),
+                    )
+                )
+            elif baseline_left and modified_left:
+                self.fail(
+                    f"{label}: {name} is left at {baseline_left} in the"
+                    f" baseline and at {modified_left} in the modified"
+                    " report, which no pairing resolves"
+                )
+            else:
+                functions.extend(
+                    (name, location, (baseline_rows[location], None))
+                    for location in baseline_left
+                )
+                functions.extend(
+                    (name, location, (None, modified_rows[location]))
+                    for location in modified_left
+                )
+        base_locations: dict[str, set[str]] = {}
+        name_counts: dict[str, int] = {}
+        for name, location, _ in functions:
+            base_locations.setdefault(os.path.basename(location), set()).add(
+                location
+            )
+            name_counts[name] = name_counts.get(name, 0) + 1
+        side_names = [
+            [""] * len(document["functions"]) for document in documents
+        ]
+        for name, location, row_indexes in functions:
+            base_name = os.path.basename(location)
+            image_name = (
+                base_name if len(base_locations[base_name]) == 1 else location
+            )
+            for names, row_index in zip(side_names, row_indexes, strict=True):
+                if row_index is not None:
+                    names[row_index] = (
+                        f"{image_name}/{name}"
+                        if name_counts[name] > 1
+                        else name
+                    )
+        return side_names
+
+    # Checks two golden function data documents' diff and its refusals.
+    def function_diff_check(self) -> None:
+        try:
+            baseline_document, modified_document = (
+                callgrind.function_data_parse(json.dumps(document), name)
+                for document, name in (
+                    (
+                        test_settings.TEST_FUNCTION_DIFF_BASELINE_DOCUMENT,
+                        test_settings.TEST_FUNCTION_DIFF_BASELINE_NAME,
+                    ),
+                    (
+                        test_settings.TEST_FUNCTION_DIFF_MODIFIED_DOCUMENT,
+                        test_settings.TEST_FUNCTION_DIFF_MODIFIED_NAME,
+                    ),
+                )
+            )
+            function_diff = callgrind_diff.CallgrindDiff.function_diff(
+                baseline_document,
+                modified_document,
+                list(test_settings.TEST_FUNCTION_DIFF_BASELINE_PATHS),
+                list(test_settings.TEST_FUNCTION_DIFF_MODIFIED_PATHS),
+                test_settings.TEST_FUNCTION_DIFF_BUILD_TREES,
+            )
+        except SystemExit as error:
+            self.fail(
+                f"the diff of {test_settings.TEST_FUNCTION_DIFF_BASELINE_NAME}"
+                " and"
+                f" {test_settings.TEST_FUNCTION_DIFF_MODIFIED_NAME} is"
+                f" refused: {error}"
+            )
+        found = json.loads(json.dumps(function_diff))
+        if found != test_settings.TEST_FUNCTION_DIFF:
+            self.fail(
+                f"the diff of {test_settings.TEST_FUNCTION_DIFF_BASELINE_NAME}"
+                " and"
+                f" {test_settings.TEST_FUNCTION_DIFF_MODIFIED_NAME} is"
+                f" {found}, expected"
+                f" {test_settings.TEST_FUNCTION_DIFF}"
+            )
+        ambiguous_name = test_settings.TEST_FUNCTION_DIFF_AMBIGUOUS_NAME
+        for image_sets in test_settings.TEST_FUNCTION_DIFF_AMBIGUOUS_CASES:
+            baseline_document, modified_document = (
+                callgrind.function_data_parse(
+                    json.dumps(
+                        {
+                            "counters": ["Ir"],
+                            "images": list(images),
+                            "functions": [
+                                [
+                                    ambiguous_name,
+                                    image_index,
+                                    0,
+                                    1,
+                                    [1],
+                                    [],
+                                    [],
+                                ]
+                                for image_index in range(len(images))
+                            ],
+                        }
+                    ),
+                    name,
+                )
+                for images, name in zip(
+                    image_sets,
+                    (
+                        test_settings.TEST_FUNCTION_DIFF_BASELINE_NAME,
+                        test_settings.TEST_FUNCTION_DIFF_MODIFIED_NAME,
+                    ),
+                    strict=True,
+                )
+            )
+            try:
+                callgrind_diff.CallgrindDiff.function_diff(
+                    baseline_document,
+                    modified_document,
+                    list(test_settings.TEST_FUNCTION_DIFF_AMBIGUOUS_PATHS),
+                    list(test_settings.TEST_FUNCTION_DIFF_AMBIGUOUS_PATHS),
+                    test_settings.TEST_FUNCTION_DIFF_BUILD_TREES,
+                )
+            except SystemExit as error:
+                if str(error).startswith(
+                    test_settings.TEST_FUNCTION_DIFF_AMBIGUOUS_ERROR
+                ):
+                    continue
+                self.fail(
+                    "the diff of"
+                    f" {ambiguous_name} in"
+                    f" {image_sets[0]} and in {image_sets[1]} is refused"
+                    f" with {error}, expected"
+                    f" {test_settings.TEST_FUNCTION_DIFF_AMBIGUOUS_ERROR}"
+                )
+            self.fail(
+                "the diff takes"
+                f" {ambiguous_name} in"
+                f" {image_sets[0]} and in {image_sets[1]}, expected"
+                f" {test_settings.TEST_FUNCTION_DIFF_AMBIGUOUS_ERROR}"
+            )
+
+    # Checks a name two images record is listed under each image, not alone.
+    def function_images_check(
+        self, profile_text: str, out_dir: str, test_name: str, file_name: str
+    ) -> None:
+        spelled_names: dict[str, dict[str, str]] = {}
+        image_paths: dict[str, set[str]] = {}
+        image_path = function_name = ""
+        is_call_line = False
+        for line in profile_text.split("\n"):
+            name_match = re.fullmatch(
+                test_settings.TEST_CALLGRIND_NAME_LINE_PATTERN, line
+            )
+            if name_match:
+                callee_mark, image_key, function_key, ident, spelling = (
+                    name_match.groups()
+                )
+                spelled = spelled_names.setdefault(
+                    image_key or function_key, {}
+                )
+                if ident is None:
+                    name = spelling
+                elif spelling:
+                    name = spelled[ident] = spelling
+                else:
+                    name = spelled[ident]
+                if callee_mark:
+                    continue
+                if image_key:
+                    image_path = name
+                else:
+                    function_name = name
+            elif line.startswith(test_settings.TEST_CALLGRIND_CALLS_PREFIX):
+                is_call_line = True
+            elif re.match(
+                test_settings.TEST_CALLGRIND_COST_LINE_PATTERN, line
+            ):
+                if not is_call_line:
+                    image_paths.setdefault(function_name, set()).add(
+                        image_path
+                    )
+                is_call_line = False
+        base_paths: dict[str, set[str]] = {}
+        for paths in image_paths.values():
+            for path in paths:
+                base_paths.setdefault(os.path.basename(path), set()).add(path)
+        image_names = {
+            path: base_name if len(paths) == 1 else path
+            for base_name, paths in base_paths.items()
+            for path in paths
+        }
+        heat_map_model = self.heat_map_model_read(out_dir, test_name)
+        listed_names = {
+            function_entry["name"]
+            for function_entry in heat_map_model["functions"]
+        }
+        for name, paths in sorted(image_paths.items()):
+            wanted_names = {f"{image_names[path]}/{name}" for path in paths}
+            if len(paths) > 1 and (
+                name in listed_names or not wanted_names <= listed_names
+            ):
+                self.fail(
+                    f"{_HEAT_MAP_MODEL_DIR_NAME}/{test_name}.js lists"
+                    f" {sorted(listed_names & (wanted_names | {name}))},"
+                    f" expected {sorted(wanted_names)}, as {file_name}"
+                    f" records {name} in {sorted(paths)}: {out_dir}"
+                )
+
+    # Checks each function of a golden recording is placed at its line.
+    def function_line_check(self) -> None:
+        heat_map = callgrind_to_heatmap.CallgrindToHeatmap(0)
+        try:
+            profile = callgrind.Callgrind().parse(
+                test_settings.TEST_FUNCTION_LINE_RECORDING,
+                test_settings.TEST_FUNCTION_LINE_RECORDING_NAME,
+            )
+        except SystemExit as error:
+            self.fail(
+                "the parser refuses"
+                f" {test_settings.TEST_FUNCTION_LINE_RECORDING_NAME}:"
+                f" {error}"
+            )
+        found_lines = {
+            name: tuple(heat_map.function_line(profile, name))
+            for name in sorted(profile.function_home)
+        }
+        if found_lines != test_settings.TEST_FUNCTION_LINES:
+            self.fail(
+                f"{test_settings.TEST_FUNCTION_LINE_RECORDING_NAME} places its"
+                " functions"
+                f" at {found_lines}, expected"
+                f" {test_settings.TEST_FUNCTION_LINES}"
+            )
+        try:
+            callgrind.Callgrind().parse(
+                test_settings.TEST_FUNCTION_LINE_RECORDING
+                + test_settings.TEST_FUNCTION_ENTRY_CONFLICT,
+                test_settings.TEST_FUNCTION_LINE_RECORDING_NAME,
+            )
+        except SystemExit:
+            return
+        self.fail(
+            "the parser takes"
+            f" {test_settings.TEST_FUNCTION_LINE_RECORDING_NAME} with"
+            f" {test_settings.TEST_FUNCTION_ENTRY_CONFLICT!r} after it, two"
+            " calls naming"
+            " one function at two entry lines"
+        )
+
+    # Checks no function is listed both alone and under an image's name.
+    def function_names_check(
+        self, database_model: dict[str, Any], label: str, path: str
+    ) -> None:
+        names = {
+            function_link[test_settings.TEST_DATABASE_FUNCTION_NAME_FIELD]
+            for function_link in database_model["functions"]
+        }
+        for name in sorted(names):
+            image_name, separator, bare_name = name.partition("/")
+            if separator and bare_name in names:
+                self.fail(
+                    f"{label} lists {bare_name} both alone and under"
+                    f" {image_name} as {name}: {path}"
+                )
+
+    # Checks each listed call was recorded and each function ran in a file.
+    def heat_map_calls_check(self, filed_model: Any, label: str) -> None:
+        files = filed_model["files"]
+        functions = filed_model["functions"]
+        call_rows = [
+            (f"{path}:{line}", call_row)
+            for path, file_entry in files.items()
+            for line, line_rows in file_entry["callees"].items()
+            for call_row in line_rows
+        ] + [
+            (function_entry["name"], call_row)
+            for function_entry in functions
+            for call_row in function_entry["callers"]
+        ]
+        for place, call_row in call_rows:
+            count = call_row[test_settings.TEST_HEAT_MAP_CALL_ROW_COUNT_FIELD]
+            if count <= 0:
+                listed_function = functions[
+                    call_row[
+                        test_settings.TEST_HEAT_MAP_CALL_ROW_FUNCTION_FIELD
+                    ]
+                ]
+                self.fail(
+                    f"{label}: {place} lists a call row of"
+                    f" {listed_function['name']} counting {count} calls"
+                )
+        for function_entry in functions:
+            if not any(function_entry["self"]):
+                self.fail(
+                    f"{label}: {function_entry['name']} holds no self cost"
+                )
+            if function_entry["file"] not in files:
+                self.fail(
+                    f"{label}: {function_entry['name']} is placed in"
+                    f" {function_entry['file']!r}, a file the model lacks"
+                )
+
     def heat_map_check(
         self,
         out_dir: str,
@@ -811,10 +1587,10 @@ class TestReport:
         text = self.page_check(
             path,
             f"{_HEAT_MAP_VIEW_KEY}/index.html",
-            _TEST_HEAT_MAP_PAGE_LEAST_BYTES,
-            _HEAT_MAP_PAGE_TITLE,
+            test_settings.TEST_HEAT_MAP_PAGE_LEAST_BYTES,
+            test_settings.HEAT_MAP_PAGE_TITLE,
         )
-        if text and "report_ui_.layout_activate" not in text:
+        if "report_ui_.layout_activate" not in text:
             self.fail(
                 f"{_HEAT_MAP_VIEW_KEY}/index.html is missing its runtime"
                 f" script (no report_ui_.layout_activate): {path}"
@@ -822,7 +1598,6 @@ class TestReport:
         model_dir = os.path.join(heat_map_dir, _HEAT_MAP_MODEL_DIR_NAME)
         if not os.path.isdir(model_dir):
             self.fail(f"no heat map model scripts: {model_dir}")
-            return
         found_names = sorted(os.listdir(model_dir))
         wanted_names = sorted(f"{test_name}.js" for test_name in tests)
         if found_names != wanted_names:
@@ -834,16 +1609,12 @@ class TestReport:
             script_path = os.path.join(model_dir, f"{test_name}.js")
             script = self.size_check(
                 script_path,
-                _TEST_HEAT_MAP_MODEL_LEAST_BYTES,
+                test_settings.TEST_HEAT_MAP_MODEL_LEAST_BYTES,
                 f"{_HEAT_MAP_MODEL_DIR_NAME}/{test_name}.js",
             )
-            if not script:
-                continue
             filed_model = self.script_value(
                 script, _HEAT_MAP_MODEL_GLOBAL_NAME, test_name, script_path
             )
-            if filed_model is None:
-                continue
             if (
                 not {"heatMapTotals", "files", "functions"}
                 <= filed_model.keys()
@@ -853,22 +1624,42 @@ class TestReport:
                     f" model lacking heatMapTotals, files or functions:"
                     f" {script_path}"
                 )
-                continue
             self.model_sources_check(
                 out_dir,
                 filed_model,
                 f"{_HEAT_MAP_MODEL_DIR_NAME}/{test_name}.js",
             )
+            if layout.is_regular_report:
+                self.heat_map_calls_check(
+                    filed_model, f"{_HEAT_MAP_MODEL_DIR_NAME}/{test_name}.js"
+                )
             if layout.has_baselines:
                 self.diff_baseline_check(
                     filed_model, f"{_HEAT_MAP_MODEL_DIR_NAME}/{test_name}.js"
                 )
 
+    # Returns a test's heat map model.
+    def heat_map_model_read(self, out_dir: str, test_name: str) -> Any:
+        model_label = f"{_HEAT_MAP_MODEL_DIR_NAME}/{test_name}.js"
+        model_path = os.path.join(
+            out_dir,
+            _HEAT_MAP_VIEW_KEY,
+            _HEAT_MAP_MODEL_DIR_NAME,
+            f"{test_name}.js",
+        )
+        script = self.size_check(
+            model_path,
+            test_settings.TEST_HEAT_MAP_MODEL_LEAST_BYTES,
+            model_label,
+        )
+        return self.script_value(
+            script, _HEAT_MAP_MODEL_GLOBAL_NAME, test_name, model_path
+        )
+
     def home_dir_check(self, out_dir: str) -> None:
         home = os.path.expanduser("~")
         if home == "~":
             self.fail("no home directory to check the report against")
-            return
         for root, _dirs, names in os.walk(out_dir):
             for name in names:
                 path = os.path.join(root, name)
@@ -887,15 +1678,8 @@ class TestReport:
     ) -> None:
         path = os.path.join(out_dir, "MANIFEST.txt")
         text = self.size_check(
-            path, _TEST_MANIFEST_LEAST_BYTES, "MANIFEST.txt"
+            path, test_settings.TEST_MANIFEST_LEAST_BYTES, "MANIFEST.txt"
         )
-        if not text:
-            self.fail(
-                "MANIFEST.txt is missing or unreadable, so this is not a"
-                f" finished report; expected its first line to be"
-                f" {layout.manifest_version!r}: {path}"
-            )
-            return
         first = text.split("\n", 1)[0]
         if first != layout.manifest_version:
             self.fail(
@@ -924,9 +1708,8 @@ class TestReport:
                 f" beside the version line {layout.manifest_version!r}:"
                 f" {path}"
             )
-            return
         found = self.checksum_compute(out_dir)
-        if found and found != recorded:
+        if found != recorded:
             self.fail(
                 "this report does not match its recorded"
                 f" {_REPORT_MANIFEST_CHECKSUM_LABEL}: found {found!r},"
@@ -935,12 +1718,44 @@ class TestReport:
                 f" after the report was written: {out_dir}"
             )
 
+    # Returns a report's build tree, its executable's path less the tool's.
+    def manifest_build_tree(self, text: str, path: str) -> str:
+        executable = self.manifest_value(
+            text, test_settings.TEST_MANIFEST_EXECUTABLE_LABEL
+        )
+        build_tree = executable.removesuffix(
+            f"/{test_settings.TEST_PERF_TOOL_TREE_PATH}"
+        )
+        if not executable or build_tree == executable:
+            self.fail(
+                f"MANIFEST.txt {test_settings.TEST_MANIFEST_EXECUTABLE_LABEL}="
+                " row is"
+                f" {executable!r}, no path ending in"
+                f" {test_settings.TEST_PERF_TOOL_TREE_PATH}: {path}"
+            )
+        return build_tree
+
     def manifest_recorded_value(self, text: str, label: str) -> str:
         return self.manifest_value(text, label).split(" ", 1)[0]
 
     def manifest_value(self, text: str, label: str) -> str:
         match = re.search(rf"^{re.escape(label)}=(.*)$", text, re.M)
         return match.group(1).strip() if match else ""
+
+    # Faults the first name two mappings give apart.
+    def mappings_compare(
+        self,
+        found: dict[str, Any],
+        wanted: dict[str, Any],
+        label: str,
+        path: str,
+    ) -> None:
+        for name in sorted(found.keys() | wanted.keys()):
+            if found.get(name) != wanted.get(name):
+                self.fail(
+                    f"{label} gives {name} {found.get(name)!r}, expected"
+                    f" {wanted.get(name)!r}: {path}"
+                )
 
     def member_text(
         self, archive: tarfile.TarFile, member: tarfile.TarInfo
@@ -964,7 +1779,6 @@ class TestReport:
         )
         if not match:
             self.fail(f"overview index.html has no empty menu strip: {path}")
-            return
         found = {
             name: html.unescape(value)
             for name, value in re.findall(
@@ -973,7 +1787,10 @@ class TestReport:
         }
         wanted = {
             "data-counter-names-": json.dumps(
-                [*recorded_counter_names, *_TEST_DERIVED_COUNTER_NAMES]
+                [
+                    *recorded_counter_names,
+                    *test_settings.TEST_DERIVED_COUNTER_NAMES,
+                ]
             ),
             "data-help-href-": help_name,
             "data-regular-report-": "1" if layout.is_regular_report else "0",
@@ -985,6 +1802,14 @@ class TestReport:
                 f" expected {wanted}: {path}"
             )
 
+    # Returns a list of names, failing on any other value.
+    def names_list_check(self, names: Any, label: str, path: str) -> list[str]:
+        if not isinstance(names, list) or not all(
+            isinstance(name, str) for name in names
+        ):
+            self.fail(f"{label} holds no list of strings: {path}")
+        return names
+
     def overview_check(
         self,
         out_dir: str,
@@ -993,38 +1818,28 @@ class TestReport:
         help_name: str,
     ) -> None:
         path = os.path.join(out_dir, "index.html")
-        text = self.page_check(
+        self.page_check(
             path,
             "index.html",
-            _TEST_OVERVIEW_PAGE_LEAST_BYTES,
-            _TEST_OVERVIEW_PAGE_TITLE,
+            test_settings.TEST_OVERVIEW_PAGE_LEAST_BYTES,
+            test_settings.TEST_OVERVIEW_PAGE_TITLE,
         )
-        if not text:
-            return
         with open(path, encoding="utf-8") as handle:
             page_text = handle.read()
-        if _TEST_OVERVIEW_TESTS_HEADING_MARKUP not in page_text:
+        if test_settings.TEST_OVERVIEW_TESTS_HEADING_MARKUP not in page_text:
             self.fail(f"overview index.html has no 'tests' section: {path}")
-        tests_attributes = self.element_attributes(
-            page_text, _TEST_OVERVIEW_TESTS_TABLE_DATA_ID
-        )
-        if (
-            tests_attributes is not None
-            and tests_attributes.get("data-diff-") != layout.table_diff_value
-        ):
+        tests_attributes = self.overview_tests_attributes(page_text, path)
+        if "data-diff-" in tests_attributes:
             self.fail(
-                "overview index.html's tests table data holds data-diff-"
-                f" {tests_attributes.get('data-diff-')!r}, expected"
-                f" {layout.table_diff_value!r}: {path}"
+                "overview index.html's tests table data holds data-diff-,"
+                f" which both reports' one column list leaves out: {path}"
             )
-        if tests_attributes is not None:
-            self.overview_columns_check(tests_attributes, layout, path)
         self.overview_sections_check(page_text, layout, path)
         page_hrefs = self.overview_tests_hrefs(page_text, path)
         for test_name in tests:
             if (
-                f"#test={test_name}&view={_TEST_DATABASE_VIEW_KEY}"
-                not in page_hrefs
+                f"#test={test_name}&view="
+                f"{test_settings.TEST_DATABASE_VIEW_KEY}" not in page_hrefs
             ):
                 self.fail(
                     "overview index.html is missing its"
@@ -1044,68 +1859,173 @@ class TestReport:
                     "overview index.html has no header block heading"
                     f" {heading!r}: {path}"
                 )
-        self.timer_artifacts_check(out_dir, page_text, tests, layout)
+        timing_document = self.timer_artifacts_check(
+            out_dir, page_text, tests, layout
+        )
+        self.overview_columns_check(
+            tests_attributes, layout, timing_document, path
+        )
 
-    # Checks each regular tests row holds a time per loop and ratio cells.
+    # Checks each tests row, a regular one's values, a diff one's changes.
     def overview_columns_check(
         self,
         attributes: dict[str, str],
         layout: TestReport.ReportLayout,
+        timing_document: dict[str, dict[str, float]] | None,
         path: str,
     ) -> None:
-        if not layout.is_regular_report:
-            return
+        ratio_fields = test_settings.TEST_OVERVIEW_RATIO_FIELDS
+        value_fields = test_settings.TEST_OVERVIEW_VALUE_FIELDS
         for table_row in self.table_data_rows(
             attributes, "overview index.html", path
         ):
-            if len(table_row) != _TEST_OVERVIEW_ROW_FIELD_COUNT:
+            if len(table_row) != test_settings.TEST_OVERVIEW_ROW_FIELD_COUNT:
                 self.fail(
                     f"overview index.html's tests row {table_row} has"
                     f" {len(table_row)} cells, expected"
-                    f" {_TEST_OVERVIEW_ROW_FIELD_COUNT}: {path}"
+                    f" {test_settings.TEST_OVERVIEW_ROW_FIELD_COUNT}: {path}"
                 )
-                continue
-            time_text = table_row[_TEST_OVERVIEW_TIME_PER_LOOP_FIELD]
-            if not isinstance(time_text, str) or not re.fullmatch(
-                _TEST_OVERVIEW_TIME_PER_LOOP_PATTERN, time_text
-            ):
+            field_patterns = (
+                [
+                    (
+                        test_settings.TEST_OVERVIEW_TIME_PER_LOOP_FIELD,
+                        test_settings.TEST_OVERVIEW_TIME_PER_LOOP_PATTERN,
+                    ),
+                    *(
+                        (
+                            ratio_field,
+                            test_settings.TEST_OVERVIEW_RATIO_PATTERN,
+                        )
+                        for ratio_field in ratio_fields
+                    ),
+                ]
+                if layout.is_regular_report
+                else [
+                    (change_field, test_settings.TEST_OVERVIEW_CHANGE_PATTERN)
+                    for change_field in value_fields
+                ]
+            )
+            for value_field, value_pattern in field_patterns:
+                value_text = (
+                    table_row[value_field]
+                    if layout.is_regular_report
+                    else self.overview_change_text(table_row[value_field])
+                )
+                if not isinstance(value_text, str) or not re.fullmatch(
+                    value_pattern, value_text
+                ):
+                    cell_text = (
+                        ""
+                        if layout.is_regular_report
+                        else test_settings.TEST_OVERVIEW_CHANGE_CELL_TEXT
+                    )
+                    self.fail(
+                        f"overview index.html's tests row {table_row} holds"
+                        f" {table_row[value_field]!r} in cell {value_field},"
+                        f" expected {value_pattern}{cell_text}: {path}"
+                    )
+            else:
+                if timing_document is not None:
+                    self.overview_values_check(
+                        table_row, timing_document, path
+                    )
+
+    # Returns a diff change cell's text, none for a heat cell unlike its text.
+    def overview_change_text(self, change_cell: Any) -> str | None:
+        if change_cell == "":
+            return change_cell
+        if not isinstance(change_cell, dict) or set(change_cell) != {
+            "text",
+            "heat_percent",
+        }:
+            return None
+        change_text, heat_percent = (
+            change_cell["text"],
+            change_cell["heat_percent"],
+        )
+        if (
+            not isinstance(change_text, str)
+            or type(heat_percent) not in (int, float)
+            or not math.isfinite(heat_percent)
+        ):
+            return None
+        arrow_sign = (
+            1
+            if change_text.startswith("▲")
+            else -1
+            if change_text.startswith("▼")
+            else 0
+        )
+        if arrow_sign != (heat_percent > 0) - (heat_percent < 0):
+            return None
+        percent_match = re.fullmatch(r"[▲▼] *(-?\d+\.\d{2})%", change_text)
+        if percent_match and (
+            abs(float(percent_match.group(1)) - heat_percent)
+            > test_settings.TEST_OVERVIEW_CHANGE_LARGEST_ERROR
+        ):
+            return None
+        return change_text
+
+    # Checks a regular row's cells print its timing document's values.
+    def overview_values_check(
+        self,
+        table_row: list[Any],
+        timing_document: dict[str, dict[str, float]],
+        path: str,
+    ) -> None:
+        test_name = (
+            table_row[0].get("text", "")
+            if isinstance(table_row[0], dict)
+            else ""
+        )
+        if test_name not in timing_document:
+            self.fail(
+                f"overview index.html's tests row {table_row} names no test"
+                f" of {test_settings.TEST_TIMING_DOCUMENT_NAME}: {path}"
+            )
+        for value_field, value_name in zip(
+            test_settings.TEST_OVERVIEW_VALUE_FIELDS,
+            test_settings.TEST_TIMING_VALUE_NAMES,
+            strict=True,
+        ):
+            value = timing_document[test_name][value_name]
+            value_text = table_row[value_field]
+            unit_seconds = 1.0
+            largest_error = test_settings.TEST_OVERVIEW_RATIO_LARGEST_ERROR
+            is_time = (
+                value_field == test_settings.TEST_OVERVIEW_TIME_PER_LOOP_FIELD
+            )
+            if is_time and value_text:
+                unit_text = value_text.lstrip("0123456789.")
+                unit_seconds = test_settings.TEST_OVERVIEW_TIME_UNIT_SECONDS[
+                    unit_text
+                ]
+                value_text = value_text.removesuffix(unit_text)
+                largest_error = test_settings.TEST_OVERVIEW_TIME_LARGEST_ERROR
+            if value:
+                is_printed = bool(value_text) and (
+                    abs(float(value_text) * unit_seconds - value)
+                    <= largest_error * unit_seconds
+                )
+            else:
+                is_printed = not value_text
+            if not is_printed:
                 self.fail(
-                    f"overview index.html's tests row {table_row} holds the"
-                    f" time per loop {time_text!r}, expected"
-                    f" {_TEST_OVERVIEW_TIME_PER_LOOP_PATTERN}: {path}"
+                    f"overview index.html's tests row {table_row} prints"
+                    f" {value_name} {value} of"
+                    f" {test_settings.TEST_TIMING_DOCUMENT_NAME}"
+                    f" as {table_row[value_field]!r}: {path}"
                 )
-            for ratio_field in _TEST_OVERVIEW_COUNTER_RATIO_FIELDS:
-                ratio_text = table_row[ratio_field]
-                if not isinstance(ratio_text, str) or not re.fullmatch(
-                    _TEST_OVERVIEW_COUNTER_RATIO_PATTERN, ratio_text
-                ):
-                    self.fail(
-                        f"overview index.html's tests row {table_row} holds"
-                        f" the counter ratio {ratio_text!r} in cell"
-                        f" {ratio_field}, expected"
-                        f" {_TEST_OVERVIEW_COUNTER_RATIO_PATTERN}: {path}"
-                    )
-            for metric_field in _TEST_OVERVIEW_PERF_METRIC_FIELDS:
-                metric_text = table_row[metric_field]
-                if not isinstance(metric_text, str) or not re.fullmatch(
-                    _TEST_OVERVIEW_PERF_METRIC_PATTERN, metric_text
-                ):
-                    self.fail(
-                        f"overview index.html's tests row {table_row} holds"
-                        f" the perf metric {metric_text!r} in cell"
-                        f" {metric_field}, expected"
-                        f" {_TEST_OVERVIEW_PERF_METRIC_PATTERN}: {path}"
-                    )
 
     # Checks the overview shows its tests, then its manifest, then raw data.
     def overview_sections_check(
         self, page_text: str, layout: TestReport.ReportLayout, path: str
     ) -> None:
         section_markups = (
-            _TEST_OVERVIEW_TESTS_HEADING_MARKUP,
+            test_settings.TEST_OVERVIEW_TESTS_HEADING_MARKUP,
             *layout.header_blocks,
             *(
-                (_TEST_OVERVIEW_RAW_DATA_MARKUP,)
+                (test_settings.TEST_OVERVIEW_RAW_DATA_MARKUP,)
                 if layout.has_timer_artifacts
                 else ()
             ),
@@ -1124,7 +2044,8 @@ class TestReport:
         linked_names: set[str] = set()
         for href in self.overview_tests_hrefs(text, index_path):
             match = re.fullmatch(
-                rf"#test=([\w.-]+)&view={re.escape(_TEST_DATABASE_VIEW_KEY)}",
+                r"#test=([\w.-]+)&view="
+                f"{re.escape(test_settings.TEST_DATABASE_VIEW_KEY)}",
                 href,
             )
             if not match or match.group(1) in linked_names:
@@ -1137,23 +2058,32 @@ class TestReport:
                     f"overview index.html links {href}, and there is no"
                     f" {database_page_path}: {index_path}"
                 )
-                continue
             names.append(test_name)
         return names
 
-    # Returns every address the overview's tests table data links.
-    def overview_tests_hrefs(self, page_text: str, path: str) -> list[str]:
+    # Returns the attributes of the overview's tests table data.
+    def overview_tests_attributes(
+        self, page_text: str, path: str
+    ) -> dict[str, str]:
         attributes = self.element_attributes(
-            page_text, _TEST_OVERVIEW_TESTS_TABLE_DATA_ID
+            page_text, test_settings.TEST_OVERVIEW_TESTS_TABLE_DATA_ID
         )
         if attributes is None:
             self.fail(
                 "overview index.html has no"
-                f" {_TEST_OVERVIEW_TESTS_TABLE_DATA_ID} table data: {path}"
+                f" {test_settings.TEST_OVERVIEW_TESTS_TABLE_DATA_ID} table"
+                f" data: {path}"
             )
-            return []
+        return attributes
+
+    # Returns every address the overview's tests table data links.
+    def overview_tests_hrefs(self, page_text: str, path: str) -> list[str]:
         return self.table_data_hrefs(
-            self.table_data_rows(attributes, "overview index.html", path)
+            self.table_data_rows(
+                self.overview_tests_attributes(page_text, path),
+                "overview index.html",
+                path,
+            )
         )
 
     def page_check(
@@ -1164,8 +2094,6 @@ class TestReport:
         want_title: str | None = None,
     ) -> str:
         text = self.size_check(path, min_bytes, label)
-        if not text:
-            return text
         if "<title>" not in text:
             self.fail(f"{label} has no <title>: {path}")
         elif want_title is not None:
@@ -1185,13 +2113,14 @@ class TestReport:
             r'<script src="(?:[^"]*/)?([^"/]+)"',
             head_match.group(1) if head_match else "",
         )
-        preamble_count = len(_TEST_PAGE_PREAMBLE_SCRIPT_NAMES)
+        preamble_count = len(test_settings.TEST_PAGE_PREAMBLE_SCRIPT_NAMES)
         if tuple(head_scripts[:preamble_count]) != (
-            _TEST_PAGE_PREAMBLE_SCRIPT_NAMES
+            test_settings.TEST_PAGE_PREAMBLE_SCRIPT_NAMES
         ):
             self.fail(
                 f"{label} head opens with the scripts {head_scripts}, expected"
-                f" {list(_TEST_PAGE_PREAMBLE_SCRIPT_NAMES)}: {path}"
+                f" {list(test_settings.TEST_PAGE_PREAMBLE_SCRIPT_NAMES)}:"
+                f" {path}"
             )
         for marker in (
             "__DATA__",
@@ -1224,40 +2153,105 @@ class TestReport:
             match = re.search(r"<title>(.*?)</title>", handle.read())
         return match.group(1) if match else None
 
-    # Checks the paths document a diff derives from the archive.
+    # Returns the paths document a diff derives from the archive, in order.
     def paths_document_check(
         self, text: str | None, archive_name: str, paths_name: str, path: str
-    ) -> None:
+    ) -> list[tuple[str, str]]:
         if text is None:
             self.fail(f"{archive_name} holds no {paths_name}: {path}")
-            return
         try:
             document = json.loads(text)
         except ValueError as error:
             self.fail(f"{paths_name} holds no JSON: {error}: {path}")
-            return
-        if not isinstance(document, dict):
-            self.fail(f"{paths_name} holds no path to code map: {path}")
-            return
-        for file_path, code in sorted(document.items()):
-            if code not in _TEST_PATHS_DOCUMENT_CODES:
+        if not isinstance(document, list):
+            self.fail(f"{paths_name} holds no array of paths: {path}")
+        file_entries: list[tuple[str, str]] = []
+        path_key, code_key = test_settings.TEST_PATHS_DOCUMENT_KEYS
+        for file_entry in document:
+            entry_keys = (
+                sorted(file_entry) if isinstance(file_entry, dict) else []
+            )
+            if entry_keys != sorted(test_settings.TEST_PATHS_DOCUMENT_KEYS):
+                self.fail(
+                    f"{paths_name} holds {file_entry!r}, expected an object"
+                    " of the keys"
+                    f" {' '.join(test_settings.TEST_PATHS_DOCUMENT_KEYS)}:"
+                    f" {path}"
+                )
+            file_path, code = file_entry[path_key], file_entry[code_key]
+            if code not in test_settings.TEST_PATHS_DOCUMENT_CODES:
                 self.fail(
                     f"{paths_name} codes {file_path} as {code!r}, not one of"
-                    f" {' '.join(_TEST_PATHS_DOCUMENT_CODES)}: {path}"
+                    f" {' '.join(test_settings.TEST_PATHS_DOCUMENT_CODES)}:"
+                    f" {path}"
                 )
-                return
             if file_path != os.path.normpath(file_path).lstrip("/"):
                 self.fail(
-                    f"{paths_name} keys {file_path}, which is no canonical"
+                    f"{paths_name} lists {file_path}, which is no canonical"
                     f" path: {path}"
                 )
-                return
+            if file_entries and file_path <= file_entries[-1][0]:
+                self.fail(
+                    f"{paths_name} lists {file_path} after"
+                    f" {file_entries[-1][0]}, out of path order: {path}"
+                )
+            file_entries.append((file_path, code))
+        return file_entries
+
+    # Checks the parser reads a recording without writing to stderr.
+    def profile_quiet_check(
+        self, text: str, archive_name: str, file_name: str, path: str
+    ) -> None:
+        written = io.StringIO()
+        with contextlib.redirect_stderr(written):
+            callgrind.Callgrind().parse(text, file_name)
+        if written.getvalue():
+            self.fail(
+                f"{archive_name}: parsing {file_name} wrote"
+                f" {written.getvalue()!r} to stderr: {path}"
+            )
+
+    # Returns each file of a regular report's raw data archive by its name.
+    def raw_data_texts(self, report_dir: str) -> TestReport.RawData:
+        manifest_path = os.path.join(report_dir, "MANIFEST.txt")
+        try:
+            with open(manifest_path, encoding="utf-8") as handle:
+                manifest_text = handle.read()
+        except OSError as error:
+            self.fail(f"no report manifest: {error}: {manifest_path}")
+        recorded_time = self.manifest_recorded_value(
+            manifest_text, _LAYOUT_FULL.manifest_recorded_labels[0]
+        )
+        archive_name = (
+            f"{test_settings.TEST_TIMER_ARTIFACTS_PREFIX}{recorded_time}"
+            f"{_REPORT_RAW_ARCHIVE_SUFFIX}"
+        )
+        path = os.path.join(report_dir, archive_name)
+        try:
+            with tarfile.open(path, "r:xz") as archive:
+                texts = {
+                    os.path.basename(member.name): self.member_text(
+                        archive, member
+                    )
+                    for member in archive.getmembers()
+                    if member.isfile()
+                }
+        except (OSError, tarfile.TarError) as error:
+            self.fail(
+                f"{archive_name} is not readable as tar.xz: {error}: {path}"
+            )
+        return TestReport.RawData(
+            archive_name,
+            path,
+            texts,
+            self.manifest_build_tree(manifest_text, manifest_path),
+        )
 
     # Faults a README page missing or unasked for, returning the help link.
     def readme_check(self, out_dir: str, has_readme_html: bool) -> str:
         for name, is_wanted in (
-            (_TEST_README_MARKDOWN_NAME, True),
-            (_TEST_README_HTML_NAME, has_readme_html),
+            (test_settings.TEST_README_MARKDOWN_NAME, True),
+            (test_settings.TEST_README_HTML_NAME, has_readme_html),
         ):
             if os.path.isfile(os.path.join(out_dir, name)) != is_wanted:
                 self.fail(
@@ -1265,9 +2259,9 @@ class TestReport:
                     f" {out_dir}"
                 )
         return (
-            _TEST_README_HTML_NAME
+            test_settings.TEST_README_HTML_NAME
             if has_readme_html
-            else _TEST_README_MARKDOWN_NAME
+            else test_settings.TEST_README_MARKDOWN_NAME
         )
 
     # Returns the recorded counters the database pages draw, faulting changes.
@@ -1280,11 +2274,10 @@ class TestReport:
             path = os.path.join(out_dir, label)
             with open(path, encoding="utf-8") as handle:
                 attributes = self.element_attributes(
-                    handle.read(), _TEST_DATABASE_MODEL_ID
+                    handle.read(), test_settings.TEST_DATABASE_MODEL_ID
                 )
             if attributes is None or "data-model-" not in attributes:
                 self.fail(f"{label} holds no database model: {path}")
-                break
             database_model = json.loads(attributes["data-model-"])
             counter_names = database_model["counterNames"]
             if test_name == tests[0]:
@@ -1294,7 +2287,6 @@ class TestReport:
                     f"{label} draws the counters {counter_names}, expected"
                     f" {tests[0]}'s {first_names}: {path}"
                 )
-                break
         return first_names
 
     def run(self, args: TestReport.TestArgs) -> int:
@@ -1311,15 +2303,36 @@ class TestReport:
         if name is None:
             print(f"error: no <title> in {index_path}", file=sys.stderr)
             return 1
-        if name != _TEST_OVERVIEW_PAGE_TITLE:
+        if name != test_settings.TEST_OVERVIEW_PAGE_TITLE:
             print(
                 f"error: <title> {name!r}, expected"
-                f" {_TEST_OVERVIEW_PAGE_TITLE!r}: {index_path}",
+                f" {test_settings.TEST_OVERVIEW_PAGE_TITLE!r}: {index_path}",
                 file=sys.stderr,
             )
             return 1
         layout = _LAYOUT_DIFF if args.diff else _LAYOUT_FULL
+        regular_dirs = [
+            os.path.abspath(path)
+            for path in (args.baseline, args.modified)
+            if path
+        ]
+        if len(regular_dirs) != (2 if layout.has_baselines else 0):
+            print(
+                f"error: --baseline {args.baseline!r} and --modified"
+                f" {args.modified!r} name a diff's two reports, a diff"
+                f" needing both and a regular report neither: {out_dir}",
+                file=sys.stderr,
+            )
+            return 2
+        regular_data = [
+            self.raw_data_texts(regular_dir) for regular_dir in regular_dirs
+        ]
 
+        self.shared_images_check()
+        self.function_line_check()
+        self.delta_home_check()
+        self.function_data_builder_check()
+        self.function_diff_check()
         self.home_dir_check(out_dir)
         self.manifest_check(out_dir, layout)
         tests = self.overview_test_names(index_path, out_dir)
@@ -1328,20 +2341,12 @@ class TestReport:
         if layout.is_regular_report:
             self.flame_app_check(out_dir)
         self.heat_map_check(out_dir, tests, layout)
-        self.source_database_check(out_dir)
+        self.source_database_check(out_dir, tests)
         traced_tests = tests if layout.test_records_runs else []
         self.flame_graph_check(out_dir, traced_tests, layout)
         for test_name in tests:
-            self.test_report_check(out_dir, test_name, layout)
+            self.test_report_check(out_dir, test_name, layout, regular_data)
 
-        if self.errors:
-            print(
-                f"test_report: {len(self.errors)} problem(s) in {out_dir}:",
-                file=sys.stderr,
-            )
-            for error in self.errors:
-                print(f"  - {error}", file=sys.stderr)
-            return 1
         if args.verbose:
             print(f"test_report: ok ({out_dir})")
         return 0
@@ -1349,7 +2354,7 @@ class TestReport:
     # Returns the object a script assigns, a test's entry when a test is named.
     def script_value(
         self, script: str, global_name: str, test_name: str | None, path: str
-    ) -> dict[str, object] | None:
+    ) -> dict[str, object]:
         assignment_target = f"window.{global_name}"
         if test_name is not None:
             assignment_target += f'["{test_name}"]'
@@ -1365,15 +2370,37 @@ class TestReport:
                 self.fail(
                     f"{assignment_prefix!r} holds no JSON: {error}: {path}"
                 )
-                return None
             if not isinstance(filed_value, dict):
                 self.fail(
                     f"{assignment_prefix!r} holds no JSON object: {path}"
                 )
-                return None
             return filed_value
         self.fail(f"no {assignment_prefix!r} line: {path}")
-        return None
+
+    # Checks two images of one file name are told apart by their paths.
+    def shared_images_check(self) -> None:
+        try:
+            profile = callgrind.Callgrind().parse(
+                test_settings.TEST_SHARED_IMAGES_RECORDING,
+                test_settings.TEST_SHARED_IMAGES_RECORDING_NAME,
+            )
+        except SystemExit as error:
+            self.fail(
+                "the parser refuses"
+                f" {test_settings.TEST_SHARED_IMAGES_RECORDING_NAME},"
+                f" two images of one file name recording one name: {error}"
+            )
+        found_names = sorted(profile.function_home)
+        if found_names != sorted(
+            test_settings.TEST_SHARED_IMAGES_FUNCTION_NAMES
+        ):
+            self.fail(
+                f"the parser names the functions of"
+                f" {test_settings.TEST_SHARED_IMAGES_RECORDING_NAME}"
+                f" {found_names},"
+                " expected"
+                f" {sorted(test_settings.TEST_SHARED_IMAGES_FUNCTION_NAMES)}"
+            )
 
     def size_check(self, path: str, min_bytes: int, label: str) -> str:
         try:
@@ -1382,7 +2409,6 @@ class TestReport:
                 text = handle.read()
         except OSError as error:
             self.fail(f"{label}: {path}: {error}")
-            return ""
         if size < min_bytes:
             self.fail(
                 f"{label} suspiciously small ({size} bytes <"
@@ -1397,7 +2423,6 @@ class TestReport:
         files = filed_model["files"]
         if not isinstance(files, dict):
             self.fail(f"{label} files no file table")
-            return
         for display, file_entry in files.items():
             script_name = file_entry["source"]
             if script_name is None:
@@ -1407,33 +2432,135 @@ class TestReport:
                 self.fail(f"{label} names {display!r} source {path}, absent")
 
     # Checks the list of every file and function the report's tests name.
-    def source_database_check(self, out_dir: str) -> None:
-        label = _TEST_SOURCE_DATABASE_SCRIPT_PATH
+    def source_database_check(
+        self, out_dir: str, tests: Sequence[str]
+    ) -> None:
+        label = test_settings.TEST_SOURCE_DATABASE_SCRIPT_PATH
         path = os.path.join(out_dir, label)
         script = self.size_check(
-            path, _TEST_SOURCE_DATABASE_LEAST_BYTES, label
+            path, test_settings.TEST_SOURCE_DATABASE_LEAST_BYTES, label
         )
-        if not script:
-            return
         database = self.script_value(
-            script, _TEST_SOURCE_DATABASE_GLOBAL_NAME, None, path
+            script, test_settings.TEST_SOURCE_DATABASE_GLOBAL_NAME, None, path
         )
-        if database is None:
-            return
         found_keys = sorted(database)
-        if found_keys != sorted(_TEST_SOURCE_DATABASE_KEYS):
+        wanted_keys = sorted(
+            [
+                *test_settings.TEST_SOURCE_DATABASE_KEYS,
+                *test_settings.TEST_SOURCE_DATABASE_TEST_KEYS,
+            ]
+        )
+        if found_keys != wanted_keys:
             self.fail(
                 f"{label} holds the keys {found_keys}, expected"
-                f" {sorted(_TEST_SOURCE_DATABASE_KEYS)}: {path}"
+                f" {wanted_keys}: {path}"
             )
-            return
-        for key in _TEST_SOURCE_DATABASE_KEYS:
-            names = database[key]
-            if not isinstance(names, list) or not all(
-                isinstance(name, str) for name in names
+        listed: dict[str, list[str]] = {}
+        for key in test_settings.TEST_SOURCE_DATABASE_KEYS:
+            listed[key] = self.names_list_check(
+                database[key], f"{label} {key}", path
+            )
+        for file_name in listed["files"]:
+            if (
+                file_name.split("/")[0]
+                in test_settings.TEST_UNKNOWN_IMAGE_NAMES
             ):
-                self.fail(f"{label} {key} holds no list of strings: {path}")
-                return
+                self.fail(
+                    f"{label} lists {file_name!r}, a file in no known image:"
+                    f" {path}"
+                )
+        if test_settings.TEST_BELOW_MAIN_FUNCTION_NAME in listed["functions"]:
+            self.fail(
+                f"{label} lists"
+                f" {test_settings.TEST_BELOW_MAIN_FUNCTION_NAME!r}, valgrind's"
+                f" name for every function below main: {path}"
+            )
+        test_keys = test_settings.TEST_SOURCE_DATABASE_TEST_KEYS
+        counted: dict[str, dict[str, list[str]]] = {}
+        for key, union_key in test_keys.items():
+            by_test = database[key]
+            if not isinstance(by_test, dict):
+                self.fail(f"{label} {key} holds no map of tests: {path}")
+            counted[key] = by_test
+            if sorted(by_test) != sorted(tests):
+                self.fail(
+                    f"{label} {key} names the tests {sorted(by_test)},"
+                    f" expected {sorted(tests)}: {path}"
+                )
+            for test_name, names in by_test.items():
+                test_label = f"{label} {key} {test_name}"
+                self.names_list_check(names, test_label, path)
+                if names != sorted(set(names)):
+                    self.fail(f"{test_label} is not sorted and unique: {path}")
+                outside = sorted(set(names) - set(listed[union_key]))
+                if outside:
+                    self.fail(
+                        f"{test_label} lists {outside[0]!r}, not among its"
+                        f" {union_key}: {path}"
+                    )
+        for test_name in tests:
+            self.source_database_test_check(
+                self.heat_map_model_read(out_dir, test_name),
+                counted["filesWithCounters"][test_name],
+                counted["functionsWithCounters"][test_name],
+                f"{label} {test_name}",
+                path,
+            )
+
+    # Checks a test's files and functions with counters against its model.
+    def source_database_test_check(
+        self,
+        filed_model: Any,
+        counted_files: list[str],
+        counted_functions: list[str],
+        label: str,
+        path: str,
+    ) -> None:
+        wanted_files = {
+            file_name
+            for file_name, entry in filed_model["files"].items()
+            if any(line[0] or line[1] for line in entry["lines"].values())
+        }
+        missing_files = sorted(wanted_files - set(counted_files))
+        if missing_files:
+            self.fail(
+                f"{label} leaves out {missing_files[0]!r}, a file with a"
+                f" counter in its model: {path}"
+            )
+        extra_files = sorted(set(counted_files) - wanted_files)
+        if extra_files:
+            self.fail(
+                f"{label} lists {extra_files[0]!r}, a file with no counter in"
+                f" its model: {path}"
+            )
+        functions = filed_model["functions"]
+        must_list = {
+            function["name"]
+            for function in functions
+            if function["line"] and (function["self"] or function["calls"])
+        }
+        may_list = set(must_list)
+        for entry in filed_model["files"].values():
+            for line_key, indexes in entry["lineFunctions"].items():
+                line = entry["lines"][line_key]
+                if line[0] or line[1]:
+                    may_list.update(
+                        functions[index]["name"]
+                        for index in indexes
+                        if functions[index]["line"]
+                    )
+        missing_functions = sorted(must_list - set(counted_functions))
+        if missing_functions:
+            self.fail(
+                f"{label} leaves out {missing_functions[0]!r}, a function"
+                f" with a line and a nonzero self or calls: {path}"
+            )
+        extra_functions = sorted(set(counted_functions) - may_list)
+        if extra_functions:
+            self.fail(
+                f"{label} lists {extra_functions[0]!r}, a function with no"
+                f" line or no counter at a line it costs: {path}"
+            )
 
     # Returns every address a table data's cells link.
     def table_data_hrefs(self, rows: Sequence[Sequence[Any]]) -> list[str]:
@@ -1452,17 +2579,14 @@ class TestReport:
     ) -> list[list[Any]]:
         if "data-rows-" not in attributes:
             self.fail(f"{label}'s table data holds no data-rows-: {path}")
-            return []
         try:
             rows = json.loads(attributes["data-rows-"])
         except ValueError as error:
             self.fail(f"{label}'s table data holds no JSON: {error}: {path}")
-            return []
         if not isinstance(rows, list) or not all(
             isinstance(row, list) for row in rows
         ):
             self.fail(f"{label}'s table data holds no list of rows: {path}")
-            return []
         return rows
 
     # Checks the archive's test list holds the overview's tests, sorted.
@@ -1475,20 +2599,24 @@ class TestReport:
     ) -> None:
         if text is None:
             self.fail(
-                f"{archive_name} holds no {_TEST_LIST_FILE_NAME}: {path}"
+                f"{archive_name} holds no {test_settings.TEST_LIST_FILE_NAME}:"
+                f" {path}"
             )
-            return
         if text.split("\n") != [*sorted(tests), ""]:
             self.fail(
-                f"{archive_name}'s {_TEST_LIST_FILE_NAME} lists"
+                f"{archive_name}'s {test_settings.TEST_LIST_FILE_NAME} lists"
                 f" {text.splitlines()}, expected the overview's tests"
                 f" {sorted(tests)}, one per line, sorted: {path}"
             )
 
     def test_report_check(
-        self, out_dir: str, name: str, layout: TestReport.ReportLayout
+        self,
+        out_dir: str,
+        name: str,
+        layout: TestReport.ReportLayout,
+        regular_data: Sequence[TestReport.RawData],
     ) -> None:
-        self.database_page_check(out_dir, name, layout)
+        self.database_page_check(out_dir, name, layout, regular_data)
         self.call_graph_page_check(out_dir, name, layout)
         stray_dir = os.path.join(out_dir, name)
         if os.path.exists(stray_dir):
@@ -1499,16 +2627,18 @@ class TestReport:
 
     def timer_artifacts_archive_check(
         self,
+        out_dir: str,
         path: str,
         archive_name: str,
         tests: Sequence[str],
         layout: TestReport.ReportLayout,
-    ) -> None:
+        build_tree: str,
+    ) -> dict[str, dict[str, float]]:
         size = os.path.getsize(path)
-        if size < _TEST_RAW_ARCHIVE_LEAST_BYTES:
+        if size < test_settings.TEST_RAW_ARCHIVE_LEAST_BYTES:
             self.fail(
                 f"{archive_name} suspiciously small ({size} bytes <"
-                f" {_TEST_RAW_ARCHIVE_LEAST_BYTES}): {path}"
+                f" {test_settings.TEST_RAW_ARCHIVE_LEAST_BYTES}): {path}"
             )
         root_name = archive_name.removesuffix(_REPORT_RAW_ARCHIVE_SUFFIX)
         try:
@@ -1523,7 +2653,6 @@ class TestReport:
             self.fail(
                 f"{archive_name} is not readable as tar.xz: {path}: {error}"
             )
-            return
         if not any(
             member.isdir() and member.name == root_name
             for member in archive_members
@@ -1543,29 +2672,61 @@ class TestReport:
             for member_name, text in texts.items()
         }
         profile_names = {
-            test_name: f"{test_name}{_TEST_PROFILE_FILE_SUFFIX}"
+            test_name: f"{test_name}{test_settings.TEST_PROFILE_FILE_SUFFIX}"
             for test_name in tests
             if layout.test_records_runs
         }
         for test_name, file_name in profile_names.items():
-            if "events:" not in texts_by_name.get(file_name, "")[:4096]:
+            profile_text = texts_by_name.get(file_name, "")
+            if "events:" not in profile_text[:4096]:
                 self.fail(
                     f"{archive_name} holds no {file_name} of {test_name}"
                     f" with an 'events:' line near its top: {path}"
                 )
+            self.profile_quiet_check(
+                profile_text, archive_name, file_name, path
+            )
+            self.function_images_check(
+                profile_text, out_dir, test_name, file_name
+            )
         self.test_list_check(
-            texts_by_name.get(_TEST_LIST_FILE_NAME), archive_name, tests, path
-        )
-        self.paths_document_check(
-            texts_by_name.get(_TEST_PATHS_DOCUMENT_NAME),
+            texts_by_name.get(test_settings.TEST_LIST_FILE_NAME),
             archive_name,
-            _TEST_PATHS_DOCUMENT_NAME,
+            tests,
+            path,
+        )
+        file_entries = self.paths_document_check(
+            texts_by_name.get(test_settings.TEST_PATHS_DOCUMENT_NAME),
+            archive_name,
+            test_settings.TEST_PATHS_DOCUMENT_NAME,
+            path,
+        )
+        function_data_names = {
+            test_name: f"{test_name}"
+            f"{test_settings.TEST_FUNCTION_DATA_FILE_SUFFIX}"
+            for test_name in profile_names
+        }
+        for test_name in function_data_names:
+            self.function_data_check(
+                TestReport.RawData(
+                    archive_name, path, texts_by_name, build_tree
+                ),
+                file_entries,
+                out_dir,
+                test_name,
+            )
+        timing_document = self.timing_document_check(
+            texts_by_name.get(test_settings.TEST_TIMING_DOCUMENT_NAME),
+            archive_name,
+            tests,
             path,
         )
         wanted_names = {
-            _TEST_LIST_FILE_NAME,
-            _TEST_PATHS_DOCUMENT_NAME,
+            test_settings.TEST_LIST_FILE_NAME,
+            test_settings.TEST_PATHS_DOCUMENT_NAME,
+            test_settings.TEST_TIMING_DOCUMENT_NAME,
             *profile_names.values(),
+            *function_data_names.values(),
         }
         for file_name in texts_by_name:
             if file_name not in wanted_names:
@@ -1579,15 +2740,19 @@ class TestReport:
                     f"{archive_name} still contains the absolute repo root "
                     f"{callgrind.REPO_ROOT!r} in {member_name}: {path}"
                 )
+        return timing_document
 
+    # Returns the regular report's timing document, none for a diff report.
     def timer_artifacts_check(
         self,
         out_dir: str,
         overview_text: str,
         tests: Sequence[str],
         layout: TestReport.ReportLayout,
-    ) -> None:
-        has_raw_data_line = _TEST_OVERVIEW_RAW_DATA_MARKUP in overview_text
+    ) -> dict[str, dict[str, float]] | None:
+        has_raw_data_line = (
+            test_settings.TEST_OVERVIEW_RAW_DATA_MARKUP in overview_text
+        )
         if layout.has_timer_artifacts and not has_raw_data_line:
             self.fail(f"overview index.html has no 'raw data' line: {out_dir}")
         elif has_raw_data_line and not layout.has_timer_artifacts:
@@ -1604,10 +2769,10 @@ class TestReport:
                 f"MANIFEST.txt names no raw data archive: {error}:"
                 f" {manifest_path}"
             )
-            return
+        timing_document = None
         for label in layout.manifest_recorded_labels:
             archive_name = (
-                f"{_TEST_TIMER_ARTIFACTS_PREFIX}"
+                f"{test_settings.TEST_TIMER_ARTIFACTS_PREFIX}"
                 f"{self.manifest_recorded_value(manifest_text, label)}"
                 f"{_REPORT_RAW_ARCHIVE_SUFFIX}"
             )
@@ -1625,21 +2790,75 @@ class TestReport:
                     f"no {archive_name}, the raw data archive MANIFEST.txt's"
                     f" {label}= row names, at the report's top: {path}"
                 )
-                continue
             if f'href="{archive_name}"' not in overview_text:
                 self.fail(
                     f"overview index.html does not link {archive_name}:"
                     f" {out_dir}"
                 )
-            self.timer_artifacts_archive_check(
-                path, archive_name, tests, layout
+            timing_document = self.timer_artifacts_archive_check(
+                out_dir,
+                path,
+                archive_name,
+                tests,
+                layout,
+                self.manifest_build_tree(manifest_text, manifest_path),
             )
+        return timing_document
+
+    # Returns the archive's timing document of each test's overview values.
+    def timing_document_check(
+        self,
+        text: str | None,
+        archive_name: str,
+        tests: Sequence[str],
+        path: str,
+    ) -> dict[str, dict[str, float]]:
+        if text is None:
+            self.fail(
+                f"{archive_name} holds no"
+                f" {test_settings.TEST_TIMING_DOCUMENT_NAME}: {path}"
+            )
+        try:
+            document = json.loads(text)
+        except ValueError as error:
+            self.fail(
+                f"{test_settings.TEST_TIMING_DOCUMENT_NAME} holds no JSON:"
+                f" {error}: {path}"
+            )
+        if not isinstance(document, dict) or list(document) != sorted(tests):
+            self.fail(
+                f"{test_settings.TEST_TIMING_DOCUMENT_NAME} keys"
+                f" {list(document) if isinstance(document, dict) else []},"
+                f" expected the overview's tests {sorted(tests)}: {path}"
+            )
+        for test_name, values in document.items():
+            if not isinstance(values, dict) or list(values) != list(
+                test_settings.TEST_TIMING_VALUE_NAMES
+            ):
+                self.fail(
+                    f"{test_settings.TEST_TIMING_DOCUMENT_NAME} gives"
+                    f" {test_name} the"
+                    f" values {values!r}, expected the names"
+                    f" {list(test_settings.TEST_TIMING_VALUE_NAMES)}: {path}"
+                )
+            for value_name, value in values.items():
+                if (
+                    type(value) not in (int, float)
+                    or value < 0
+                    or not math.isfinite(value)
+                ):
+                    self.fail(
+                        f"{test_settings.TEST_TIMING_DOCUMENT_NAME} gives"
+                        f" {test_name}"
+                        f" {value_name} {value!r}, expected a finite number"
+                        f" not below 0: {path}"
+                    )
+        return document
 
 
 _FLAME_GRAPH_VIEW_KEY = _FLAME_GRAPH_VIEW_ENTRY[0]
 
 _HEAT_MAP_VIEW_KEY = _HEAT_MAP_VIEW_ENTRY[0]
-_HEAT_MAP_PAGE_TITLE = ""
 
 _LAYOUT_DIFF = TestReport.ReportLayout(
     is_regular_report=False,
@@ -1703,84 +2922,6 @@ _LAYOUT_FULL = TestReport.ReportLayout(
     has_baselines=False,
 )
 
-_REPORT_CHECKSUM_COMMAND = (
-    "find . -type f ! -name MANIFEST.txt -print"
-    " | LC_ALL=C sort | LC_ALL=C tr '\\n' '\\0'"
-    " | xargs -0 -r cksum --"
-    " | LC_ALL=C sort | cksum"
-)
-
-_TEST_CALL_GRAPH_EDGE_CALLEE_FIELD = 1
-_TEST_CALL_GRAPH_EDGE_CALLER_FIELD = 0
-_TEST_CALL_GRAPH_EDGE_FIELDS = 5
-_TEST_CALL_GRAPH_EDGE_FUNCTION_FIELDS = (0, 1)
-_TEST_CALL_GRAPH_EDGE_INCLUSIVE_FIELD = 4
-_TEST_CALL_GRAPH_FUNCTION_FIELDS = 2
-_TEST_CALL_GRAPH_FUNCTION_NAME_FIELD = 0
-_TEST_CALL_GRAPH_FUNCTION_SELF_FIELD = 1
-_TEST_CALL_GRAPH_MODEL_KEYS = ("edges", "functions", "roots")
-_TEST_CALL_GRAPH_PAGE_DIR_NAME = "call-graph"
-_TEST_CALL_GRAPH_PAGE_LEAST_BYTES = 2000
-_TEST_CALL_GRAPH_ROOT_CALLS_FIELD = 1
-_TEST_CALL_GRAPH_ROOT_FIELDS = 2
-_TEST_CALL_GRAPH_ROOT_FUNCTION_FIELD = 0
-_TEST_CALL_GRAPH_START_FUNCTION_CALLS = 1
-_TEST_CALL_GRAPH_START_FUNCTION_NAME = "main"
-_TEST_CALL_GRAPH_STOP_FUNCTION_NAME = "exit"
-_TEST_CALL_GRAPH_TABLE_ID = "call-graph-table-"
-_TEST_DATABASE_CALL_COUNTS_START_FIELD = 1
-_TEST_DATABASE_CALLEE_ROWS_FIELD = 6
-_TEST_DATABASE_CALLER_ROWS_FIELD = 5
-_TEST_DATABASE_FUNCTION_HREF_FIELD = 1
-_TEST_DATABASE_FUNCTION_NAME_FIELD = 0
-_TEST_DATABASE_MODEL_ID = "database-model-"
-_TEST_DATABASE_PAGE_DIR_NAME = "database"
-_TEST_DATABASE_ROW_BASELINE_CALLS_FIELD = 7
-_TEST_DATABASE_ROW_CALLS_FIELD = 3
-_TEST_DATABASE_ROW_FILE_FIELD = 1
-_TEST_DATABASE_ROW_FUNCTION_FIELD = 0
-_TEST_DATABASE_ROW_LINE_FIELD = 2
-_TEST_DATABASE_VIEW_KEY = "database"
-_TEST_DERIVED_COUNTER_NAMES = ("D1m", "DLm", "L1m", "LLm", "Bm", "CEst")
-_TEST_FLAME_GRAPH_PAGE_LEAST_BYTES = 300
-_TEST_FLAME_GRAPH_SCRIPT_LEAST_BYTES = 200
-_TEST_HEAT_MAP_CALLER_COUNT_FIELD = 4
-_TEST_HEAT_MAP_MODEL_LEAST_BYTES = 5000
-_TEST_HEAT_MAP_PAGE_LEAST_BYTES = 1000
-_TEST_LIST_FILE_NAME = "test_list.txt"
-_TEST_MANIFEST_LEAST_BYTES = 40
-_TEST_OVERVIEW_COUNTER_RATIO_FIELDS = (5,)
-_TEST_OVERVIEW_COUNTER_RATIO_PATTERN = r"(?:\d+\.\d{6})?"
-_TEST_OVERVIEW_PAGE_LEAST_BYTES = 2000
-_TEST_OVERVIEW_PAGE_TITLE = ""
-_TEST_OVERVIEW_PERF_METRIC_FIELDS = (2, 3, 4)
-_TEST_OVERVIEW_PERF_METRIC_PATTERN = r"(?:\d+\.\d{6})?"
-_TEST_OVERVIEW_RAW_DATA_MARKUP = '<div id="overview-raw-data-">'
-_TEST_OVERVIEW_ROW_FIELD_COUNT = 6
-_TEST_OVERVIEW_TESTS_HEADING_MARKUP = (
-    '<div id="overview-tests-heading-" class="page-heading-"></div>'
-)
-_TEST_OVERVIEW_TESTS_TABLE_DATA_ID = "overview-tests-table-"
-_TEST_OVERVIEW_TIME_PER_LOOP_FIELD = 1
-_TEST_OVERVIEW_TIME_PER_LOOP_PATTERN = r"(?:\d+\.\d{2}(?:s|ms|us|ns|ps))?"
-_TEST_PAGE_PREAMBLE_SCRIPT_NAMES = (
-    "error_overlay.js",
-    "utility.js",
-    "ui_strings.js",
-    "settings.js",
-)
-_TEST_PATHS_DOCUMENT_CODES = ("err", "git", "repo", "sys")
-_TEST_PATHS_DOCUMENT_NAME = "0_file_data.json"
-_TEST_PROFILE_FILE_SUFFIX = ".callgrind.out"
-_TEST_RAW_ARCHIVE_LEAST_BYTES = 100
-_TEST_README_HTML_NAME = "README.html"
-_TEST_README_MARKDOWN_NAME = "README.md"
-_TEST_SOURCE_DATABASE_GLOBAL_NAME = "report_source_database_"
-_TEST_SOURCE_DATABASE_KEYS = ("files", "functions")
-_TEST_SOURCE_DATABASE_LEAST_BYTES = 1000
-_TEST_SOURCE_DATABASE_SCRIPT_PATH = "scripts/source_database.js"
-_TEST_TIMER_ARTIFACTS_PREFIX = "timer-artifacts-"
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -1791,10 +2932,24 @@ def main() -> int:
         help="a perf2html_diff.sh report: heat map only",
     )
     parser.add_argument(
+        "--baseline",
+        default="",
+        metavar="DIR",
+        help="the diff's baseline report, whose function places the diff"
+        " copies (--diff only)",
+    )
+    parser.add_argument(
+        "--modified",
+        default="",
+        metavar="DIR",
+        help="the diff's modified report, whose function places the diff"
+        " copies first (--diff only)",
+    )
+    parser.add_argument(
         "--readme-html",
         action="store_true",
-        help=f"the report holds {_TEST_README_HTML_NAME}, which its help link"
-        " opens",
+        help=f"the report holds {test_settings.TEST_README_HTML_NAME},"
+        " which its help link opens",
     )
     parser.add_argument(
         "--verbose",
@@ -1807,6 +2962,8 @@ def main() -> int:
         TestReport.TestArgs(
             out_dir=namespace.out_dir,
             diff=namespace.diff,
+            baseline=namespace.baseline,
+            modified=namespace.modified,
             readme_html=namespace.readme_html,
             verbose=namespace.verbose,
         )

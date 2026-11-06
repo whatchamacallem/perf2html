@@ -16,7 +16,8 @@ is labelled with. Tab also moves focus forward through interactive elements
 (links, buttons, inputs), and Shift+Tab moves backward. This is the primary
 navigation system for keyboard-only users, including screen reader users and
 switch device users. Enter or Space activates the focused element, and arrow
-keys control widgets.
+keys control widgets. Use `+`/`=` or `-` to zoom instead of the browser's
+built-in zoom controls.
 
 The HTML will open straight from disk, with no server. Start by opening the top
 level `index.html` in the report and then bookmarks will work.
@@ -125,8 +126,9 @@ these same names.
 
 `CEst` weights a miss by roughly what it costs and is used by default.
 
-See the [callgrind](https://valgrind.org/docs/manual/cl-manual.html) docs. GPL
-Version 3, 29 June 2007.
+See the [callgrind](https://valgrind.org/docs/manual/cl-manual.html) docs.
+
+Callgrind is GPL Version 3, 29 June 2007.
 
 ## Reading A Diff Report
 
@@ -136,9 +138,8 @@ A regular report contains a suite of tests that can be explored using a menu.
 There is heat map data, call graph data, and a flame graph.
 
 A regular report shows you each counter selected in the menu's counters
-pulldown, a total for each and a percentage of that total. In most places it is
-a percentage of the global total, however in the source view it may also be a
-percentage of a file or function if selected.
+pulldown, a total for each and a percentage of that total. Every percentage of
+a file, function or line is its cost as a share of the test's global cost.
 
 ```txt
 | example     |       % |
@@ -194,9 +195,6 @@ The keybindings are:
 - -: zoom out
 - 0: zoom out to see the entire profile
 - w/a/s/d or arrow keys: pan around the profile
-- 1: Switch to the "Time Order" view
-- 2: Switch to the "Left Heavy" view
-- 3: Switch to the "Sandwich" view
 - r: Collapse recursion in the flamegraphs
 - Cmd+S/Ctrl+S to save the current profile
 - Cmd+O/Ctrl+O to open a new profile
@@ -206,5 +204,6 @@ The keybindings are:
 - Cmd+F/Ctrl+F: to open search. While open, Enter and Shift+Enter cycle through
   results
 
-[speedscope](https://github.com/jlfwong/speedscope) is Copyright (c) 2018 Jamie
-Wong
+[speedscope](https://github.com/jlfwong/speedscope) is Copyright (c) 2018+
+Jamie Wong and contributors. `speedscope` is an upstream project and is not
+affiliated with the `perf2html` project.

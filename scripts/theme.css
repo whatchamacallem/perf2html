@@ -53,14 +53,9 @@ pre {
   grid-template-rows: auto auto minmax(0, 1fr);
   height: 100%;
 }
+/* The home panel, a view across the page's columns. */
 #overview-home- {
-  display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-#overview-home-text- {
-  overflow-x: hidden;
-  overflow-y: auto;
 }
 /* The home page column, as wide as its widest line, centred in its box. */
 #overview-home-text- > .page- {
@@ -73,26 +68,24 @@ pre {
   height: 100%;
 }
 
-/* A view: the scrolled page beside its bar. */
+/* A view: the scrolled page beside its bar, over the sideways bar's row. */
 .view- {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) [sideways-bar-] auto;
 }
 .view- > main {
   overflow-x: hidden;
   overflow-y: auto;
 }
-
-/* The call graph: its page beside its bar, over its sideways bar. */
-#call-graph- {
-  grid-template-rows: minmax(0, 1fr) [sideways-bar-] auto;
-}
 /* The sideways bar keeps its row while the bar beside the page hides. */
-#call-graph- > .text-scrollbar-.horizontal- {
+.view- > .text-scrollbar-.horizontal- {
   grid-row: sideways-bar-;
 }
+
 /* The call graph table, as wide as its longest row, in its clear border. */
 #call-graph-table- {
+  position: relative;
   width: max-content;
   border: var(--call-graph-border-width-) solid transparent;
   border-collapse: separate;
@@ -102,22 +95,47 @@ pre {
 #call-graph-table- td {
   padding: 0;
 }
-/* A share or tail sits right: shares line up and a line meets its branch. */
-#call-graph-table- :is(.call-graph-share-, .call-graph-tail-) {
+/* A share or multiple sits right, so each lines up with those above it. */
+#call-graph-table- :is(.call-graph-share-, .call-graph-multiple-) {
   text-align: right;
 }
-/* A symbol button has no room of its own, its template's spaces around it. */
+/* A symbol button has no room of its own, its template's spaces inside it. */
 #call-graph-table- .menu-button- {
   padding: 0;
 }
-
-/* The heat map: the main box, then the minimap and its bar following it. */
-#heat-map- {
-  display: flex;
+/* A cell taking a symbol's click shows the pointer, as the symbol does. */
+#call-graph-table- td.clickable- {
+  cursor: pointer;
 }
-/* The main box fills the row until its edge narrows it, sizing the tree. */
-#heat-map-main- {
+/* A hovered row's frame draws over the symbol buttons it crosses. */
+#call-graph-table-::before {
+  z-index: var(--call-graph-hover-row-z-index-);
+}
+
+/* The database page grows with its table, so the bars redraw as it widens. */
+#database-page- > .page- {
+  min-width: max-content;
+}
+
+/* The heat map: its hottest lines over the panes. */
+#heat-map- {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+/* The panes: the main column, then the minimap and the main box's bar. */
+#heat-map-panes- {
+  display: flex;
+  min-height: 0;
+}
+/* The main column fills the row until its edge narrows it, sizing the tree. */
+#heat-map-main-column- {
   flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+/* The main box, over its sideways bar, sizes the tree that hangs in it. */
+#heat-map-main- {
   container-type: size;
   overflow-x: hidden;
   overflow-y: auto;
@@ -137,10 +155,6 @@ pre {
   grid-template-rows: minmax(0, 1fr);
   height: calc(100cqh - 100%);
 }
-/* Under the information line the titles stick a band lower. */
-.heat-map-source- .heat-map-tree-track- {
-  height: calc(100cqh - 100% - var(--heat-map-source-band-height-));
-}
 #heat-map-tree- {
   overflow-x: hidden;
   overflow-y: scroll;
@@ -154,6 +168,12 @@ pre {
   display: inline-block;
   padding: 0 var(--page-emphasis-padding-inline-);
   white-space: pre;
+}
+
+/* A character in one page character's room, whatever font draws it. */
+.character-cell- {
+  display: inline-block;
+  width: 1ch;
 }
 
 /* A strip: a line of buttons, a status line under the menu's. */
@@ -212,9 +232,29 @@ pre {
   margin-right: var(--menu-status-bar-padding-right-);
   white-space: pre;
 }
+/* The search, label and placeholder share one place the last two size. */
+.menu-pulldown-text-box- {
+  display: inline-grid;
+}
+.menu-pulldown-text-box- > * {
+  grid-area: 1 / 1;
+}
+/* A search past its box shows its end, its start cut. */
 .menu-pulldown-search-box- {
-  display: inline-block;
-  min-width: var(--menu-pulldown-search-box-min-width-);
+  display: flex;
+  justify-content: flex-end;
+  contain: inline-size;
+  overflow: clip;
+}
+/* A search that fits starts at the box start. */
+.menu-pulldown-search-box-::after {
+  content: "";
+  flex-grow: 1;
+}
+/* A shown search hides the label under it, the placeholder only sizing. */
+.menu-pulldown-search-box-:not([hidden]) ~ *,
+.menu-pulldown-placeholder-box- {
+  visibility: hidden;
 }
 .menu-pulldown-entry-box- {
   position: absolute;
@@ -267,15 +307,32 @@ tr.row-link- {
 /* A cell or pane whose right edge the pointer may drag shows the cursor. */
 .table- :is(th, td).column-edge-grab-,
 .table- :is(th, td).column-edge-grab- *,
-#heat-map-main-.column-edge-grab-,
-#heat-map-main-.column-edge-grab- * {
+#heat-map-main-column-.column-edge-grab-,
+#heat-map-main-column-.column-edge-grab- * {
   cursor: col-resize;
 }
-/* A hovered row a click acts on anchors the frame its table draws over it. */
-.table- > tbody > :is(tr.row-link-, tr.clickable-):hover {
+/* A title's tool tip hangs under it, flipped to stay in the window. */
+.table- th[data-tool-tip-text-]:hover {
+  anchor-name: --table-title-tool-tip-anchor-;
+}
+.menu-button-.table-title-tool-tip- {
+  position: fixed;
+  position-anchor: --table-title-tool-tip-anchor-;
+  position-try-fallbacks: flip-inline;
+  top: anchor(bottom);
+  right: anchor(right);
+  z-index: var(--page-table-title-tool-tip-z-index-);
+  pointer-events: none;
+}
+/* A hovered link row, source line or call graph row anchors its frame. */
+.table- > tbody > :is(tr.row-link-, tr[data-line-number-]):hover,
+#call-graph-table- > tbody > tr:hover {
   anchor-name: --table-hover-row-;
 }
-table.table-:has(> tbody > :is(tr.row-link-, tr.clickable-):hover)::before {
+table.table-:has(
+    > tbody > :is(tr.row-link-, tr[data-line-number-]):hover
+  )::before,
+#call-graph-table-:has(> tbody > tr:hover)::before {
   content: "";
   position: absolute;
   position-anchor: --table-hover-row-;
@@ -292,26 +349,48 @@ table.table-:has(> tbody > :is(tr.row-link-, tr.clickable-):hover)::before {
   height: 1lh;
   align-content: unsafe end;
 }
+/* The raw data link takes a column cell's side room around its name. */
+#overview-raw-data- > a {
+  padding: 0 var(--page-table-cell-padding-inline-);
+}
 
-/* A text scrollbar: one cell per character of its track. */
+/* A text scrollbar: one cell per character, its characters design scaled. */
 .text-scrollbar- {
+  display: flex;
   contain: size;
-  overflow: hidden;
+  overflow: clip;
   white-space: pre;
   user-select: none;
   touch-action: none;
 }
 .text-scrollbar-.horizontal- {
+  font-size: calc(
+    var(--design-font-size-px-) * var(--design-font-fit-) *
+      var(--page-text-scrollbar-horizontal-font-multiple-)
+  );
   height: var(--page-text-scrollbar-horizontal-height-);
 }
 .text-scrollbar-.vertical- {
+  flex-direction: column;
+  font-size: calc(
+    var(--design-font-size-px-) * var(--design-font-fit-) *
+      var(--page-text-scrollbar-vertical-font-multiple-)
+  );
   width: var(--page-text-scrollbar-vertical-width-);
 }
-.text-scrollbar-.vertical- > span {
-  display: block;
+/* The forward chevron sits at the bar's end, past the room of a part cell. */
+.text-scrollbar-.horizontal- > :last-child:not(:first-child) {
+  margin-left: auto;
+}
+.text-scrollbar-.vertical- > :last-child:not(:first-child) {
+  margin-top: auto;
 }
 /* A bar whose target shows all it holds takes no room. */
 .text-scrollbar-.target-fits- {
+  display: none;
+}
+/* The top page's bar takes no room while a view's bar holds its scroll. */
+.text-scrollbar-.lent-to-view- {
   display: none;
 }
 

@@ -34,6 +34,7 @@ _DARK_MODE_ATTRIBUTE_NAME: str = ""
 _DARK_MODE_DISABLED_VALUE: str = ""
 _NUMBER_FRACTION_DIGITS: int = 0
 _NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES: float = 0.0
+_NUMBER_MULTIPLE_SUFFIX_TEXT: str = ""
 _STYLE_COLOR_DARK_MODE: dict[str, list[str]] = {}
 _STYLE_COLOR_DARK_MODE_ROLE_PREFIX: str = ""
 _STYLE_COLOR_LIGHT_MODE: dict[str, list[str]] = {}
@@ -46,6 +47,7 @@ _STYLE_DESIGN_SCALE_SMALLEST_MULTIPLE: float = 0.0
 _STYLE_DESIGN_VIEWPORT_HEIGHT_PROPERTY: str = ""
 _STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_PROPERTY: str = ""
 _STYLE_PAGE_FONT_FAMILY_PROPERTY: str = ""
+_STYLE_TEXT_SCROLLBAR_FONT_MULTIPLE_PROPERTY: dict[str, str] = {}
 _STYLE_VALUE_ENTRIES: dict[str, str] = {}
 _THEME_TIME_UNIT_ENTRIES: tuple[tuple[str, float], ...] = ()
 settings.load_into(__name__)
@@ -70,6 +72,7 @@ _DARK_MODE_ENABLED_SELECTOR = (
 class Cell(NamedTuple):
     text: str = ""
     href: str = ""
+    heat_percent: float | None = None
 
 
 CellOrText: TypeAlias = Cell | str
@@ -86,7 +89,7 @@ class Theme:
             self.smallest_printed_percent = 1 / 10**_NUMBER_FRACTION_DIGITS
             self.time_units = time_units
 
-        def diff_share(self, delta: int, baseline: int | None) -> float:
+        def diff_share(self, delta: float, baseline: float | None) -> float:
             baseline_count = 0 if baseline is None else baseline
             if delta < -baseline_count:
                 raise ValueError(
@@ -108,25 +111,10 @@ class Theme:
             split_at = len(digits) - digit_count
             return sign + digits[:split_at] + "." + digits[split_at:]
 
-        def human(self, number: float) -> str:
-            value, unit = float(number), ""
-            for candidate in ("K", "M", "G", "T"):
-                if value < 999.5:
-                    break
-                value /= 1000
-                unit = candidate
-            digit_count = 1 if unit and value < 9.95 else 0
-            return self.fixed_text(value, digit_count) + unit
-
         def rounded_units(self, value: float, digit_count: int) -> int:
             scaled = abs(value) * 10.0**digit_count
             whole = math.floor(scaled)
             return whole + 1 if scaled - whole >= 0.5 else whole
-
-        def signed(self, number: float) -> str:
-            if number == 0:
-                return ""
-            return ("-" if number < 0 else "") + self.human(abs(number))
 
         def signed_percent(self, percent: float) -> str:
             digit_count = _NUMBER_FRACTION_DIGITS
@@ -143,7 +131,10 @@ class Theme:
             elif times >= _NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES:
                 amount_text = "≈∞%"
             else:
-                amount_text = self.fixed_text(times, digit_count) + "x"
+                amount_text = (
+                    self.fixed_text(times, digit_count)
+                    + _NUMBER_MULTIPLE_SUFFIX_TEXT
+                )
             return arrow + amount_text.rjust(self.signed_percent_amount_chars)
 
         def time(self, seconds: float) -> str:
@@ -235,12 +226,14 @@ class Theme:
         return self.asset_read(name)
 
     # Returns a cell as the JS table writer's fields, defaults left out.
-    def cell_fields(self, value: CellOrText) -> str | dict[str, str]:
+    def cell_fields(self, value: CellOrText) -> str | dict[str, str | float]:
         if isinstance(value, str):
             return value
-        fields = {"text": value.text}
+        fields: dict[str, str | float] = {"text": value.text}
         if value.href:
             fields["href"] = value.href
+        if value.heat_percent is not None:
+            fields["heat_percent"] = value.heat_percent
         return fields
 
     def js(self) -> str:
@@ -295,6 +288,7 @@ class Theme:
             _STYLE_DESIGN_VIEWPORT_HEIGHT_PROPERTY,
             _STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_PROPERTY,
             _STYLE_PAGE_FONT_FAMILY_PROPERTY,
+            *_STYLE_TEXT_SCROLLBAR_FONT_MULTIPLE_PROPERTY.values(),
         }
         common_stylesheets_text = "".join(
             self.asset_read(name)
@@ -340,7 +334,7 @@ def asset_text_read(name: str) -> str:
     return _renderer.asset_read(name)
 
 
-def diff_share(delta: int, baseline: int | None) -> float:
+def diff_share(delta: float, baseline: float | None) -> float:
     return _renderer.number_format.diff_share(delta, baseline)
 
 
@@ -351,14 +345,6 @@ def fixed_text(number: float, digit_count: int) -> str:
 
 def href(depth: int, name: str) -> str:
     return "../" * depth + name
-
-
-def num_human(number: float) -> str:
-    return _renderer.number_format.human(number)
-
-
-def num_signed(number: float) -> str:
-    return _renderer.number_format.signed(number)
 
 
 def num_signed_pct(percent: float) -> str:

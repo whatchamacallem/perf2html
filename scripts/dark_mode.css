@@ -42,6 +42,9 @@
   .heat-map-source-information-box- .table- {
     background: var(--dark-mode-page-bg-);
   }
+  tr.heat-map-source-file-information-row- .heat-map-source-information-box- {
+    background: var(--dark-mode-page-bg-);
+  }
   tr.has-callee- td.heat-map-source-table-line-number-cell-::before {
     color: var(--dark-mode-menu-normal-fg-);
   }
@@ -73,10 +76,18 @@
     background: var(--dark-mode-page-bg-);
     color: var(--dark-mode-page-fg-);
   }
+  /* Each call graph multiple and symbol column takes the odd column color. */
+  #call-graph-table- :is(td.call-graph-multiple-, td.call-graph-symbol-) {
+    background: var(--dark-mode-panel-bg-);
+  }
   /* The manifest labels and raw data link take the odd column color. */
   #overview-raw-data- > a:not(:focus-visible),
   .overview-manifest-label- {
     background: var(--dark-mode-panel-bg-);
+  }
+  /* The tests table's report names take the page text color. */
+  .overview-tests-table- a:not(:focus-visible) {
+    color: var(--dark-mode-page-fg-);
   }
   #overview-view-frame- {
     background: var(--dark-mode-page-bg-);
@@ -103,9 +114,15 @@
   .menu-button-:focus-visible,
   .menu-button-.flash-,
   .menu-button-.open-,
+  .menu-button-.table-title-tool-tip-,
   .menu-pulldown-entry-list- > .highlighted-entry- {
     background: var(--dark-mode-menu-focus-bg-);
     color: var(--dark-mode-menu-focus-fg-);
+  }
+  /* An open pulldown whose list holds the focus shows its cell unfocused. */
+  .menu-button-.open-:has(.highlighted-entry-) {
+    background: var(--dark-mode-menu-normal-bg-);
+    color: var(--dark-mode-menu-normal-fg-);
   }
 
   #heat-map-main- {
@@ -119,25 +136,23 @@
     border-width: var(--page-line-width-);
     border-color: var(--dark-mode-menu-normal-outline-);
   }
-  table.table-::before {
+  table.table-::before,
+  #call-graph-table-::before {
     left: anchor(left);
     right: anchor(right);
     bottom: calc(anchor(bottom) - var(--page-line-width-));
     border-width: var(--page-line-width-);
     border-color: var(--dark-mode-menu-normal-outline-);
   }
+  /* A hovered source line's frame starts at the tree's edge, in view. */
+  table.heat-map-source-table-::before {
+    left: anchor(--heat-map-source-hover-tree-cell- right);
+  }
   .heat-map-tree-node-:not(.cold-):hover::before {
     inset: 0 0 calc(-1 * var(--page-line-width-));
     border-style: solid;
     border-width: var(--page-line-width-);
     border-color: var(--dark-mode-menu-normal-outline-);
-  }
-  .heat-map-source-information-line- {
-    background: var(--dark-mode-page-emphasis-bg-);
-    color: var(--dark-mode-page-emphasis-fg-);
-  }
-  .heat-map-source-information-line- a:not(:focus-visible) {
-    color: inherit;
   }
   tr.heat-map-source-information-box-synthetic-row- > td {
     background: none;

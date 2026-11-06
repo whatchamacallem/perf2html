@@ -16,6 +16,7 @@ _FLAME_GRAPH_APP_DIR_NAME: str = ""
 _FLAME_GRAPH_PROFILE_DIR_NAME: str = ""
 _FLAME_GRAPH_PROFILE_GLOBAL_NAME: str = ""
 _FLAME_GRAPH_VIEW_ENTRY: tuple[str, str] = ("", "")
+_SETTINGS_HELD_SCRIPT_TEMPLATE_ID: str = ""
 settings.load_into(__name__)
 
 _FLAME_GRAPH_PAGE_PATH = _FLAME_GRAPH_VIEW_ENTRY[1]
@@ -34,6 +35,9 @@ class BuildFlameGraph:
         artifacts: str
         report: str
 
+    def __init__(self, verbose: int) -> None:
+        self.verbose = verbose
+
     def page_write(self, args: BuildFlameGraph.PageArgs) -> None:
         app_href = theme.href(
             _FLAME_GRAPH_PAGE_DEPTH, _FLAME_GRAPH_APP_DIR_NAME
@@ -43,13 +47,17 @@ class BuildFlameGraph:
             {
                 "__APP_CSS__": f"{app_href}/{args.app_css}",
                 "__APP_SCRIPT__": f"{app_href}/{args.app_js}",
+                "__HELD_SCRIPT_TEMPLATE_ID__": theme.render_html_escape(
+                    _SETTINGS_HELD_SCRIPT_TEMPLATE_ID
+                ),
             },
         )
         path = os.path.join(args.report, _FLAME_GRAPH_PAGE_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(html)
-        print(f"wrote {path}", file=sys.stderr)
+        if self.verbose:
+            print(f"wrote {path}")
 
     # Writes one test's profile script, its speedscope profile embedded.
     def profile_write(
@@ -77,7 +85,8 @@ class BuildFlameGraph:
                 f"{profiles_global}[{json.dumps(test_name)}] ="
                 f" {json.dumps(test_profile)};\n"
             )
-        print(f"wrote {path} ({len(raw):,} bytes of profile)", file=sys.stderr)
+        if self.verbose:
+            print(f"wrote {path} ({len(raw):,} bytes of profile)")
 
     # Writes every listed test's profile script.
     def profiles_write(self, args: BuildFlameGraph.ProfilesArgs) -> None:
@@ -128,9 +137,17 @@ def main() -> None:
         metavar="DIR",
         help="the report directory the page is written in",
     )
+    for written_parser in (page_parser, profiles_parser):
+        written_parser.add_argument(
+            "--verbose",
+            action="count",
+            default=0,
+            help="print each file written; a quiet run prints nothing on"
+            " success",
+        )
 
     namespace = parser.parse_args()
-    flame_graph = BuildFlameGraph()
+    flame_graph = BuildFlameGraph(namespace.verbose)
     if namespace.cmd == "page":
         flame_graph.page_write(
             BuildFlameGraph.PageArgs(

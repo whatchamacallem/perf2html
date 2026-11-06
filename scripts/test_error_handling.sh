@@ -8,10 +8,13 @@
 usage_show() {
   cat <<'EOF'
 test_error_handling.sh [--help]
-    Runs test_expected_behavior.sh --keep-artifacts --verbose into
-    test_verbose.md, checks a --regenerate run from the
-    recordings kept, runs the failure-mode testcases on copies of its
-    reports, then prettier --check over that markdown.
+    Runs test_expected_behavior.sh --regenerate --keep-artifacts --verbose
+    into test_verbose.md from the recordings a measuring run kept, checks
+    that a perf2html_batch.sh --regenerate run leaves them unchanged, runs
+    the failure-mode testcases on copies of its reports, then prettier
+    --check over that markdown. Shots differing from screenshots-gold/ are
+    no failure: every test still runs, then a note and an exit with
+    SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE from settings.sh.
     --help is the only argument.
 EOF
 }
@@ -53,7 +56,7 @@ _TEST_ERROR_TEST_LIST_FILE_NAME=test_list.txt
 _TEST_ERROR_TRUNCATED_BYTES=1024
 _TEST_ERROR_TIMER_ARTIFACTS_PREFIX=timer-artifacts-
 _TEST_ERROR_VALGRIND_LOG_FILE_SUFFIX=.valgrind.log
-_TEST_ERROR_VALGRIND_LOG_PURPOSE='the valgrind log with the objects loaded'
+_TEST_ERROR_VALGRIND_LOG_PURPOSE='the valgrind log'
 
 _TEST_ERROR_RECORDING_FILE_SUFFIXES=("$_TEST_ERROR_PROFILE_FILE_SUFFIX"
   .cyg_callback.bin .cyg_callback.bin.maps .cyg_callback.log .perf-stat.json
@@ -66,6 +69,10 @@ _TEST_ERROR_MANIFEST_VERSION_DIFF='curl/perf2html_diff.sh v0'
 
 _TEST_ERROR_SCRATCH="$_DIR_PERF2HTML/build/test_error_handling_scratch"
 
+_TEST_ERROR_SCREENSHOT_DIFF_DIR="$_DIR_PERF2HTML/screenshots-diff"
+_TEST_ERROR_SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE=3
+_TEST_ERROR_SCREENSHOT_GOLD_DIR="$_DIR_PERF2HTML/screenshots-gold"
+
 test_error_path_without_tool() {
   local _tool="$1" _bin="$_TEST_ERROR_SCRATCH/bin_without_$1" _dirs=() _dir
   mkdir "$_bin"
@@ -74,7 +81,7 @@ test_error_path_without_tool() {
     case "$_dir" in /*) ;; *) continue ;; esac
     [ -d "$_dir" ] || continue
     # Links each directory's own entries, never a subtree with its modes.
-    find "$_dir" -mindepth 1 -maxdepth 1 -not -type d \
+    find "$_dir" -mindepth 1 -maxdepth 1 -not -xtype d \
       -exec cp -s --update=none -t "$_bin" {} +
   done
   [ -e "$_bin/$_tool" ] \
@@ -182,16 +189,21 @@ test_error_markdown_check_run() {
   echo "ok test_error_markdown_check"
 }
 
+# Regenerates every report from the recordings a measuring run kept.
 test_error_expected_behavior_run() {
   local _code=0 _start=$SECONDS
-  "$_TEST_EXPECTED_BEHAVIOR" --keep-artifacts --verbose \
+  "$_TEST_EXPECTED_BEHAVIOR" --regenerate --keep-artifacts --verbose \
     2>"$_TEST_VERBOSE_DOCUMENT" </dev/null || _code=$?
-  if [ "$_code" != 0 ]; then
-    printf 'FAILED: test_expected_behavior.sh exited %s, see %s\n' "$_code" \
-      "$(path_shown "$_TEST_VERBOSE_DOCUMENT")" >&2
-    exit "$_code"
-  fi
-  printf 'test_expected_behavior.sh --keep-artifacts: %ss\n' \
+  # A gold difference lets every other test run, noted again at the end.
+  case "$_code" in
+    0 | "$_TEST_ERROR_SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE") ;;
+    *)
+      printf 'FAILED: test_expected_behavior.sh exited %s, see %s\n' \
+        "$_code" "$(path_shown "$_TEST_VERBOSE_DOCUMENT")" >&2
+      exit "$_code"
+      ;;
+  esac
+  printf 'test_expected_behavior.sh --regenerate --keep-artifacts: %ss\n' \
     "$((SECONDS - _start))"
 }
 
@@ -231,10 +243,10 @@ test_error_cache_snapshot() {
     | LC_ALL=C tr '\n' '\0' | xargs -0 -r cksum -- | LC_ALL=C sort)
 }
 
+# Refuses a kept file the regenerate runs since the snapshot changed.
 test_error_regenerate_cache_check() {
-  local _before _after _gone _new _line _path _name _suffix _start=$SECONDS
-  local _code=0
-  _before="$(test_error_cache_snapshot)"
+  local _before="$1" _after _gone _new _line _path _name _suffix
+  local _start=$SECONDS _code=0
   "$_DIR_PERF2HTML/perf2html_batch.sh" --regenerate \
     "--target-dir=$_DIR_PERF2HTML" </dev/null || _code=$?
   [ "$_code" = 0 ] || test_fail regenerate_from_cache \
@@ -630,13 +642,20 @@ test_error_failure_tests_run() {
 }
 
 main() {
+  local _cache_before
   test_error_markdown_formatter_check
-  test_error_expected_behavior_run
   test_error_cache_populated_check
-  test_error_regenerate_cache_check
+  _cache_before="$(test_error_cache_snapshot)"
+  test_error_expected_behavior_run
+  test_error_regenerate_cache_check "$_cache_before"
   test_error_failure_tests_run
   test_error_markdown_check_run
   printf 'test_error_handling.sh: %ss total\n' "$SECONDS"
+  if [ -d "$_TEST_ERROR_SCREENSHOT_DIFF_DIR" ]; then
+    screenshot_gold_notice "$_TEST_ERROR_SCREENSHOT_GOLD_DIR" \
+      "$_TEST_ERROR_SCREENSHOT_DIFF_DIR"
+    exit "$_TEST_ERROR_SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE"
+  fi
 }
 
 main

@@ -89,9 +89,15 @@ body {
 .menu-button-:focus-visible,
 .menu-button-.flash-,
 .menu-button-.open-,
+.menu-button-.table-title-tool-tip-,
 .menu-pulldown-entry-list- > .highlighted-entry- {
   background: var(--light-mode-menu-focus-bg-);
   color: var(--light-mode-menu-focus-fg-);
+}
+/* An open pulldown whose list holds the focus shows its cell unfocused. */
+.menu-button-.open-:has(.highlighted-entry-) {
+  background: var(--light-mode-menu-normal-bg-);
+  color: var(--light-mode-menu-normal-fg-);
 }
 
 #heat-map-main- {
@@ -103,13 +109,6 @@ body {
 #heat-map-minimap-viewport- {
   border-width: var(--page-line-width-);
   border-color: var(--light-mode-menu-normal-outline-);
-}
-.heat-map-source-information-line- {
-  background: var(--light-mode-page-emphasis-bg-);
-  color: var(--light-mode-page-emphasis-fg-);
-}
-.heat-map-source-information-line- a:not(:focus-visible) {
-  color: inherit;
 }
 tr.heat-map-source-information-box-synthetic-row- > td {
   background: var(--light-mode-status-bar-bg-);
@@ -133,21 +132,23 @@ tr.heat-map-source-information-box-synthetic-row- > td {
 /* Light mode alone draws lines, each on the top of the slot below its own. */
 :where(:root[data-dark-mode-="disabled"]) {
   /* A framed box: its top line in the room of a clear top border. */
-  .page- a:not(.row-link- a),
+  .page- a:not(.table- a, .menu-button- a),
   .heat-map-source- a,
   .heat-map-tree-node- {
     position: relative;
   }
-  .page- a:not(.row-link- a),
+  .page- a:not(.table- a, .menu-button- a),
   .heat-map-source- a,
   .menu-button-,
+  .menu-pulldown-entry-box-,
   .heat-map-tree-node- {
     border-top: var(--page-line-width-) solid transparent;
   }
   /* The frame, over its box, passing each press to what lies under it. */
-  .page- a:not(.row-link- a)::after,
+  .page- a:not(.table- a, .menu-button- a)::after,
   .heat-map-source- a::after,
   .menu-button-:not([data-entry-name-="str_report_name"])::after,
+  .menu-pulldown-entry-box-::after,
   .heat-map-tree-node-.selected-::after {
     content: "";
     position: absolute;
@@ -196,7 +197,105 @@ tr.heat-map-source-information-box-synthetic-row- > td {
     right: calc(anchor(right) - var(--page-line-width-) / 2);
     bottom: calc(anchor(bottom) - var(--page-line-width-));
     border-width: var(--page-line-width-);
-    border-color: var(--light-mode-menu-normal-outline-);
+    border-color: var(--light-mode-table-hover-outline-);
+  }
+  /* A hovered source line's frame starts at the tree's edge, in view. */
+  table.heat-map-source-table-::before {
+    left: calc(
+      anchor(--heat-map-source-hover-tree-cell- right) -
+        var(--page-line-width-) / 2
+    );
+  }
+  /* A hovered call graph row's frame, its bottom below, as in dark mode. */
+  #call-graph-table-::before {
+    left: anchor(left);
+    right: anchor(right);
+    bottom: calc(anchor(bottom) - var(--page-line-width-));
+    border-width: var(--page-line-width-);
+    border-color: var(--light-mode-table-hover-outline-);
+  }
+  /* A call graph node's frame runs from its multiple through its name. */
+  #call-graph-table-
+    td.clickable-:is(.call-graph-multiple-, .call-graph-share-),
+  #call-graph-table- td.call-graph-symbol-:has(> .menu-button-) {
+    position: relative;
+  }
+  /* A cell's piece draws its top line, its bottom line hung below the cell. */
+  #call-graph-table-
+    td.clickable-:is(.call-graph-multiple-, .call-graph-share-)::before,
+  #call-graph-table-
+    td.clickable-:is(.call-graph-multiple-, .call-graph-share-)::after,
+  #call-graph-table- td.call-graph-symbol-:has(> .menu-button-)::before,
+  #call-graph-table- td.call-graph-symbol-:has(> .menu-button-)::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+    border-top: var(--page-line-width-) solid
+      var(--light-mode-menu-normal-outline-);
+  }
+  #call-graph-table-
+    td.clickable-:is(.call-graph-multiple-, .call-graph-share-)::before,
+  #call-graph-table- td.call-graph-symbol-:has(> .menu-button-)::before {
+    top: 100%;
+    bottom: auto;
+  }
+  #call-graph-table- td.clickable-.call-graph-multiple-::after {
+    border-left: var(--page-line-width-) solid
+      var(--light-mode-menu-normal-outline-);
+  }
+  /* The name's piece closes the frame at the right of the name's button. */
+  #call-graph-table- td.call-graph-symbol- > .menu-button- {
+    anchor-name: --call-graph-symbol-button-;
+  }
+  #call-graph-table- td.call-graph-symbol-:has(> .menu-button-)::before,
+  #call-graph-table- td.call-graph-symbol-:has(> .menu-button-)::after {
+    right: anchor(--call-graph-symbol-button- right);
+  }
+  #call-graph-table- td.call-graph-symbol-:has(> .menu-button-)::after {
+    border-right: var(--page-line-width-) solid
+      var(--light-mode-menu-normal-outline-);
+  }
+  /* A symbol button draws no frame of its own, its cell's piece framing it. */
+  #call-graph-table- .menu-button-::after {
+    content: none;
+  }
+  /* A bar's frame as a framed box's, its clip margin plain as Chrome needs. */
+  .text-scrollbar- {
+    position: relative;
+    overflow-clip-margin: var(--page-line-width-);
+  }
+  /* A bar's clear top border, a page line in the bar's own characters. */
+  .text-scrollbar-.horizontal- {
+    border-top: calc(
+        var(--page-line-width-) /
+          var(--page-text-scrollbar-horizontal-font-multiple-)
+      )
+      solid transparent;
+  }
+  .text-scrollbar-.vertical- {
+    border-top: calc(
+        var(--page-line-width-) /
+          var(--page-text-scrollbar-vertical-font-multiple-)
+      )
+      solid transparent;
+  }
+  /* The frame, in the page's characters so its line is a page line. */
+  .text-scrollbar-::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    font-size: calc(var(--design-font-size-px-) * var(--design-font-fit-));
+    outline: var(--page-line-width-) solid
+      var(--light-mode-menu-normal-outline-);
+  }
+  /* A pulldown's bar lies under its box's clear top border, its top line. */
+  .menu-pulldown-entry-box- > .text-scrollbar- {
+    border-top: 0;
   }
   /* A hovered node's frame, drawn the way the selected node's frame is. */
   .heat-map-tree-node-:not(.cold-):hover::before {

@@ -36,26 +36,75 @@ ASSET_THEME_STYLESHEET_NAME = "theme.css"
 ASSET_UI_STRINGS_SCRIPT_NAME = "ui_strings.js"
 ASSET_UTILITY_SCRIPT_NAME = "utility.js"
 
-CALL_GRAPH_BRANCH_LAST_TEXT = "└ "
-CALL_GRAPH_BRANCH_MIDDLE_TEXT = "├ "
-CALL_GRAPH_BRANCH_OPEN_TEXT = "┬─"
-CALL_GRAPH_BRANCH_PASS_TEXT = "│ "
-CALL_GRAPH_LINE_TEXT = "─"
+CALL_GRAPH_BRANCH_FIRST_TEXT = "┳━"
+CALL_GRAPH_BRANCH_LAST_TEXT = "┗━"
+CALL_GRAPH_BRANCH_MIDDLE_TEXT = "┣━"
+CALL_GRAPH_BRANCH_ONLY_TEXT = "━━"
+CALL_GRAPH_BRANCH_PASS_TEXT = "┃"
+CALL_GRAPH_CLOSED_TEXT = "⊞"
+CALL_GRAPH_DOWNLOAD_FILE_NAME_SUFFIX = "_call_graph.svg"
+CALL_GRAPH_LINE_TEXT = "━"
+CALL_GRAPH_PAD_TEXT = " "
 CALL_GRAPH_PAGE_DIR_NAME = "call-graph"
 CALL_GRAPH_REVEAL_CLEARANCE_CHARS = 1
 CALL_GRAPH_REVEAL_CLEARANCE_LINES = 0.5
+CALL_GRAPH_SORT_DEFAULT_MODE = "cumulative"
 CALL_GRAPH_VIEW_KEY = "call-graph"
 
+CALLGRIND_FILE_DATA_CODE_KEY = "t"
 CALLGRIND_FILE_DATA_ERROR_CODE = "err"
 CALLGRIND_FILE_DATA_GIT_CODE = "git"
-CALLGRIND_FILE_DATA_INDENT_CHARS = 2
+CALLGRIND_FILE_DATA_PATH_KEY = "p"
 CALLGRIND_FILE_DATA_REPO_CODE = "repo"
 CALLGRIND_FILE_DATA_SYSTEM_CODE = "sys"
+CALLGRIND_FORMAT_CALLEE_FILE_KEYS: tuple[str, ...] = ("cfl", "cfi")
+CALLGRIND_FORMAT_CALLEE_FUNCTION_KEY = "cfn"
+CALLGRIND_FORMAT_CALLEE_IMAGE_KEY = "cob"
+CALLGRIND_FORMAT_CALLS_KEY = "calls"
+CALLGRIND_FORMAT_COMMAND_KEY = "cmd"
+CALLGRIND_FORMAT_COUNTERS_KEY = "events"
+CALLGRIND_FORMAT_FILE_KEY = "fl"
+CALLGRIND_FORMAT_FUNCTION_KEY = "fn"
+CALLGRIND_FORMAT_IMAGE_KEY = "ob"
+CALLGRIND_FORMAT_INLINE_FILE_KEYS: tuple[str, ...] = ("fi", "fe")
+CALLGRIND_FORMAT_JUMP_FILE_KEY = "jfi"
+CALLGRIND_FORMAT_JUMP_FUNCTION_KEY = "jfn"
+CALLGRIND_FORMAT_LINE_POSITION_NAME = "line"
+CALLGRIND_FORMAT_POSITIONS_KEY = "positions"
+CALLGRIND_FORMAT_SUMMARY_KEYS: tuple[str, ...] = ("summary", "totals")
+CALLGRIND_NAME_COMPRESSION_PATTERN = r"^\((\d+)\)(?: (.*))?$"
+CALLGRIND_UNKNOWN_DISPLAY_PATH = "(unknown)"
 CALLGRIND_UNKNOWN_NAME = "???"
 
 COUNTER_LIST_CALLEES_LINE_NAME = "callees"
 COUNTER_LIST_CALLERS_LINE_NAME = "callers"
+COUNTER_LIST_CALLGRIND_LINE_NAMES: tuple[str, ...] = (
+    "Ir",
+    "Dr",
+    "Dw",
+    "I1mr",
+    "D1mr",
+    "D1mw",
+    "ILmr",
+    "DLmr",
+    "DLmw",
+    "Bc",
+    "Bcm",
+    "Bi",
+    "Bim",
+    "D1m",
+    "DLm",
+    "L1m",
+    "LLm",
+    "Bm",
+    "CEst",
+)
 COUNTER_LIST_CALLS_LINE_NAME = "calls"
+COUNTER_LIST_NON_CALLGRIND_LINE_NAMES: tuple[str, ...] = (
+    COUNTER_LIST_CALLS_LINE_NAME,
+    COUNTER_LIST_CALLERS_LINE_NAME,
+    COUNTER_LIST_CALLEES_LINE_NAME,
+)
 
 DARK_MODE_ATTRIBUTE_NAME = "data-dark-mode-"
 DARK_MODE_DISABLED_VALUE = "disabled"
@@ -70,6 +119,7 @@ DATABASE_COUNTER_LIST_DEFAULT_SHOWN_NAMES: tuple[str, ...] = (
     COUNTER_LIST_CALLS_LINE_NAME,
     COUNTER_LIST_CALLERS_LINE_NAME,
 )
+DATABASE_DOWNLOAD_FILE_NAME_SUFFIX = "_database.svg"
 DATABASE_PAGE_DIR_NAME = "database"
 DATABASE_TIME_SUFFIX_SECONDS: dict[str, float] = {"ns": 1e-9, "usecs": 1e-6}
 DATABASE_TOP_FUNCTION_ROWS = 50
@@ -94,8 +144,13 @@ DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {
 
 DRAG_DIRECTION_THRESHOLD_PX = 5
 
+FLAME_GRAPH_ADDRESS_FRAME_NAME_FORMAT = "%s+%#x"
 FLAME_GRAPH_COLOR_SCHEME_KEY_NAME = "speedscope-color-scheme"
 FLAME_GRAPH_EXPORTER_NAME = "tests/perf2html/scripts/trace_to_speedscope.py"
+FLAME_GRAPH_FILE_FORMAT_CLOSE_EVENT_TYPE = "C"
+FLAME_GRAPH_FILE_FORMAT_OPEN_EVENT_TYPE = "O"
+FLAME_GRAPH_FILE_FORMAT_PROFILE_TYPE = "evented"
+FLAME_GRAPH_FILE_FORMAT_PROFILE_UNIT = "nanoseconds"
 FLAME_GRAPH_FILE_FORMAT_SCHEMA_URL = (
     "https://www.speedscope.app/file-format-schema.json"
 )
@@ -107,18 +162,16 @@ FLAME_GRAPH_PROFILE_GLOBAL_NAME = "report_flame_graph_profiles_"
 FLAME_GRAPH_PROFILE_NAME_FORMAT = "%s (loops=%s)"
 FLAME_GRAPH_STARTUP_POLL_DELAY_MS = 50
 FLAME_GRAPH_STARTUP_POLL_MAX_ATTEMPTS = 200
+FLAME_GRAPH_TRACE_PROFILE_NAME_FORMAT = (
+    "rdtsc trace (-finstrument-functions), %s calls, events %s..%s of %s"
+)
 FLAME_GRAPH_VIEW_ENTRY: tuple[str, str] = (
     "flame-graph",
     "flame-graph/index.html",
 )
 
 HEAT_MAP_COUNTER_DESCRIPTION_STRING_ID_PREFIX = "str_counter_"
-HEAT_MAP_COUNTER_LIST_DEFAULT_SHOWN_NAMES: tuple[str, ...] = (
-    COUNTER_LIST_CALLS_LINE_NAME,
-    "Bcm",
-    "D1m",
-    "DLm",
-)
+HEAT_MAP_COUNTER_LIST_DEFAULT_SHOWN_NAMES: tuple[str, ...] = ("Bm",)
 HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX = 8
 HEAT_MAP_MODEL_DIR_NAME = "data"
 HEAT_MAP_MODEL_GLOBAL_NAME = "report_heat_map_models_"
@@ -129,22 +182,41 @@ HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_MAX_COUNT = 10
 HEAT_MAP_SOURCE_TAB_SIZE_CHARS = 4
 HEAT_MAP_SOURCE_VIEW_WIDTH_CHARS = 80
 HEAT_MAP_TREE_ALWAYS_LISTED_DIRS = ("lib", "include", "src", "tests/perf")
-HEAT_MAP_TREE_AUTO_EXPAND_ABOVE_SHARE = 0.05
+HEAT_MAP_TREE_BRANCH_LAST_TEXT = "┗━"
+HEAT_MAP_TREE_BRANCH_MIDDLE_TEXT = "┣━"
+HEAT_MAP_TREE_BRANCH_PASS_TEXT = "┃ "
+HEAT_MAP_TREE_CLOSED_TEXT = "⊞"
+HEAT_MAP_TREE_FILE_TEXT = "━"
+HEAT_MAP_TREE_OPEN_TEXT = "┳"
 HEAT_MAP_VIEW_ENTRY: tuple[str, str] = (
     "heat-map",
     "heat-map/index.html",
 )
 
+LOAD_LOG_INPUT_EVENT_NAMES: dict[str, str] = {
+    "click": "click",
+    "key": "keydown",
+}
+LOAD_LOG_MESSAGE_NAME = "load_log_entry"
+LOAD_LOG_NAVIGATION_CAUSE_NAME = "navigation"
+
 MENU_DIGIT_KEY_COUNT = 10
 MENU_ENTRY_NEEDS: dict[str, list[str]] = {
     "counters": ["counter_list"],
-    "heat_scale": ["view"],
-    "heat_sort": ["view"],
     "str_menu_file": ["test"],
     "str_menu_function": ["test"],
     "str_view_call_graph": ["test", "view_page"],
     "str_view_database": ["test", "view_page"],
     "str_view_flame_graph": ["test", "view_page"],
+}
+MENU_ENTRY_VIEW_KEYS: dict[str, list[str]] = {
+    "call_graph_sort": [CALL_GRAPH_VIEW_KEY],
+    "heat_scale": [
+        CALL_GRAPH_VIEW_KEY,
+        DATABASE_VIEW_KEY,
+        HEAT_MAP_VIEW_ENTRY[0],
+    ],
+    "heat_sort": [HEAT_MAP_VIEW_ENTRY[0]],
 }
 MENU_FLASH_DURATION_MS = 500
 MENU_PULLDOWN_KEY_NAMES: dict[str, str] = {
@@ -162,6 +234,7 @@ MENU_SCALE_KEY_STEPS: dict[str, int] = {"+": 1, "=": 1, "-": -1}
 
 NUMBER_FRACTION_DIGITS = 2
 NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES = 999.99
+NUMBER_MULTIPLE_SUFFIX_TEXT = "x"
 
 PERF_TOOL_TIME_LABEL = "Time"
 
@@ -181,6 +254,9 @@ REGULAR_REPORT_VIEW_KEYS: list[str] = [
     FLAME_GRAPH_VIEW_ENTRY[0],
 ]
 
+RESOURCE_FAILURE_TEXT = "resource failed: "
+RESOURCE_TAG_NAMES: tuple[str, ...] = ("LINK", "SCRIPT", "IMG")
+
 SCREENSHOT_LABEL_QUERY_KEY_NAME = "screenshot"
 SCREENSHOT_LABEL_QUERY_VALUE = "1"
 SCREENSHOT_MENU_KEY_NUMBER = "screenshot-menu"
@@ -192,13 +268,18 @@ SETTINGS_DEBUG_JSON_MAX_LENGTH_CHARS = 79
 SETTINGS_DEBUG_JSON_SPACING_PATTERN = r'("(?:[^\\"]|\\.)*")|[:,]'
 SETTINGS_DEBUG_QUERY_KEY_NAME = "debug"
 SETTINGS_DEBUG_QUERY_VALUES: dict[str, str] = {"disabled": "0", "enabled": "1"}
+SETTINGS_HELD_SCRIPT_TEMPLATE_ID = "page-held-script-"
 SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES = 0
+SETTINGS_LOAD_LOG_HISTORY_ENTRY_NAME = "history"
 SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES: tuple[int, ...] = (0, 10, 20, 50, 100)
 SETTINGS_LOAD_LOG_HISTORY_MAX_LINES = 100
+SETTINGS_RELAY_MESSAGE_NAME = "settings_relay"
+SETTINGS_REQUEST_MESSAGE_NAME = "settings_request"
 SETTINGS_VIEW_ENTRY: tuple[str, str] = ("settings", "settings/index.html")
 
 SIGNAL_EXIT_CODE_BASE = 128
 
+STORAGE_KEY_CALL_GRAPH_SORT = "call_graph.sort"
 STORAGE_KEY_DATABASE_COUNTER_LIST = "database.counter_list"
 STORAGE_KEY_DATABASE_FUNCTION_ROWS = "database.function_rows"
 STORAGE_KEY_HEATMAP_COUNTER_LIST = "heatmap.counter_list"
@@ -209,6 +290,7 @@ STORAGE_KEY_VIEW_DARK_MODE = "view.dark_mode"
 STORAGE_KEY_VIEW_SCALE = "view.scale"
 STORAGE_OWNED_KEYS: tuple[str, ...] = (
     FLAME_GRAPH_COLOR_SCHEME_KEY_NAME,
+    STORAGE_KEY_CALL_GRAPH_SORT,
     STORAGE_KEY_DATABASE_COUNTER_LIST,
     STORAGE_KEY_DATABASE_FUNCTION_ROWS,
     STORAGE_KEY_HEATMAP_COUNTER_LIST,
@@ -252,7 +334,7 @@ STYLE_COLOR_DARK_MODE: dict[str, list[str]] = {
 STYLE_COLOR_DARK_MODE_ROLE_PREFIX = "dark-mode-"
 
 STYLE_COLOR_LIGHT_MODE: dict[str, list[str]] = {
-    "#000000": [
+    "#101010": [
         "light-mode-menu-focus-bg-",
         "light-mode-menu-normal-fg-",
         "light-mode-menu-normal-outline-",
@@ -260,18 +342,19 @@ STYLE_COLOR_LIGHT_MODE: dict[str, list[str]] = {
         "light-mode-page-fg-",
         "light-mode-screenshot-bg-",
     ],
-    "#FFFFFF": [
+    "#FCFCFA": [
         "light-mode-menu-focus-fg-",
         "light-mode-page-emphasis-fg-",
         "light-mode-page-bg-",
         "light-mode-screenshot-fg-",
         "light-mode-status-bar-fg-",
     ],
-    "#AAAAAA": [
+    "#AAAAA9": [
         "light-mode-menu-normal-bg-",
     ],
-    "#00AAAA": [
+    "#10AAA9": [
         "light-mode-status-bar-bg-",
+        "light-mode-table-hover-outline-",
     ],
 }
 STYLE_COLOR_LIGHT_MODE_ROLE_PREFIX = "light-mode-"
@@ -291,8 +374,8 @@ STYLE_DESIGN_SCALE_STOP_MULTIPLE_FRACTION_DIGITS = 2
 STYLE_DESIGN_VIEWPORT_HEIGHT_PROPERTY = "--design-viewport-height-"
 STYLE_DESIGN_VIEWPORT_HEIGHT_START_PERCENT = 100
 STYLE_HEAT_CELL_ON_BRIGHT_ABOVE_LUMINANCE_SHARE = 0.5
-STYLE_HEAT_CELL_ON_BRIGHT_ROLE = "dark-mode-page-bg-"
-STYLE_HEAT_CELL_ON_DARK_ROLE = "dark-mode-page-fg-"
+STYLE_HEAT_CELL_ON_BRIGHT_ROLE = "light-mode-page-fg-"
+STYLE_HEAT_CELL_ON_DARK_ROLE = "light-mode-page-bg-"
 STYLE_HEAT_COLOR_FULL_SCALE_PERCENT = 100
 STYLE_HEAT_COLOR_STOPS: list[str] = [
     "#3E4A89",
@@ -312,9 +395,7 @@ STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_CHARS = 2
 STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_PROPERTY = (
     "--heat-map-source-table-line-number-cell-callee-marker-width-"
 )
-STYLE_HEAT_MAP_TREE_INDENT_PER_LEVEL_CHARS = 2
 STYLE_MENU_LOGO_START_SHARE = 0.5
-STYLE_MENU_PULLDOWN_EXTRA_WIDTH_CHARS = 2
 STYLE_PAGE_BACKGROUND_DARK_MODE_ROLE = "dark-mode-page-bg-"
 STYLE_PAGE_BACKGROUND_EARLY_FILL_ENABLED = True
 STYLE_PAGE_BACKGROUND_LIGHT_MODE_ROLE = "light-mode-page-bg-"
@@ -327,27 +408,34 @@ STYLE_README_PAGE_VALUE_ENTRIES: dict[str, str] = {
     "readme-page-fg-": "#3A2A14",
     "readme-page-font-family-": "Arial",
 }
-STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS = 0.5
+STYLE_SVG_NAMESPACE_URL = "http://www.w3.org/2000/svg"
+STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS = 1.5
 STYLE_TABLE_FUNCTION_LIST_COLUMN_MAX_CHARS = 48
 STYLE_TABLE_FUNCTION_NAME_MAX_CHARS = 20
 STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS = 48
+STYLE_TEXT_SCROLLBAR_FONT_MULTIPLE: dict[str, float] = {
+    "horizontal": 1,
+    "vertical": 1.5,
+}
+STYLE_TEXT_SCROLLBAR_FONT_MULTIPLE_PROPERTY: dict[str, str] = {
+    "horizontal": "--page-text-scrollbar-horizontal-font-multiple-",
+    "vertical": "--page-text-scrollbar-vertical-font-multiple-",
+}
 STYLE_TEXT_SCROLLBAR_THUMB_SHORTEST_CHARS = 4
 STYLE_VALUE_ENTRIES: dict[str, str] = {
     "call-graph-border-width-": "1ch",
-    "heat-map-band-z-index-": "2",
+    "call-graph-hover-row-z-index-": "1",
     "heat-map-minimap-width-": "110px",
-    "heat-map-source-band-height-": "1lh",
     "heat-map-source-table-line-number-cell-callee-marker-text-": '"►"',
     "heat-map-source-ticker-tape-gap-": "1ch",
     "heat-map-tree-node-hover-z-index-": "1",
     "heat-map-tree-node-padding-right-": "1ch",
     "heat-map-tree-node-share-percent-width-": "10ch",
-    "heat-map-tree-width-": "39ch",
+    "heat-map-tree-width-": "40ch",
     "menu-button-padding-inline-": "1ch",
     "menu-pulldown-entry-list-max-height-share-": "0.6",
     "menu-pulldown-entry-list-z-index-": "3",
     "menu-pulldown-entry-padding-inline-": "1ch",
-    "menu-pulldown-search-box-min-width-": "13ch",
     "menu-status-bar-padding-left-": "1ch",
     "menu-status-bar-padding-right-": "1ch",
     "menu-strip-blank-line-height-": "0.5lh",
@@ -358,26 +446,37 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "page-inset-inline-": "2ch",
     "page-line-width-": "0.1em",
     "page-table-cell-padding-inline-": "1ch",
+    "page-table-title-tool-tip-z-index-": "2",
     "page-table-title-z-index-": "1",
     "page-text-scrollbar-horizontal-height-": "1lh",
     "page-text-scrollbar-vertical-width-": "1ch",
     "screenshot-z-index-": "3",
 }
 
+TABLE_COLUMN_FUNCTION_NAME = "function"
+TABLE_COLUMN_LINE_NAME = "line"
+TABLE_COLUMN_LOCATION_NAME = "location"
+TABLE_COLUMN_SOURCE_NAME = "source"
+TABLE_DOWNLOAD_URL_PREFIX = "data:image/svg+xml;charset=utf-8,"
 TABLE_MARKDOWN_COLUMN_NARROWEST_CHARS = 3
-TABLE_ROW_COUNT_CHOICES: tuple[int, ...] = (
-    10,
-    20,
-    30,
-    40,
-    50,
-    60,
-    70,
-    80,
-    90,
-    100,
+TABLE_MARKDOWN_ESCAPE_TEXT = "\\"
+TABLE_MARKDOWN_PAD_TEXT = " "
+TABLE_MARKDOWN_PIPE_TEXT = "|"
+TABLE_MARKDOWN_RULE_RIGHT_TEXT = ":"
+TABLE_MARKDOWN_RULE_TEXT = "-"
+TABLE_RESIZABLE_COLUMN_NAMES: tuple[str, ...] = (
+    TABLE_COLUMN_FUNCTION_NAME,
+    TABLE_COLUMN_LOCATION_NAME,
+    TABLE_COLUMN_SOURCE_NAME,
+    COUNTER_LIST_CALLERS_LINE_NAME,
+    COUNTER_LIST_CALLEES_LINE_NAME,
 )
+TABLE_ROW_COUNT_CHOICES: tuple[int, ...] = (20, 50, 100, 1000)
 
+TEXT_SCROLLBAR_CHEVRON_STEP_CHARS: dict[str, int] = {
+    "horizontal": 6,
+    "vertical": 3,
+}
 TEXT_SCROLLBAR_WHEEL_DELTA_PER_NOTCH = 100
 TEXT_SCROLLBAR_WHEEL_NOTCH_LINES = 2.5
 
@@ -389,14 +488,28 @@ THEME_TIME_UNIT_ENTRIES: tuple[tuple[str, float], ...] = (
     ("ps", 1e-12),
 )
 
+TIMING_COLUMN_NAMES: tuple[str, ...] = (
+    "time_per_loop",
+    "instructions_per_cycle",
+    "loads_per_instruction",
+    "branch_miss_ratio",
+    "l1d_miss_ratio",
+)
 TIMING_COLUMN_STRING_ID_PREFIX = "str_column_"
 TIMING_COUNTER_RATIOS: tuple[tuple[str, str, str], ...] = (
     ("loads_per_instruction", "L1-dcache-loads", "instructions"),
 )
-TIMING_PERF_STAT_METRICS: tuple[tuple[str, str, str], ...] = (
-    ("instructions_per_cycle", "instructions", "insn per cycle"),
-    ("branch_miss_percent", "branch-misses", "of all branches"),
-    ("l1d_miss_percent", "L1-dcache-load-misses", "of all L1-dcache accesses"),
+TIMING_DATA_INDENT_CHARS = 2
+# Each metric's last field is how many of perf's metric units make a ratio 1.
+TIMING_PERF_STAT_METRICS: tuple[tuple[str, str, str, int], ...] = (
+    ("instructions_per_cycle", "instructions", "insn per cycle", 1),
+    ("branch_miss_ratio", "branch-misses", "of all branches", 100),
+    (
+        "l1d_miss_ratio",
+        "L1-dcache-load-misses",
+        "of all L1-dcache accesses",
+        100,
+    ),
 )
 TIMING_PERF_STAT_METRIC_FRACTION_DIGITS = 6
 TIMING_PERF_STAT_NUMBER_PATTERN = r"[0-9]+(?:\.[0-9]+)?"
@@ -406,15 +519,21 @@ TIMING_PERF_STAT_UNCOUNTED_VALUES: tuple[str, ...] = (
 )
 TIMING_TIME_PER_LOOP_NAME = "time_per_loop"
 
+TRACE_ADDR2LINE_COMMAND: tuple[str, ...] = ("addr2line", "-f", "-C", "-e")
+TRACE_ADDR2LINE_UNKNOWN_NAME = "??"
+TRACE_BUILDID_COMMAND: tuple[str, ...] = ("readelf", "-n")
 TRACE_BUILDID_KEYWORD = "buildid"
 TRACE_BUILDID_LABEL = "Build ID"
 TRACE_FUNCTION_EXIT_BIT = 1 << 63
 # Uses json compatible precision.
 TRACE_HEADER_MAGIC = 0xABCDEF0123456000
 TRACE_HEADER_WORDS = 8
+TRACE_LOAD_SEGMENT_COMMAND: tuple[str, ...] = ("readelf", "-lW")
+TRACE_LOAD_SEGMENT_KEYWORD = "LOAD"
+TRACE_MAPS_EXECUTABLE_FLAG = "x"
 TRACE_RECORD_WORDS = 2
 
-VALGRIND_DEBUG_LINE_PATTERN = "^--[0-9]+--"
+TREE_OPEN_LEAST_CUMULATIVE_PERCENT = 0.1
 
 WIDGET_KEY_NAMES: dict[str, str] = {
     "activate": "Enter",
@@ -531,14 +650,10 @@ class SettingsReader:
                 number, f"{name} is not a setting name (SCREAMING_SNAKE)"
             )
         if name in found:
-            self.shell_settings_fail(
-                number, f"{name} is assigned twice; keep one of them"
-            )
+            self.shell_settings_fail(number, f"{name} is assigned twice")
         if name in globals():
             self.shell_settings_fail(
-                number,
-                f"{name} is also defined in settings.py; a setting has one "
-                "definition, in one of the two files",
+                number, f"{name} is also defined in settings.py"
             )
 
     def shell_scalar_parse(

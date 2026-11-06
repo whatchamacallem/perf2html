@@ -4,25 +4,29 @@
 
 ARTIFACTS_NAME=perf2html_temporary_artifacts
 
-ARTIFACT_ARCHIVE_KINDS=(callgrind)
+ARTIFACT_ARCHIVE_KINDS=(callgrind function-data)
 
-ARTIFACT_DIFFED_KINDS=(caller-counts delta)
+ARTIFACT_ARCHIVE_RUN_KINDS=(file-data timing-data)
+
+ARTIFACT_DIFFED_KINDS=(delta function-diff)
 
 declare -A ARTIFACT_FILE_PURPOSES=(
   ["baseline-header"]="the baseline report's header block"
   ["baseline-profiles"]="the baseline report's raw data archive, extracted"
   [callgrind]="the callgrind recording"
-  ["caller-counts"]="the callers diff with the baseline costs"
   [delta]="the callgrind delta, modified minus baseline"
   ["diff-log"]="the diff run's log"
   ["diff-regenerate-log"]="the last diff --regenerate run's log"
   ["file-data"]="the paths document, each path's code"
+  ["function-data"]="each function's place, self costs, callers and callees"
+  ["function-diff"]="the function data diff with the baseline costs"
   ["header-rows"]="the manifest rows of the measuring run"
   ["modified-header"]="the modified report's header block"
   ["modified-profiles"]="the modified report's raw data archive, extracted"
   ["profile-log"]="the measuring run's log"
   ["profile-regenerate-log"]="the last --regenerate run's log"
   ["test-list"]="the test names, one per line, sorted"
+  ["timing-data"]="the timing document, each test's overview values"
   ["timing-json"]="the perf stat counters, one JSON line per event"
   ["timing-page"]="the timing page, the command and the curl perf tool's runs"
   ["timing-summary"]="the timing summary rows, one label=value each"
@@ -30,7 +34,7 @@ declare -A ARTIFACT_FILE_PURPOSES=(
   ["trace-log"]="the trace page, both runs and the conversion"
   ["trace-maps"]="the traced process's mappings"
   ["trace-speedscope"]="the speedscope profile of the sampled run"
-  ["valgrind-log"]="the valgrind log with the objects loaded"
+  ["valgrind-log"]="the valgrind log"
 )
 
 ARTIFACT_RECORDED_KINDS=(callgrind timing-json timing-page trace-log
@@ -48,12 +52,14 @@ declare -A ARTIFACT_RUN_FILE_FORMATS=(
   ["profile-log"]='%s/perf2html.log'
   ["profile-regenerate-log"]='%s/perf2html.regenerate.log'
   ["test-list"]='%s/test_list.txt'
+  ["timing-data"]='%s/0_timing_data.json'
 )
 
 declare -A ARTIFACT_TEST_FILE_FORMATS=(
   [callgrind]='%s/%s.callgrind.out'
-  ["caller-counts"]='%s/%s.callgrind_diff.json'
   [delta]='%s/%s.callgrind_diff.out'
+  ["function-data"]='%s/%s_function_data.json'
+  ["function-diff"]='%s/%s.callgrind_diff.json'
   ["timing-json"]='%s/%s.perf-stat.json'
   ["timing-page"]='%s/%s.perf-stat.txt'
   ["timing-summary"]='%s/%s.perf-stat.summary'
@@ -88,7 +94,6 @@ declare -A CONTAINING_PACKAGES=(
   [taskset]=util-linux
   [python3]=python3
   [addr2line]=binutils
-  [objdump]=binutils
   [readelf]=binutils
   [cksum]=coreutils
   [curl]=curl
@@ -117,6 +122,7 @@ PACKAGE_INSTALL_COMMAND='sudo apt-get install -y'
 
 PROFILE_PINNED_CPU=3
 
+PROFILE_SKIPPED_FUNCTION_PATTERN='0x*'
 PROFILE_START_FUNCTION_NAME=main
 PROFILE_STOP_FUNCTION_NAME=exit
 
@@ -131,6 +137,7 @@ REPORT_BASELINE_DIR_NAME=perf2html_baseline_report
 REPORT_DIFF_DIR_NAME=perf2html_diff_report
 
 REPORT_MANIFEST_CHECKSUM_LABEL=checksum
+REPORT_MANIFEST_EXECUTABLE_LABEL=executable
 
 REPORT_MANIFEST_VERSION_DIFF='curl/perf2html_diff.sh v0'
 REPORT_MANIFEST_VERSION_FULL='curl/perf2html.sh v0'
@@ -143,6 +150,8 @@ REPORT_RAW_ARCHIVE_SUFFIX=.txz
 REPORT_SCRIPTS_DIR_NAME=scripts
 
 REPORT_SOURCES_DIR_NAME=sources
+
+SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE=3
 
 TEST_LOOPS=100
 
@@ -163,7 +172,6 @@ TRACE_BUILD_DIR=build-instr
 
 TRACE_OUT_VARIABLE=PERF_TRACE_OUT
 
-# 0xABCDEF0123456000. Uses json compatible precision.
 TRACE_SKIP_ALL=9223372036854775808
 TRACE_SKIP_VARIABLE=PERF_TRACE_SKIP
 

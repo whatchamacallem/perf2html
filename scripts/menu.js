@@ -10,12 +10,10 @@ window.try_catch_handler_(function () {
   const FLAME_GRAPH_VIEW_ENTRY = settings_("FLAME_GRAPH_VIEW_ENTRY");
   const HEAT_MAP_VIEW_ENTRY = settings_("HEAT_MAP_VIEW_ENTRY");
   const MENU_ENTRY_NEEDS = settings_("MENU_ENTRY_NEEDS");
+  const MENU_ENTRY_VIEW_KEYS = settings_("MENU_ENTRY_VIEW_KEYS");
   const MENU_SCALE_KEY_STEPS = settings_("MENU_SCALE_KEY_STEPS");
   const SETTINGS_VIEW_ENTRY = settings_("SETTINGS_VIEW_ENTRY");
   const STYLE_MENU_LOGO_START_SHARE = settings_("STYLE_MENU_LOGO_START_SHARE");
-  const STYLE_MENU_PULLDOWN_EXTRA_WIDTH_CHARS = settings_(
-    "STYLE_MENU_PULLDOWN_EXTRA_WIDTH_CHARS",
-  );
 
   const FLAME_GRAPH_VIEW_KEY = FLAME_GRAPH_VIEW_ENTRY[0];
   const HEAT_MAP_VIEW_KEY = HEAT_MAP_VIEW_ENTRY[0];
@@ -40,15 +38,13 @@ window.try_catch_handler_(function () {
   const menu_strip = document.getElementById("menu-");
   const help_href = menu_strip.getAttribute("data-help-href-");
   const preference_strip = document.getElementById("menu-preference-");
-  const pulldown_box_width_chars =
-    Math.max(
-      ...window.report_frame_.test_names.map((test_name) => test_name.length),
-    ) + STYLE_MENU_PULLDOWN_EXTRA_WIDTH_CHARS;
 
   if (typeof window.report_manifest_table_ === "undefined")
     window.throw_exception_("str_error_report_incomplete");
   if (!window.report_source_database_)
     window.throw_exception_("str_error_internal");
+  const call_graph_sort_choices =
+    window.report_preferences_.call_graph_sort_choices;
   const heat_scale_choices = window.report_preferences_.heat_scale_choices();
   const heat_sort_choices = window.report_preferences_.heat_sort_choices;
   let flash_entry_name = "";
@@ -81,32 +77,31 @@ window.try_catch_handler_(function () {
     );
     return entry_link;
   }
-  function heat_map_entries(names, entry_name, part) {
+  // Links each name of the shown test to the heat map hash written for it.
+  function heat_map_entries(names_by_test, entry_name, name_hash) {
     const entry_test_name = active_test_name();
-    return names.map((name) =>
-      pulldown_link(
-        name,
-        window.report_ui_.address.hash({
-          test: entry_test_name,
-          view: HEAT_MAP_VIEW_KEY,
-          ...part(name),
-        }),
-        entry_name,
-      ),
+    return names_by_test[entry_test_name].map((name) =>
+      pulldown_link(name, name_hash(entry_test_name, name), entry_name),
     );
   }
   function files_entries(line_number) {
     return heat_map_entries(
-      window.report_source_database_.files,
+      window.report_source_database_.filesWithCounters,
       "str_menu_file",
-      (file_name) => ({ file: file_name, line: line_number || null }),
+      (test_name, file_name) =>
+        window.report_ui_.address.hash({
+          test: test_name,
+          view: HEAT_MAP_VIEW_KEY,
+          file: file_name,
+          line: line_number || null,
+        }),
     );
   }
   function functions_entries() {
     return heat_map_entries(
-      window.report_source_database_.functions,
+      window.report_source_database_.functionsWithCounters,
       "str_menu_function",
-      (function_name) => ({ function: function_name }),
+      window.report_ui_.address.function_hash,
     );
   }
   // Returns the address with another test, the database from the overview.
@@ -127,7 +122,6 @@ window.try_catch_handler_(function () {
   }
   function pulldown_options(entries, on_close, reads_line_number) {
     return {
-      box_width_chars: pulldown_box_width_chars,
       entries,
       keeps_open: false,
       on_close,
@@ -171,19 +165,21 @@ window.try_catch_handler_(function () {
     window.report_frame_.view_post("dark_mode_show");
     menu_render();
   }
-  // Resets every browser preference to its default, as the reset entry does.
-  function user_preferences_reset() {
+  // Resets every browser preference to its default, the dark mode as given.
+  function user_preferences_reset(dark_mode_enabled) {
     window.report_ui_.view_storage.preferences_clear();
     window.report_ui_.design_scale_stop_set(null);
-    window.report_ui_.dark_mode_set_(null);
+    window.report_ui_.dark_mode_set_(dark_mode_enabled);
     window.report_preferences_.seed();
     window.report_frame_.load_log_history();
     window.report_frame_.view_post("layout_reset");
     menu_render();
   }
-  // Resets the preferences, then asks the view to reset its own state.
+  // Resets the preferences but the dark mode shown, then the view's state.
   function preferences_reset() {
-    user_preferences_reset();
+    user_preferences_reset(
+      Boolean(window.report_ui_.dark_mode_enabled_now_()),
+    );
     window.report_frame_.view_post("view_reset");
     window.report_frame_.settings_debug_clear();
   }
@@ -191,48 +187,18 @@ window.try_catch_handler_(function () {
   function dark_mode_toggle_query_apply() {
     const toggle_value = window.report_dark_mode_.toggle_query_value();
     if (toggle_value === null) return;
-    user_preferences_reset();
+    user_preferences_reset(null);
     if (toggle_value) dark_mode_toggle();
   }
 
   function choice_label(choices, choice_value) {
     return choices.find((choice) => choice.value === choice_value).label;
   }
-  // Returns the counters label: one counter's description, else the word.
-  function counters_label(list_key) {
-    const shown_names =
-      window.report_preferences_.shown_counter_names(list_key);
-    return shown_names.length === 1
-      ? window.report_preferences_.counter_description(shown_names[0])
-      : window.ui_strings_.text("str_menu_counters");
-  }
-  // Lists the counters pulldown's choices, each line of the list, marked.
-  function counter_choices(list_key) {
-    const shown_preferences = window.report_preferences_.now();
-    return shown_preferences.counter_lists[list_key].map((counter_line) => ({
-      label: window.ui_strings_.text_fill("str_menu_counter_entry", {
-        mark: window.ui_strings_.text(
-          counter_line.is_shown
-            ? "str_menu_counter_selected_mark"
-            : "str_menu_counter_unselected_mark",
-        ),
-        label: window.report_preferences_.line_label(
-          list_key,
-          counter_line.line_name,
-        ),
-      }),
-      value: counter_line.line_name,
-    }));
-  }
   // Shows or hides one line of a counters list, unless the list keeps it.
   function counter_line_toggle(list_key, line_name) {
     if (!window.report_preferences_.counter_line_toggle(list_key, line_name))
       return;
     window.report_frame_.view_post("preferences_apply");
-    preference_strip_handle.pulldown_label_set(
-      "counters",
-      counters_label(list_key),
-    );
   }
   // Moves one line of a counters list next to its anchor, columns following.
   function counter_line_move(list_key, line_name, anchor_name, lands_after) {
@@ -244,21 +210,45 @@ window.try_catch_handler_(function () {
     );
     window.report_frame_.view_post("preferences_apply");
   }
-  function heat_scale_choose(scale_value) {
-    window.report_preferences_.heat_scale_choose(scale_value);
+  // Chooses a call graph sort, then labels its pulldown with it.
+  function call_graph_sort_choose(sort_mode) {
+    window.report_preferences_.call_graph_sort_choose(sort_mode);
     window.report_frame_.view_post("preferences_apply");
     preference_strip_handle.pulldown_label_set(
-      "heat_scale",
-      choice_label(heat_scale_choices, scale_value),
+      "call_graph_sort",
+      choice_label(call_graph_sort_choices, sort_mode),
     );
   }
-  function heat_sort_choose(sort_mode) {
-    window.report_preferences_.heat_sort_choose(sort_mode);
-    window.report_frame_.view_post("preferences_apply");
-    preference_strip_handle.pulldown_label_set(
-      "heat_sort",
-      choice_label(heat_sort_choices, sort_mode),
+  // Returns the value of the one choice of a pair not chosen.
+  function other_choice_value(choices, chosen_value) {
+    const other_choices = choices.filter(
+      (offered_choice) => offered_choice.value !== chosen_value,
     );
+    if (other_choices.length !== 1)
+      window.throw_exception_("str_error_internal");
+    return other_choices[0].value;
+  }
+  // Chooses the other heat scale, then draws the menu with its label.
+  function heat_scale_toggle() {
+    window.report_preferences_.heat_scale_choose(
+      other_choice_value(
+        heat_scale_choices,
+        window.report_preferences_.now().heat_scale_value,
+      ),
+    );
+    window.report_frame_.view_post("preferences_apply");
+    menu_render();
+  }
+  // Chooses the other heat sort, then draws the menu with its label.
+  function heat_sort_toggle() {
+    window.report_preferences_.heat_sort_choose(
+      other_choice_value(
+        heat_sort_choices,
+        window.report_preferences_.now().heat_sort_mode,
+      ),
+    );
+    window.report_frame_.view_post("preferences_apply");
+    menu_render();
   }
 
   function scale_text(scale_stop) {
@@ -303,8 +293,13 @@ window.try_catch_handler_(function () {
     return true;
   }
 
-  // Returns whether an entry shows, each need its settings row names met.
+  // Returns whether an entry shows: on a view it names, if any, each need met.
   function entry_available(entry_name, address, view_key) {
+    if (
+      Object.hasOwn(MENU_ENTRY_VIEW_KEYS, entry_name) &&
+      !MENU_ENTRY_VIEW_KEYS[entry_name].includes(address.view)
+    )
+      return false;
     if (!Object.hasOwn(MENU_ENTRY_NEEDS, entry_name)) return true;
     return MENU_ENTRY_NEEDS[entry_name].every((need_name) => {
       if (need_name === "counter_list")
@@ -313,7 +308,6 @@ window.try_catch_handler_(function () {
           address.view,
         );
       if (need_name === "test") return address.test !== null;
-      if (need_name === "view") return address.view !== null;
       if (need_name === "view_page" && view_key !== null)
         return window.report_frame_.view_has_page(view_key);
       window.throw_exception_("str_error_internal");
@@ -421,9 +415,6 @@ window.try_catch_handler_(function () {
       {
         is_available: entry_available(entry_name, address, null),
         pulldown_options: {
-          box_width_chars:
-            Math.max(...choices().map((choice) => choice.label.length)) +
-            STYLE_MENU_PULLDOWN_EXTRA_WIDTH_CHARS,
           entries: () => window.report_ui_.strip.choice_entries(choices()),
           keeps_open,
           on_close: () => {},
@@ -440,8 +431,8 @@ window.try_catch_handler_(function () {
     return preference_pulldown_entry(
       "counters",
       address,
-      counters_label(list_key),
-      () => counter_choices(list_key),
+      window.ui_strings_.text("str_menu_counters"),
+      () => window.report_preferences_.counter_choices(list_key),
       (line_name) => counter_line_toggle(list_key, line_name),
       true,
       (line_name, anchor_name, lands_after) =>
@@ -455,23 +446,35 @@ window.try_catch_handler_(function () {
       ...(entry_available("counters", address, null)
         ? [counters_entry(address)]
         : []),
-      preference_pulldown_entry(
+      window.report_ui_.strip.entry_make(
         "heat_scale",
-        address,
+        "action",
         choice_label(heat_scale_choices, shown_preferences.heat_scale_value),
-        () => heat_scale_choices,
-        heat_scale_choose,
+        {
+          is_available: entry_available("heat_scale", address, null),
+          on_activate: heat_scale_toggle,
+        },
+      ),
+      preference_pulldown_entry(
+        "call_graph_sort",
+        address,
+        choice_label(
+          call_graph_sort_choices,
+          shown_preferences.call_graph_sort_mode,
+        ),
+        () => call_graph_sort_choices,
+        call_graph_sort_choose,
         false,
         null,
       ),
-      preference_pulldown_entry(
+      window.report_ui_.strip.entry_make(
         "heat_sort",
-        address,
+        "action",
         choice_label(heat_sort_choices, shown_preferences.heat_sort_mode),
-        () => heat_sort_choices,
-        heat_sort_choose,
-        false,
-        null,
+        {
+          is_available: entry_available("heat_sort", address, null),
+          on_activate: heat_sort_toggle,
+        },
       ),
       entry(dark_mode_string_id(), "action", address, null, {
         is_numbered: false,
@@ -484,20 +487,12 @@ window.try_catch_handler_(function () {
     if (address.function !== null) return address.function;
     if (address.file === null) return "";
     const base_name = address.file.split("/").pop();
-    return address.line !== null ? base_name + ":" + address.line : base_name;
+    return window.report_ui_.location_text(base_name, address.line);
   }
-  // Lists the heat map's status labels: a function, else a file and its line.
+  // Lists the heat map's status label: a function, else a file and its line.
   function heat_map_status_entries(address) {
-    if (address.function !== null) return [address.function];
-    if (address.file === null) return [];
-    const file_label = address.file.split("/").pop();
-    if (address.line === null) return [file_label];
-    return [
-      file_label,
-      window.ui_strings_.text_fill("str_menu_status_line", {
-        line: address.line,
-      }),
-    ];
+    const part_text = heat_map_part_text(address);
+    return part_text ? [part_text] : [];
   }
   // Lists the focused path labels while the call graph shows, root first.
   function focused_path_status_entries(address) {
@@ -593,6 +588,7 @@ window.try_catch_handler_(function () {
   window.report_menu_ = {
     address_show,
     counter_line_move,
+    heat_sort_toggle,
     menu_key_handler,
     menu_render,
   };

@@ -6,9 +6,9 @@
   <head>
     <meta charset="utf-8" />
     <script src="scripts/error_overlay.js"></script>
+    <script src="scripts/settings.js"></script>
     <script src="scripts/utility.js"></script>
     <script src="scripts/ui_strings.js"></script>
-    <script src="scripts/settings.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title></title>
     <link rel="stylesheet" href="scripts/theme.css" />
@@ -19,7 +19,7 @@
     <div id="overview-page-scroll-box-">
       <div id="overview-page-">
         __MENU__
-        <div id="overview-home-" hidden>
+        <div id="overview-home-" class="view-" hidden>
           <main id="overview-home-text-">
             <div class="page-">
               __TESTS_HEADING__ __TESTS__
@@ -30,6 +30,12 @@
           <div
             class="text-scrollbar- vertical-"
             data-scrolls-="overview-home-text-"
+            aria-hidden="true"
+          ></div>
+          <div
+            class="text-scrollbar- horizontal-"
+            data-scrolls-="overview-home-text-"
+            data-chains-page-
             aria-hidden="true"
           ></div>
         </div>

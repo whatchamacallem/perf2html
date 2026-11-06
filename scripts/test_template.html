@@ -22,17 +22,22 @@
         padding: 4px;
         background: inherit;
       }
-      #strip- select {
+      #strip- select,
+      #strip- input,
+      #strip- button {
         font: inherit;
       }
-      table {
+      #strip- form {
+        display: inline;
+      }
+      #grid- table {
         width: 100%;
         border: 0;
         border-spacing: 0;
         border-collapse: collapse;
         table-layout: fixed;
       }
-      td {
+      #grid- td {
         padding: 0;
         border: 0;
         overflow: hidden;
@@ -56,6 +61,14 @@
         right: 0;
         bottom: 0;
       }
+      #page-timings- {
+        border-collapse: collapse;
+      }
+      #page-timings- th,
+      #page-timings- td {
+        padding: 0 1ch;
+        text-align: left;
+      }
     </style>
   </head>
   <body>
@@ -64,9 +77,40 @@
       <a href="test_verbose.md">test_verbose.md</a>
       <label for="width-">width:</label>
       <select id="width-" autocomplete="off"></select>
+      <form id="window-form-">
+        <label for="resolution-">resolution:</label>
+        <input
+          id="resolution-"
+          type="number"
+          min="1"
+          step="1"
+          required
+          autocomplete="off"
+        />p
+        <label for="zoom-">zoom:</label>
+        <input
+          id="zoom-"
+          type="number"
+          min="1"
+          step="1"
+          required
+          autocomplete="off"
+        />%
+        <button type="submit">apply</button>
+      </form>
     </div>
     <div id="grid-"></div>
-    <pre id="page-timings-"></pre>
+    <table id="page-timings-">
+      <thead>
+        <tr>
+          <th>ms</th>
+          <th>page</th>
+          <th>phase</th>
+          <th>shot</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
     __SHOT_LIST__
     <script>
       (function () {
@@ -74,14 +118,25 @@
           document.getElementById("shot-list-").textContent,
         );
         const select = document.getElementById("width-");
+        const resolution_box = document.getElementById("resolution-");
+        const zoom_box = document.getElementById("zoom-");
+        const window_form = document.getElementById("window-form-");
         const grid = document.getElementById("grid-");
         const report_links = document.getElementById("report-links-");
-        const timing_list = document.getElementById("page-timings-");
+        const timing_table = document.getElementById("page-timings-");
+        const RESOLUTION_HASH_KEY = "resolution";
         // The page y of the menu and view boundary, kept on whole pixels.
         const SCALE_QUANTUM_PAGE_Y = 51;
         const WIDTH_CHOICE_MAX = 16;
         const WIDTH_DEFAULT = 4;
         const WIDTH_STORAGE_KEY = "perf2html.test.thumbs_width";
+        const ZOOM_HASH_KEY = "zoom";
+        // The zoom percent of no zoom, which a frame takes when none is given.
+        const ZOOM_WHOLE_PERCENT = 100;
+        let frame_height = 0,
+          frame_width = 0,
+          frame_zoom = 0,
+          layout_animation_frame = 0;
         for (let n = 1; n <= WIDTH_CHOICE_MAX; n++) {
           const option = document.createElement("option");
           option.value = String(n);
@@ -98,18 +153,28 @@
           report_link.textContent = report_entry.name;
           report_links.append(report_link);
         });
-        // Draws each report's page load and phase timings below the grid.
-        const timing_lines = data.page_timings.map(function (page_timing) {
-          return page_timing.line;
+        // Draws every report's page load and phase timings, slowest first.
+        data.page_timings.sort(function (first_timing, second_timing) {
+          return (
+            Number(second_timing.duration_ms) -
+            Number(first_timing.duration_ms)
+          );
         });
-        timing_list.textContent = timing_lines.join("\n");
+        for (const page_timing of data.page_timings) {
+          const timing_row = timing_table.tBodies[0].insertRow();
+          for (const column_text of [
+            page_timing.duration_ms,
+            page_timing.page_file,
+            page_timing.phase_label,
+            page_timing.shot,
+          ]) {
+            timing_row.insertCell().textContent = column_text;
+          }
+        }
 
         // Returns the stored width choice, the default when none is stored.
         function width_choice_read() {
-          let stored_choice = null;
-          try {
-            stored_choice = localStorage.getItem(WIDTH_STORAGE_KEY);
-          } catch (storage_error) {}
+          const stored_choice = localStorage.getItem(WIDTH_STORAGE_KEY);
           if (stored_choice === null) {
             return String(WIDTH_DEFAULT);
           }
@@ -123,9 +188,64 @@
         }
 
         function width_choice_write() {
-          try {
-            localStorage.setItem(WIDTH_STORAGE_KEY, select.value);
-          } catch (storage_error) {}
+          localStorage.setItem(WIDTH_STORAGE_KEY, select.value);
+        }
+
+        // Returns a hash key's whole number above zero, null for none.
+        function hash_number_read(hash_key) {
+          const number_text = new URLSearchParams(location.hash.slice(1)).get(
+            hash_key,
+          );
+          if (number_text === null) {
+            return null;
+          }
+          if (!/^[1-9][0-9]*$/.test(number_text)) {
+            throw new Error(hash_key + " holds " + number_text);
+          }
+          return Number(number_text);
+        }
+
+        // Returns the hash holding a resolution and a zoom percent.
+        function window_hash(resolution, zoom_percent) {
+          return (
+            "#" +
+            new URLSearchParams({
+              [RESOLUTION_HASH_KEY]: resolution,
+              [ZOOM_HASH_KEY]: zoom_percent,
+            })
+          );
+        }
+
+        // Sizes every frame to a resolution in the shots' aspect, zoomed.
+        function window_apply(resolution, zoom_percent) {
+          frame_height = resolution;
+          frame_width = Math.round((resolution * data.width) / data.height);
+          frame_zoom = zoom_percent / ZOOM_WHOLE_PERCENT;
+          resolution_box.value = String(resolution);
+          zoom_box.value = String(zoom_percent);
+          build();
+        }
+
+        // Applies the hash's window, writing in each default it lacks.
+        function hash_window_take() {
+          const hash_resolution = hash_number_read(RESOLUTION_HASH_KEY);
+          const hash_zoom_percent = hash_number_read(ZOOM_HASH_KEY);
+          if (hash_resolution === null || hash_zoom_percent === null) {
+            history.replaceState(
+              null,
+              "",
+              window_hash(
+                hash_resolution === null ? data.height : hash_resolution,
+                hash_zoom_percent === null
+                  ? ZOOM_WHOLE_PERCENT
+                  : hash_zoom_percent,
+              ),
+            );
+          }
+          window_apply(
+            hash_number_read(RESOLUTION_HASH_KEY),
+            hash_number_read(ZOOM_HASH_KEY),
+          );
         }
 
         // Sizes whole pixel boxes under a scale quantized for whole rows.
@@ -133,14 +253,24 @@
           const count = Number(select.value);
           const cell_width = grid.clientWidth / count;
           const scale =
-            Math.floor((cell_width / data.width) * SCALE_QUANTUM_PAGE_Y) /
+            Math.floor((cell_width / frame_width) * SCALE_QUANTUM_PAGE_Y) /
             SCALE_QUANTUM_PAGE_Y;
-          const box_width = Math.floor(data.width * scale);
-          const box_height = Math.floor(data.height * scale);
+          const box_width = Math.floor(frame_width * scale);
+          const box_height = Math.floor(frame_height * scale);
           for (const cell of grid.querySelectorAll(".cell-")) {
             cell.style.width = box_width + "px";
             cell.style.height = box_height + "px";
             cell.firstChild.style.transform = "scale(" + scale + ")";
+          }
+        }
+
+        // Lays out next frame, so no observed size changes in the callback.
+        function layout_defer() {
+          if (!layout_animation_frame) {
+            layout_animation_frame = requestAnimationFrame(function () {
+              layout_animation_frame = 0;
+              layout();
+            });
           }
         }
 
@@ -158,8 +288,10 @@
             box.className = "cell-";
             const frame = document.createElement("iframe");
             frame.src = page.href;
-            frame.width = data.width;
-            frame.height = data.height;
+            // Shows the page the window a browser zoom gives, in the same box.
+            frame.style.width = frame_width / frame_zoom + "px";
+            frame.style.height = frame_height / frame_zoom + "px";
+            frame.style.zoom = String(frame_zoom);
             // Opens the page as a user loads it, with no screenshot code.
             const page_address = new URL(page.href, document.baseURI);
             for (const screenshot_key of data.screenshot_keys) {
@@ -183,12 +315,21 @@
           width_choice_write();
           build();
         });
-        new ResizeObserver(layout).observe(grid);
+        // Puts the edited window in the hash, which applies it.
+        window_form.addEventListener("submit", function (submit_event) {
+          submit_event.preventDefault();
+          location.hash = window_hash(
+            Number(resolution_box.value),
+            Number(zoom_box.value),
+          );
+        });
+        window.addEventListener("hashchange", hash_window_take);
+        new ResizeObserver(layout_defer).observe(grid);
         // Takes the focus from the frames, each of which may have focused one.
         window.addEventListener("load", function () {
           window.focus();
         });
-        build();
+        hash_window_take();
       })();
     </script>
   </body>

@@ -12,6 +12,9 @@ import argparse, bisect, json, os, re, shutil, subprocess, sys, urllib.parse
 import PIL.Image, PIL.ImageChops, PIL.ImageDraw, PIL.ImageEnhance
 import PIL.ImageFont
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import test_settings
+
 
 class PageTiming(NamedTuple):
     # A report page's file, relative to the report.
@@ -41,145 +44,67 @@ class ScreenshotSet(NamedTuple):
     absent_files: tuple[str, ...]
 
     def shot_variants(self) -> tuple[ShotVariant, ...]:
-        if self.shot_flags & _SHOOT_INDEX_PAGE:
+        if self.shot_flags & test_settings.SHOOT_INDEX_PAGE:
             return _SHOT_INDEX_PAGE
-        if self.shot_flags & _SHOOT_ONE_VARIANT:
+        if self.shot_flags & test_settings.SHOOT_ONE_VARIANT:
             return _SHOT_ONE_VARIANT
         return _SHOT_REPORT_PERMUTATIONS
 
 
-_COMPARE_BACKGROUND_COLOR = (96, 96, 96)
-_COMPARE_BOX_LINE_PX = 4
-_COMPARE_CROP_MARGIN_PX = 8
-_COMPARE_GAP_PX = 8
-_COMPARE_HIGHLIGHT_COLOR = (255, 0, 255)
-_COMPARE_IMAGE_PREFIX = "compare_"
-_COMPARE_KEPT_BRIGHTNESS_SHARE = 0.25
-_COMPARE_LABEL_COLOR = (255, 255, 255)
-_COMPARE_LABEL_FONT_PX = 20
-_COMPARE_LISTED_REGION_COUNT = 4
-_COMPARE_PANELS_MAX_HEIGHT_SHARE = 2
-_COMPARE_REGION_TILE_PX = 16
+# The texts of a kept timing, as the index table and the verbose line show.
+class TimingRow(NamedTuple):
+    duration_ms: str
+    page_file: str
+    phase_label: str
+    shot: str
 
-_DEBUG_SCRIPT_ASSET: tuple[str, ...] = ("scripts/debug.js",)
+    # Returns the line the verbose output prints for the timing.
+    def verbose_line(self) -> str:
+        return (
+            f"{self.page_file}: {self.phase_label}"
+            f" {self.duration_ms} ms, {self.shot}"
+        )
 
-_ENTRY_PAGE = "index.html"
 
-_FAULT_TAIL_CHARS = 400
-
-_IMAGE_SUFFIX = ".png"
-
-_INDEX_DATA_PATTERN = re.compile(
-    r'<script id="shot-list-" type="application/json">(.*?)</script>',
-    re.DOTALL,
+_SHOOT_BOTH_REPORTS = (
+    test_settings.SHOOT_DIFF_REPORT | test_settings.SHOOT_REGULAR_REPORT
 )
-_INDEX_MARKER = "__SHOT_LIST__"
-_INDEX_PAGE_NAME = "test_index.html"
-_INDEX_REPORT_NAMES: tuple[str, ...] = (
-    "perf2html_baseline_report",
-    "perf2html_modified_report",
-    "perf2html_diff_report",
-)
-_INDEX_TEMPLATE_NAME = "test_template.html"
-
-_MARKDOWN_FENCE_INFO = "txt"
-_MARKDOWN_FENCE_MARK = "`"
-_MARKDOWN_FENCE_MIN_MARKS = 3
-
-_REPORT_THEME_STYLESHEET_ASSET: tuple[str, ...] = ("scripts/theme.css",)
-
-_SCREENSHOT_DIR_NAME = "screenshots"
-
-_SCREENSHOT_LABEL_URL_PARAM = "screenshot"
-_SCREENSHOT_LABEL_URL_VALUE = "1"
-
-_SCREENSHOT_MENU_URL_PARAM = "screenshot-menu"
-
-_SCREENSHOT_RENDER_BUDGET_MS = 8000
-
-_SCREENSHOT_SCRATCH_DIR_PATH = "build/screenshots_scratch"
-
-_SCREENSHOT_TOGGLE_DARK_URL_PARAM = "toggle-dark"
-# The default dark mode first, then that toggled to light.
-_SCREENSHOT_TOGGLE_DARK_VALUES: tuple[str, ...] = ("0", "1")
-
-_SCREENSHOT_TRACE_FILE_PATH = "build/screenshots_trace.json"
-
-_SCREENSHOT_VIEWPORTS: tuple[tuple[str, int, int], ...] = (
-    ("720p", 1280, 720),
-    ("4k", 3840, 2160),
-)
-
-_SHOOT_DIFF_REPORT = 1 << 0
-# Shoots the index page of the finished run at 4k, once.
-_SHOOT_INDEX_PAGE = 1 << 3
-# Shoots 720p dark, once.
-_SHOOT_ONE_VARIANT = 1 << 1
-_SHOOT_REGULAR_REPORT = 1 << 2
-_SHOOT_BOTH_REPORTS = _SHOOT_DIFF_REPORT | _SHOOT_REGULAR_REPORT
 
 _SHOT_INDEX_PAGE: tuple[ShotVariant, ...] = (
-    ShotVariant(*_SCREENSHOT_VIEWPORTS[1], _SCREENSHOT_TOGGLE_DARK_VALUES[0]),
+    ShotVariant(
+        *test_settings.SCREENSHOT_VIEWPORTS[1],
+        test_settings.SCREENSHOT_TOGGLE_DARK_VALUES[0],
+    ),
 )
 _SHOT_ONE_VARIANT: tuple[ShotVariant, ...] = (
-    ShotVariant(*_SCREENSHOT_VIEWPORTS[0], _SCREENSHOT_TOGGLE_DARK_VALUES[0]),
+    ShotVariant(
+        *test_settings.SCREENSHOT_VIEWPORTS[0],
+        test_settings.SCREENSHOT_TOGGLE_DARK_VALUES[0],
+    ),
 )
 _SHOT_REPORT_PERMUTATIONS: tuple[ShotVariant, ...] = tuple(
     ShotVariant(*viewport, toggle_dark_value)
-    for viewport in _SCREENSHOT_VIEWPORTS
-    for toggle_dark_value in _SCREENSHOT_TOGGLE_DARK_VALUES
+    for viewport in test_settings.SCREENSHOT_VIEWPORTS
+    for toggle_dark_value in test_settings.SCREENSHOT_TOGGLE_DARK_VALUES
 )
-
-_SHOT_MODE_NAME_PARTS: dict[str, str] = {"0": "dark", "1": "light"}
-_SHOT_NAME_SEPARATOR = "-"
-_SHOT_NUMBER_DIGITS = 2
-
-_TIMING_FILE_LINES_MAX = 3
-_TIMING_LOAD_PHASE_NAME = "load"
-_TIMING_MICROSECONDS_PER_MILLISECOND = 1000
-_TIMING_SCRIPT_PHASE_NAME = "script"
-
-_TRACE_BEGIN_TYPE = "B"
-_TRACE_CATEGORIES = "devtools.timeline"
-# navigationStart is stamped in virtual time, so loads count from the commit.
-_TRACE_COMMIT_NAME = "CommitLoad"
-_TRACE_COMPLETE_TYPE = "X"
-_TRACE_END_TYPE = "E"
-_TRACE_FORMAT = "json"
-_TRACE_FUNCTION_CALL_NAME = "FunctionCall"
-_TRACE_LOAD_NAME = "MarkLoad"
-_TRACE_MARK_NAMES: tuple[str, ...] = (_TRACE_COMMIT_NAME, _TRACE_LOAD_NAME)
-# A function call of this script id runs no page script, so no file owns it.
-_TRACE_NO_SCRIPT_ID = "0"
-# The phase each traced slice counts to and the argument naming its frame.
-_TRACE_PHASES: dict[str, tuple[str, str]] = {
-    "EvaluateScript": (_TIMING_SCRIPT_PHASE_NAME, "data"),
-    _TRACE_FUNCTION_CALL_NAME: (_TIMING_SCRIPT_PHASE_NAME, "data"),
-    "Layout": ("layout", "beginData"),
-    "Paint": ("paint", "data"),
-    "UpdateLayoutTree": ("style", "beginData"),
-}
-_TRACE_SLICE_TYPES: tuple[str, ...] = (
-    _TRACE_BEGIN_TYPE,
-    _TRACE_COMPLETE_TYPE,
-    _TRACE_END_TYPE,
-)
-
-_VERBOSE_RAW_LEVEL = 2
 
 _VIEWS: tuple[ScreenshotSet, ...] = (
     ScreenshotSet(
-        _SHOOT_REGULAR_REPORT,
+        test_settings.SHOOT_REGULAR_REPORT,
         "#test=urlparser&view=flame-graph&localProfilePath=profile",
         "",
         "flame_graph",
         "profile",
         (),
     ),
-    ScreenshotSet(_SHOOT_DIFF_REPORT, "", "2", "overview", "home", ()),
-    ScreenshotSet(_SHOOT_REGULAR_REPORT, "", "", "overview", "home", ()),
     ScreenshotSet(
-        _SHOOT_REGULAR_REPORT,
+        test_settings.SHOOT_DIFF_REPORT, "", "2", "overview", "home", ()
+    ),
+    ScreenshotSet(
+        test_settings.SHOOT_REGULAR_REPORT, "", "", "overview", "home", ()
+    ),
+    ScreenshotSet(
+        test_settings.SHOOT_REGULAR_REPORT,
         "#test=urlparser&view=database",
         "5",
         "database",
@@ -187,7 +112,7 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         (),
     ),
     ScreenshotSet(
-        _SHOOT_REGULAR_REPORT | _SHOOT_ONE_VARIANT,
+        test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_ONE_VARIANT,
         "#test=urlparser&view=heat-map",
         "",
         "error",
@@ -221,7 +146,7 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         (),
     ),
     ScreenshotSet(
-        _SHOOT_BOTH_REPORTS | _SHOOT_ONE_VARIANT,
+        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_ONE_VARIANT,
         "#view=settings",
         "",
         "settings",
@@ -229,7 +154,7 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         (),
     ),
     ScreenshotSet(
-        _SHOOT_BOTH_REPORTS | _SHOOT_ONE_VARIANT,
+        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_ONE_VARIANT,
         "#view=settings&setting=DARK_MODE_ENABLED_DEFAULT"
         "&setting-values=eyJEQVJLX01PREVfRU5BQkxFRF9ERUZBVUxUIjpmYWxzZX0%3D",
         "",
@@ -238,7 +163,7 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         (),
     ),
     ScreenshotSet(
-        _SHOOT_BOTH_REPORTS | _SHOOT_ONE_VARIANT,
+        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_ONE_VARIANT,
         "#test=urlparser&view=heat-map&function=no_such_function",
         "",
         "error",
@@ -246,26 +171,31 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         (),
     ),
     ScreenshotSet(
-        _SHOOT_BOTH_REPORTS | _SHOOT_ONE_VARIANT,
+        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_ONE_VARIANT,
         "",
         "",
         "error",
         "report_incomplete",
-        _DEBUG_SCRIPT_ASSET,
+        test_settings.DEBUG_SCRIPT_ASSET,
     ),
     ScreenshotSet(
-        _SHOOT_BOTH_REPORTS | _SHOOT_ONE_VARIANT,
+        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_ONE_VARIANT,
         "",
         "",
         "error",
         "stylesheet_missing",
-        _REPORT_THEME_STYLESHEET_ASSET,
+        test_settings.REPORT_THEME_STYLESHEET_ASSET,
     ),
     ScreenshotSet(
-        _SHOOT_DIFF_REPORT | _SHOOT_INDEX_PAGE, "", "", "index", "page", ()
+        test_settings.SHOOT_DIFF_REPORT | test_settings.SHOOT_INDEX_PAGE,
+        "",
+        "",
+        "index",
+        "page",
+        (),
     ),
     ScreenshotSet(
-        _SHOOT_REGULAR_REPORT,
+        test_settings.SHOOT_REGULAR_REPORT,
         "#test=urlparser&view=database"
         "&setting-values=eyJEQVRBQkFTRV9DT1VOVEVSX0xJU1RfREVGQVVMVF9TSE9X"
         "Tl9OQU1FUyI6WyJjYWxscyIsIklyIiwiRDFtciIsIkRMbXIiLCJCY20iXX0%3D",
@@ -275,7 +205,7 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         (),
     ),
     ScreenshotSet(
-        _SHOOT_REGULAR_REPORT | _SHOOT_ONE_VARIANT,
+        test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_ONE_VARIANT,
         "#view=heat-map",
         "",
         "error",
@@ -294,7 +224,7 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         (),
     ),
     ScreenshotSet(
-        _SHOOT_REGULAR_REPORT | _SHOOT_ONE_VARIANT,
+        test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_ONE_VARIANT,
         "#view=database",
         "",
         "error",
@@ -302,7 +232,7 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         (),
     ),
     ScreenshotSet(
-        _SHOOT_REGULAR_REPORT | _SHOOT_ONE_VARIANT,
+        test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_ONE_VARIANT,
         "#view=flame-graph",
         "",
         "error",
@@ -310,7 +240,7 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         (),
     ),
     ScreenshotSet(
-        _SHOOT_REGULAR_REPORT,
+        test_settings.SHOOT_REGULAR_REPORT,
         "#test=urlparser&view=call-graph",
         "7",
         "call_graph",
@@ -318,7 +248,7 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         (),
     ),
     ScreenshotSet(
-        _SHOOT_REGULAR_REPORT | _SHOOT_ONE_VARIANT,
+        test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_ONE_VARIANT,
         "#view=call-graph",
         "",
         "error",
@@ -369,7 +299,7 @@ class Screenshots:
     def changed_regions(
         self, changed_mask: PIL.Image.Image
     ) -> list[tuple[int, int, int, int]]:
-        tile_mask = changed_mask.reduce(_COMPARE_REGION_TILE_PX)
+        tile_mask = changed_mask.reduce(test_settings.COMPARE_REGION_TILE_PX)
         marked_tiles = {
             (tile_index % tile_mask.width, tile_index // tile_mask.width)
             for tile_index, tile_value in enumerate(tile_mask.tobytes())
@@ -392,14 +322,18 @@ class Screenshots:
                     if neighbour_tile in marked_tiles:
                         marked_tiles.remove(neighbour_tile)
                         pending_tiles.append(neighbour_tile)
-            tile_left = min(region_columns) * _COMPARE_REGION_TILE_PX
-            tile_top = min(region_rows) * _COMPARE_REGION_TILE_PX
+            tile_left = (
+                min(region_columns) * test_settings.COMPARE_REGION_TILE_PX
+            )
+            tile_top = min(region_rows) * test_settings.COMPARE_REGION_TILE_PX
             inner_box = changed_mask.crop(
                 (
                     tile_left,
                     tile_top,
-                    (max(region_columns) + 1) * _COMPARE_REGION_TILE_PX,
-                    (max(region_rows) + 1) * _COMPARE_REGION_TILE_PX,
+                    (max(region_columns) + 1)
+                    * test_settings.COMPARE_REGION_TILE_PX,
+                    (max(region_rows) + 1)
+                    * test_settings.COMPARE_REGION_TILE_PX,
                 )
             ).getbbox()
             assert inner_box is not None, "a marked tile holds no change"
@@ -433,11 +367,15 @@ class Screenshots:
         compare_path: str,
     ) -> None:
         overview_image = PIL.ImageEnhance.Brightness(new_shot).enhance(
-            _COMPARE_KEPT_BRIGHTNESS_SHARE
+            test_settings.COMPARE_KEPT_BRIGHTNESS_SHARE
         )
-        overview_image.paste(_COMPARE_HIGHLIGHT_COLOR, mask=changed_mask)
+        overview_image.paste(
+            test_settings.COMPARE_HIGHLIGHT_COLOR, mask=changed_mask
+        )
         box_drawing = PIL.ImageDraw.Draw(overview_image)
-        label_font = PIL.ImageFont.load_default(size=_COMPARE_LABEL_FONT_PX)
+        label_font = PIL.ImageFont.load_default(
+            size=test_settings.COMPARE_LABEL_FONT_PX
+        )
         for region_number, (
             region_left,
             region_top,
@@ -446,26 +384,26 @@ class Screenshots:
         ) in enumerate(changed_regions, 1):
             box_drawing.rectangle(
                 (
-                    region_left - _COMPARE_BOX_LINE_PX,
-                    region_top - _COMPARE_BOX_LINE_PX,
-                    region_right - 1 + _COMPARE_BOX_LINE_PX,
-                    region_bottom - 1 + _COMPARE_BOX_LINE_PX,
+                    region_left - test_settings.COMPARE_BOX_LINE_PX,
+                    region_top - test_settings.COMPARE_BOX_LINE_PX,
+                    region_right - 1 + test_settings.COMPARE_BOX_LINE_PX,
+                    region_bottom - 1 + test_settings.COMPARE_BOX_LINE_PX,
                 ),
-                outline=_COMPARE_HIGHLIGHT_COLOR,
-                width=_COMPARE_BOX_LINE_PX,
+                outline=test_settings.COMPARE_HIGHLIGHT_COLOR,
+                width=test_settings.COMPARE_BOX_LINE_PX,
             )
             box_drawing.text(
                 (
-                    max(region_left - _COMPARE_BOX_LINE_PX, 0),
+                    max(region_left - test_settings.COMPARE_BOX_LINE_PX, 0),
                     max(
                         region_top
-                        - _COMPARE_BOX_LINE_PX
-                        - _COMPARE_LABEL_FONT_PX,
+                        - test_settings.COMPARE_BOX_LINE_PX
+                        - test_settings.COMPARE_LABEL_FONT_PX,
                         0,
                     ),
                 ),
                 str(region_number),
-                fill=_COMPARE_HIGHLIGHT_COLOR,
+                fill=test_settings.COMPARE_HIGHLIGHT_COLOR,
                 font=label_font,
             )
         region_panels: list[PIL.Image.Image] = []
@@ -482,11 +420,12 @@ class Screenshots:
             )
             if (
                 panels_height + region_panel.height
-                > _COMPARE_PANELS_MAX_HEIGHT_SHARE * new_shot.height
+                > test_settings.COMPARE_PANELS_MAX_HEIGHT_SHARE
+                * new_shot.height
             ):
                 continue
             region_panels.append(region_panel)
-            panels_height += region_panel.height + _COMPARE_GAP_PX
+            panels_height += region_panel.height + test_settings.COMPARE_GAP_PX
         compare_image = PIL.Image.new(
             "RGB",
             (
@@ -496,13 +435,13 @@ class Screenshots:
                 ),
                 overview_image.height + panels_height,
             ),
-            _COMPARE_BACKGROUND_COLOR,
+            test_settings.COMPARE_BACKGROUND_COLOR,
         )
         compare_image.paste(overview_image, (0, 0))
         panel_top = overview_image.height
         for region_panel in region_panels:
             compare_image.paste(region_panel, (0, panel_top))
-            panel_top += region_panel.height + _COMPARE_GAP_PX
+            panel_top += region_panel.height + test_settings.COMPARE_GAP_PX
         os.makedirs(self.compare_dir, exist_ok=True)
         compare_image.save(compare_path)
 
@@ -510,7 +449,7 @@ class Screenshots:
     def entry_href(self, report_dir: str, index_path: str) -> str:
         return urllib.parse.quote(
             os.path.relpath(
-                os.path.join(report_dir, _ENTRY_PAGE),
+                os.path.join(report_dir, test_settings.ENTRY_PAGE),
                 os.path.dirname(index_path),
             )
         )
@@ -522,58 +461,57 @@ class Screenshots:
     # Names each shot that differs from its gold twin, each one missing.
     def gold_compare(
         self, gold_dir: str, prefix: str, verbose_level: int
-    ) -> bool:
+    ) -> None:
         shot_pattern = re.compile(
-            f"[0-9]{{{_SHOT_NUMBER_DIGITS}}}-[^-]+-[^-]+-[^-]+"
-            f"-{re.escape(prefix.rstrip('_'))}-.*" + re.escape(_IMAGE_SUFFIX)
+            f"[0-9]{{{test_settings.SHOT_NUMBER_DIGITS}}}-[^-]+-[^-]+-[^-]+"
+            f"-{re.escape(prefix.rstrip('_'))}-.*"
+            + re.escape(test_settings.IMAGE_SUFFIX)
         )
         if os.path.isdir(self.compare_dir):
             for file_name in os.listdir(self.compare_dir):
                 if file_name.startswith(
-                    _COMPARE_IMAGE_PREFIX
+                    test_settings.COMPARE_IMAGE_PREFIX
                 ) and shot_pattern.fullmatch(
-                    file_name.removeprefix(_COMPARE_IMAGE_PREFIX)
+                    file_name.removeprefix(test_settings.COMPARE_IMAGE_PREFIX)
                 ):
                     os.remove(os.path.join(self.compare_dir, file_name))
         shot_names = self.shot_names(prefix)
         is_same = True
         for shot_name in shot_names:
             if not self.gold_compare_one(
-                shot_name + _IMAGE_SUFFIX, gold_dir, verbose_level
+                shot_name + test_settings.IMAGE_SUFFIX, gold_dir, verbose_level
             ):
                 is_same = False
         for file_name in sorted(os.listdir(gold_dir)):
             if (
                 shot_pattern.fullmatch(file_name)
-                and file_name.removesuffix(_IMAGE_SUFFIX) not in shot_names
+                and file_name.removesuffix(test_settings.IMAGE_SUFFIX)
+                not in shot_names
             ):
                 print(
-                    f"{file_name}: in {gold_dir}, not among this run's shots",
-                    file=sys.stderr,
+                    f"{file_name}: in {gold_dir}, not among this run's shots"
                 )
                 is_same = False
+        # A difference makes the compare directory, its one sign to the run.
         if not is_same:
             os.makedirs(self.compare_dir, exist_ok=True)
-        return is_same
 
     def gold_compare_one(
         self, file_name: str, gold_dir: str, verbose_level: int
     ) -> bool:
-        gold_path = os.path.join(gold_dir, file_name)
-        if not os.path.isfile(gold_path):
-            print(f"{file_name}: absent from {gold_dir}", file=sys.stderr)
-            return False
         new_path = os.path.join(self.out_dir, file_name)
         if not os.path.isfile(new_path):
-            print(f"{file_name}: absent from {self.out_dir}", file=sys.stderr)
+            raise RuntimeError(f"{file_name}: absent from {self.out_dir}")
+        gold_path = os.path.join(gold_dir, file_name)
+        if not os.path.isfile(gold_path):
+            print(f"{file_name}: absent from {gold_dir}")
             return False
         new_shot = PIL.Image.open(new_path).convert("RGB")
         gold_shot = PIL.Image.open(gold_path).convert("RGB")
         if new_shot.size != gold_shot.size:
             print(
                 f"{file_name}: {new_shot.width}x{new_shot.height}, gold"
-                f" {gold_shot.width}x{gold_shot.height}",
-                file=sys.stderr,
+                f" {gold_shot.width}x{gold_shot.height}"
             )
             return False
         red_change, green_change, blue_change = PIL.ImageChops.difference(
@@ -592,7 +530,7 @@ class Screenshots:
         changed_count = changed_mask.histogram()[255]
         changed_regions = self.changed_regions(changed_mask)
         compare_path = os.path.join(
-            self.compare_dir, _COMPARE_IMAGE_PREFIX + file_name
+            self.compare_dir, test_settings.COMPARE_IMAGE_PREFIX + file_name
         )
         self.compare_image_write(
             new_shot, gold_shot, changed_mask, changed_regions, compare_path
@@ -600,10 +538,12 @@ class Screenshots:
         listed_regions = "; ".join(
             f"{region_left},{region_top} to {region_right},{region_bottom}"
             for region_left, region_top, region_right, region_bottom in (
-                changed_regions[:_COMPARE_LISTED_REGION_COUNT]
+                changed_regions[: test_settings.COMPARE_LISTED_REGION_COUNT]
             )
         )
-        unlisted_count = len(changed_regions) - _COMPARE_LISTED_REGION_COUNT
+        unlisted_count = (
+            len(changed_regions) - test_settings.COMPARE_LISTED_REGION_COUNT
+        )
         if unlisted_count > 0:
             listed_regions += f"; {unlisted_count} more"
         changed_percent = (
@@ -614,8 +554,7 @@ class Screenshots:
             f" ({changed_percent:.2f}%),"
             f" largest channel change {channel_change.getextrema()[1]},"
             f" {len(changed_regions)} region(s) {listed_regions},"
-            f" compare image {compare_path}",
-            file=sys.stderr,
+            f" compare image {compare_path}"
         )
         return False
 
@@ -625,30 +564,38 @@ class Screenshots:
         prefix: str,
         index_path: str,
         template: str,
-        timing_lines: list[str],
+        timing_rows: list[TimingRow],
     ) -> None:
-        assert template.count(_INDEX_MARKER) == 1, _INDEX_MARKER
+        assert template.count(test_settings.INDEX_MARKER) == 1, (
+            test_settings.INDEX_MARKER
+        )
         report_name = prefix.rstrip("_")
         report_href = self.entry_href(self.report, index_path)
         index_reports: list[dict[str, str]] = []
-        for listed_report in _INDEX_REPORT_NAMES:
+        for listed_report in test_settings.INDEX_REPORT_NAMES:
             listed_dir = os.path.join(
                 os.path.dirname(index_path), listed_report
             )
-            if not os.path.isfile(os.path.join(listed_dir, _ENTRY_PAGE)):
-                raise RuntimeError(f"{listed_dir} holds no {_ENTRY_PAGE}")
+            if not os.path.isfile(
+                os.path.join(listed_dir, test_settings.ENTRY_PAGE)
+            ):
+                raise RuntimeError(
+                    f"{listed_dir} holds no {test_settings.ENTRY_PAGE}"
+                )
             index_reports.append(
                 {
                     "name": listed_report,
                     "href": self.entry_href(listed_dir, index_path),
                 }
             )
-        width_px, height_px = _SCREENSHOT_VIEWPORTS[0][1:]
+        width_px, height_px = test_settings.SCREENSHOT_VIEWPORTS[0][1:]
         pages: dict[str, str] = {}
         page_timings: list[dict[str, str]] = []
         if os.path.isfile(index_path):
             with open(index_path) as index_file:
-                found = _INDEX_DATA_PATTERN.search(index_file.read())
+                found = test_settings.INDEX_DATA_PATTERN.search(
+                    index_file.read()
+                )
             assert found, f"{index_path} holds no shot list"
             index_data = json.loads(found.group(1))
             if "page_timings" not in index_data:
@@ -656,17 +603,27 @@ class Screenshots:
             for page in index_data["pages"]:
                 if page["report"] != report_name:
                     pages[page["name"]] = page["href"]
+            timing_keys = sorted(("report", *TimingRow._fields))
+            for page_timing in index_data["page_timings"]:
+                if sorted(page_timing) != timing_keys:
+                    raise RuntimeError(
+                        f"{index_path} holds a page timing keyed"
+                        f" {sorted(page_timing)}, not {timing_keys}"
+                    )
             page_timings = [
                 page_timing
                 for page_timing in index_data["page_timings"]
                 if page_timing["report"] != report_name
             ]
         page_timings += [
-            {"report": report_name, "line": timing_line}
-            for timing_line in timing_lines
+            {"report": report_name, **timing_row._asdict()}
+            for timing_row in timing_rows
         ]
         for view_index, view in self.report_views:
-            if view.absent_files or view.shot_flags & _SHOOT_INDEX_PAGE:
+            if (
+                view.absent_files
+                or view.shot_flags & test_settings.SHOOT_INDEX_PAGE
+            ):
                 continue
             for toggle_dark_value in dict.fromkeys(
                 variant.toggle_dark_value for variant in view.shot_variants()
@@ -682,13 +639,15 @@ class Screenshots:
             "width": width_px,
             "height": height_px,
             "screenshot_keys": [
-                _SCREENSHOT_LABEL_URL_PARAM,
-                _SCREENSHOT_MENU_URL_PARAM,
+                test_settings.SCREENSHOT_LABEL_URL_PARAM,
+                test_settings.SCREENSHOT_MENU_URL_PARAM,
             ],
             "pages": [
                 {
                     "name": name,
-                    "report": name.split(_SHOT_NAME_SEPARATOR)[-2],
+                    "report": name.split(test_settings.SHOT_NAME_SEPARATOR)[
+                        -2
+                    ],
                     "href": pages[name],
                 }
                 for name in sorted(pages)
@@ -704,18 +663,24 @@ class Screenshots:
             + "</script>"
         )
         with open(index_path, "w") as index_file:
-            index_file.write(template.replace(_INDEX_MARKER, data_script))
+            index_file.write(
+                template.replace(test_settings.INDEX_MARKER, data_script)
+            )
 
     # Returns the query and hash a page is shot at.
     def page_address(
         self, view_hash: str, menu_entry_number: str, toggle_dark_value: str
     ) -> str:
         query_values = {
-            _SCREENSHOT_TOGGLE_DARK_URL_PARAM: toggle_dark_value,
-            _SCREENSHOT_LABEL_URL_PARAM: _SCREENSHOT_LABEL_URL_VALUE,
+            test_settings.SCREENSHOT_TOGGLE_DARK_URL_PARAM: toggle_dark_value,
         }
+        query_values[test_settings.SCREENSHOT_LABEL_URL_PARAM] = (
+            test_settings.SCREENSHOT_LABEL_URL_VALUE
+        )
         if menu_entry_number:
-            query_values[_SCREENSHOT_MENU_URL_PARAM] = menu_entry_number
+            query_values[test_settings.SCREENSHOT_MENU_URL_PARAM] = (
+                menu_entry_number
+            )
         return "?" + urllib.parse.urlencode(query_values) + view_hash
 
     # Keeps the longer of the timings of one page file and phase.
@@ -741,7 +706,7 @@ class Screenshots:
         page = (
             page_dir
             if os.path.isfile(page_dir)
-            else os.path.join(page_dir, _ENTRY_PAGE)
+            else os.path.join(page_dir, test_settings.ENTRY_PAGE)
         )
         address = self.page_address(
             view_hash, menu_entry_number, toggle_dark_value
@@ -772,10 +737,16 @@ class Screenshots:
     ) -> PIL.Image.Image:
         region_left, region_top, region_right, region_bottom = changed_region
         crop_box = (
-            max(region_left - _COMPARE_CROP_MARGIN_PX, 0),
-            max(region_top - _COMPARE_CROP_MARGIN_PX, 0),
-            min(region_right + _COMPARE_CROP_MARGIN_PX, new_shot.width),
-            min(region_bottom + _COMPARE_CROP_MARGIN_PX, new_shot.height),
+            max(region_left - test_settings.COMPARE_CROP_MARGIN_PX, 0),
+            max(region_top - test_settings.COMPARE_CROP_MARGIN_PX, 0),
+            min(
+                region_right + test_settings.COMPARE_CROP_MARGIN_PX,
+                new_shot.width,
+            ),
+            min(
+                region_bottom + test_settings.COMPARE_CROP_MARGIN_PX,
+                new_shot.height,
+            ),
         )
         crop_width = crop_box[2] - crop_box[0]
         crop_height = crop_box[3] - crop_box[1]
@@ -785,23 +756,28 @@ class Screenshots:
         )
         gold_label_width = int(label_font.getlength(gold_label)) + 1
         column_width = max(crop_width, gold_label_width)
-        label_height = _COMPARE_LABEL_FONT_PX + _COMPARE_GAP_PX
-        new_left = column_width + _COMPARE_GAP_PX
+        label_height = (
+            test_settings.COMPARE_LABEL_FONT_PX + test_settings.COMPARE_GAP_PX
+        )
+        new_left = column_width + test_settings.COMPARE_GAP_PX
         region_panel = PIL.Image.new(
             "RGB",
             (new_left + column_width, label_height + crop_height),
-            _COMPARE_BACKGROUND_COLOR,
+            test_settings.COMPARE_BACKGROUND_COLOR,
         )
         region_panel.paste(gold_shot.crop(crop_box), (0, label_height))
         region_panel.paste(new_shot.crop(crop_box), (new_left, label_height))
         panel_drawing = PIL.ImageDraw.Draw(region_panel)
         panel_drawing.text(
-            (0, 0), gold_label, fill=_COMPARE_LABEL_COLOR, font=label_font
+            (0, 0),
+            gold_label,
+            fill=test_settings.COMPARE_LABEL_COLOR,
+            font=label_font,
         )
         panel_drawing.text(
             (new_left, 0),
             f"{region_number} new",
-            fill=_COMPARE_LABEL_COLOR,
+            fill=test_settings.COMPARE_LABEL_COLOR,
             font=label_font,
         )
         return region_panel
@@ -830,7 +806,7 @@ class Screenshots:
     def shoot_all(self, prefix: str) -> int:
         written = 0
         for view_index, view in self.report_views:
-            if view.shot_flags & _SHOOT_INDEX_PAGE:
+            if view.shot_flags & test_settings.SHOOT_INDEX_PAGE:
                 continue
             if view.absent_files:
                 written += self.copy_shoot(view_index, prefix, view)
@@ -840,12 +816,18 @@ class Screenshots:
                 )
         return written
 
-    def index_shoot(self, prefix: str, index_path: str) -> int:
+    # Shoots the index page at the given hash, else at its view's own.
+    def index_shoot(
+        self, prefix: str, index_path: str, index_hash: str
+    ) -> int:
         written = 0
         for view_index, view in self.report_views:
-            if view.shot_flags & _SHOOT_INDEX_PAGE:
+            if view.shot_flags & test_settings.SHOOT_INDEX_PAGE:
                 written += self.view_shoot(
-                    index_path, view_index, prefix, view
+                    index_path,
+                    view_index,
+                    prefix,
+                    view._replace(view_hash=index_hash or view.view_hash),
                 )
         return written
 
@@ -861,7 +843,9 @@ class Screenshots:
         height_px: int,
         trace_path: str,
     ) -> None:
-        out_path = os.path.join(self.out_dir, shot + _IMAGE_SUFFIX)
+        out_path = os.path.join(
+            self.out_dir, shot + test_settings.IMAGE_SUFFIX
+        )
         if os.path.exists(out_path):
             os.remove(out_path)
         assert self.browser, "a compare only run shoots nothing"
@@ -871,9 +855,9 @@ class Screenshots:
             if os.path.exists(trace_path):
                 os.remove(trace_path)
             trace_flags = [
-                f"--trace-startup={_TRACE_CATEGORIES}",
+                f"--trace-startup={test_settings.TRACE_CATEGORIES}",
                 f"--trace-startup-file={trace_path}",
-                f"--trace-startup-format={_TRACE_FORMAT}",
+                f"--trace-startup-format={test_settings.TRACE_FORMAT}",
                 # Zero traces until the browser exits after the shot.
                 "--trace-startup-duration=0",
             ]
@@ -888,7 +872,8 @@ class Screenshots:
                 "--run-all-compositor-stages-before-draw",
                 f"--window-size={window}",
                 f"--screenshot={out_path}",
-                f"--virtual-time-budget={_SCREENSHOT_RENDER_BUDGET_MS}",
+                "--virtual-time-budget="
+                f"{test_settings.SCREENSHOT_RENDER_BUDGET_MS}",
                 *trace_flags,
                 self.page_url(
                     page_dir, view_hash, menu_entry_number, toggle_dark_value
@@ -901,7 +886,7 @@ class Screenshots:
             return
         raise RuntimeError(
             f"{shot}: {view_hash or '(entry page)'} wrote no image:"
-            f" {result.stderr.strip()[-_FAULT_TAIL_CHARS:]}"
+            f" {result.stderr.strip()[-test_settings.FAULT_TAIL_CHARS :]}"
         )
 
     # Names a shot, leaving out the resolution when the size is empty.
@@ -913,15 +898,15 @@ class Screenshots:
         view: ScreenshotSet,
         toggle_dark_value: str,
     ) -> str:
-        return _SHOT_NAME_SEPARATOR.join(
+        return test_settings.SHOT_NAME_SEPARATOR.join(
             name_part
             for name_part in (
-                f"{view_index:0{_SHOT_NUMBER_DIGITS}d}",
+                f"{view_index:0{test_settings.SHOT_NUMBER_DIGITS}d}",
                 size_name,
                 view.view_name,
                 view.subview_name,
                 prefix.rstrip("_"),
-                _SHOT_MODE_NAME_PARTS[toggle_dark_value],
+                test_settings.SHOT_MODE_NAME_PARTS[toggle_dark_value],
             )
             if name_part
         )
@@ -941,7 +926,7 @@ class Screenshots:
         ]
 
     # Returns each page file's slowest load, then its largest phases.
-    def timing_lines(self) -> list[str]:
+    def timing_rows(self) -> list[TimingRow]:
         largest_timings: dict[tuple[str, str], PageTiming] = {}
         for page_timing in self.page_timings:
             self.page_timing_keep(largest_timings, page_timing)
@@ -949,28 +934,34 @@ class Screenshots:
         for page_timing in sorted(
             largest_timings.values(),
             key=lambda page_timing: (
-                page_timing.phase_name != _TIMING_LOAD_PHASE_NAME,
+                page_timing.phase_name != test_settings.TIMING_LOAD_PHASE_NAME,
                 -page_timing.duration_us,
             ),
         ):
             file_timings.setdefault(page_timing.page_file, []).append(
                 page_timing
             )
-        kept_lines: list[str] = []
+        kept_rows: list[TimingRow] = []
         for page_file, page_file_timings in sorted(
             file_timings.items(),
             key=lambda file_entry: -file_entry[1][0].duration_us,
         ):
-            for page_timing in page_file_timings[:_TIMING_FILE_LINES_MAX]:
+            for page_timing in page_file_timings[
+                : test_settings.TIMING_FILE_LINES_MAX
+            ]:
                 duration_ms = (
                     page_timing.duration_us
-                    / _TIMING_MICROSECONDS_PER_MILLISECOND
+                    / test_settings.TIMING_MICROSECONDS_PER_MILLISECOND
                 )
-                kept_lines.append(
-                    f"{page_file}: {page_timing.phase_label}"
-                    f" {duration_ms:.1f} ms, {page_timing.shot}"
+                kept_rows.append(
+                    TimingRow(
+                        f"{duration_ms:.1f}",
+                        page_file,
+                        page_timing.phase_label,
+                        page_timing.shot,
+                    )
                 )
-        return kept_lines
+        return kept_rows
 
     # Returns the longest load and phase slice of each page file a trace shows.
     def trace_page_timings(
@@ -979,8 +970,8 @@ class Screenshots:
         timed_events = [
             trace_event
             for trace_event in trace_events
-            if trace_event["ph"] in _TRACE_SLICE_TYPES
-            or trace_event["name"] in _TRACE_MARK_NAMES
+            if trace_event["ph"] in test_settings.TRACE_SLICE_TYPES
+            or trace_event["name"] in test_settings.TRACE_MARK_NAMES
         ]
         timed_events.sort(key=lambda trace_event: trace_event["ts"])
         commit_times: dict[str, list[float]] = {}
@@ -991,21 +982,21 @@ class Screenshots:
         for trace_event in timed_events:
             event_type = trace_event["ph"]
             thread = (trace_event["pid"], trace_event["tid"])
-            if event_type == _TRACE_END_TYPE:
+            if event_type == test_settings.TRACE_END_TYPE:
                 begun_event = begun_slices[thread].pop()
-                if begun_event["name"] in _TRACE_PHASES:
+                if begun_event["name"] in test_settings.TRACE_PHASES:
                     phase_slices.append(
                         (begun_event, trace_event["ts"] - begun_event["ts"])
                     )
                 continue
-            if event_type == _TRACE_BEGIN_TYPE:
+            if event_type == test_settings.TRACE_BEGIN_TYPE:
                 begun_slices.setdefault(thread, []).append(trace_event)
             elif (
-                event_type == _TRACE_COMPLETE_TYPE
-                and trace_event["name"] in _TRACE_PHASES
+                event_type == test_settings.TRACE_COMPLETE_TYPE
+                and trace_event["name"] in test_settings.TRACE_PHASES
             ):
                 phase_slices.append((trace_event, trace_event["dur"]))
-            if trace_event["name"] == _TRACE_COMMIT_NAME:
+            if trace_event["name"] == test_settings.TRACE_COMMIT_NAME:
                 commit_data = trace_event["args"]["data"]
                 commit_times.setdefault(commit_data["frame"], []).append(
                     trace_event["ts"]
@@ -1013,7 +1004,7 @@ class Screenshots:
                 commit_files.setdefault(commit_data["frame"], []).append(
                     self.relative_file_of(commit_data["url"], root_url)
                 )
-            elif trace_event["name"] == _TRACE_LOAD_NAME:
+            elif trace_event["name"] == test_settings.TRACE_LOAD_NAME:
                 load_marks.append(
                     (trace_event["args"]["data"]["frame"], trace_event["ts"])
                 )
@@ -1030,14 +1021,16 @@ class Screenshots:
                 page_timings,
                 PageTiming(
                     commit_files[frame][commit_index],
-                    _TIMING_LOAD_PHASE_NAME,
-                    _TIMING_LOAD_PHASE_NAME,
+                    test_settings.TIMING_LOAD_PHASE_NAME,
+                    test_settings.TIMING_LOAD_PHASE_NAME,
                     load_time - commit_times[frame][commit_index],
                     shot,
                 ),
             )
         for begun_event, duration_us in phase_slices:
-            phase_name, data_key = _TRACE_PHASES[begun_event["name"]]
+            phase_name, data_key = test_settings.TRACE_PHASES[
+                begun_event["name"]
+            ]
             slice_data = begun_event["args"][data_key]
             frame = slice_data["frame"]
             commit_index = self.commit_index_at(
@@ -1046,12 +1039,12 @@ class Screenshots:
             if commit_index < 0 or not commit_files[frame][commit_index]:
                 continue
             if (
-                begun_event["name"] == _TRACE_FUNCTION_CALL_NAME
-                and slice_data["scriptId"] == _TRACE_NO_SCRIPT_ID
+                begun_event["name"] == test_settings.TRACE_FUNCTION_CALL_NAME
+                and slice_data["scriptId"] == test_settings.TRACE_NO_SCRIPT_ID
             ):
                 continue
             phase_label = phase_name
-            if phase_name == _TIMING_SCRIPT_PHASE_NAME:
+            if phase_name == test_settings.TIMING_SCRIPT_PHASE_NAME:
                 script_file = self.relative_file_of(
                     slice_data["url"], root_url
                 )
@@ -1090,13 +1083,14 @@ class Screenshots:
         except (IndexError, KeyError, TypeError, ValueError) as error:
             raise RuntimeError(f"{trace_path}: {error!r}") from error
         if not any(
-            page_timing.page_file == _ENTRY_PAGE
-            and page_timing.phase_name == _TIMING_LOAD_PHASE_NAME
+            page_timing.page_file == test_settings.ENTRY_PAGE
+            and page_timing.phase_name == test_settings.TIMING_LOAD_PHASE_NAME
             for page_timing in page_timings
         ):
             raise RuntimeError(
-                f"{trace_path}: no {_TRACE_LOAD_NAME} of {_ENTRY_PAGE} after"
-                f" its {_TRACE_COMMIT_NAME}"
+                f"{trace_path}: no {test_settings.TRACE_LOAD_NAME} of"
+                f" {test_settings.ENTRY_PAGE} after"
+                f" its {test_settings.TRACE_COMMIT_NAME}"
             )
         os.remove(trace_path)
         return page_timings
@@ -1111,7 +1105,9 @@ class Screenshots:
         shot_variants = view.shot_variants()
         # The index page frames report pages, so only the report shots trace.
         trace_path = (
-            "" if view.shot_flags & _SHOOT_INDEX_PAGE else self.trace_path
+            ""
+            if view.shot_flags & test_settings.SHOOT_INDEX_PAGE
+            else self.trace_path
         )
         for variant in shot_variants:
             shot = self.shot_name(
@@ -1148,8 +1144,9 @@ def main() -> int:
         default="",
         metavar="DIR",
         help="compare each new shot with the same named shot in DIR, naming"
-        " every difference and writing a compare_ image of it; exit 1 if"
-        " any shot differs or is missing",
+        " every difference on stdout and writing a compare_ image of it; a"
+        " difference exits 0, the --compare-out directory made only for"
+        " one, and a shot this run did not write is an error",
     )
     parser.add_argument(
         "--compare-only",
@@ -1167,11 +1164,12 @@ def main() -> int:
     parser.add_argument(
         "--diff", action="store_true", help="the report is a diff report"
     )
+    parser.add_argument("--index-hash", default="", metavar="HASH")
     parser.add_argument(
         "--out",
         default="",
         help="where the PNGs go (default"
-        f" tests/perf2html/{_SCREENSHOT_DIR_NAME})",
+        f" tests/perf2html/{test_settings.SCREENSHOT_DIR_NAME})",
     )
     parser.add_argument(
         "--verbose",
@@ -1183,8 +1181,11 @@ def main() -> int:
     namespace = parser.parse_args()
 
     report = os.path.abspath(namespace.report)
-    if not os.path.isfile(os.path.join(report, _ENTRY_PAGE)):
-        print(f"error: {report} holds no {_ENTRY_PAGE}", file=sys.stderr)
+    if not os.path.isfile(os.path.join(report, test_settings.ENTRY_PAGE)):
+        print(
+            f"error: {report} holds no {test_settings.ENTRY_PAGE}",
+            file=sys.stderr,
+        )
         return 2
 
     gold_dir = os.path.abspath(namespace.compare_gold)
@@ -1203,6 +1204,13 @@ def main() -> int:
         print("error: --compare-only needs --compare-gold", file=sys.stderr)
         return 2
 
+    if namespace.index_hash and not namespace.index_hash.startswith("#"):
+        print(
+            f"error: --index-hash {namespace.index_hash} starts with no #",
+            file=sys.stderr,
+        )
+        return 2
+
     if not namespace.browser and not namespace.compare_only:
         print("error: shooting needs --browser", file=sys.stderr)
         return 2
@@ -1211,18 +1219,20 @@ def main() -> int:
         os.path.dirname(os.path.abspath(__file__)), ".."
     )
     out_dir = namespace.out or os.path.join(
-        perf2html_dir, _SCREENSHOT_DIR_NAME
+        perf2html_dir, test_settings.SCREENSHOT_DIR_NAME
     )
     out_dir = os.path.abspath(out_dir)
     scratch_dir = os.path.abspath(
-        os.path.join(perf2html_dir, _SCREENSHOT_SCRATCH_DIR_PATH)
+        os.path.join(perf2html_dir, test_settings.SCREENSHOT_SCRATCH_DIR_PATH)
     )
     trace_path = os.path.abspath(
-        os.path.join(perf2html_dir, _SCREENSHOT_TRACE_FILE_PATH)
+        os.path.join(perf2html_dir, test_settings.SCREENSHOT_TRACE_FILE_PATH)
     )
 
     report_flag = (
-        _SHOOT_DIFF_REPORT if namespace.diff else _SHOOT_REGULAR_REPORT
+        test_settings.SHOOT_DIFF_REPORT
+        if namespace.diff
+        else test_settings.SHOOT_REGULAR_REPORT
     )
     compare_dir = os.path.abspath(namespace.compare_out or out_dir)
     shooter = Screenshots(
@@ -1235,10 +1245,8 @@ def main() -> int:
         trace_path,
     )
     if namespace.compare_only:
-        is_same = shooter.gold_compare(
-            gold_dir, namespace.prefix, namespace.verbose
-        )
-        return 0 if is_same else 1
+        shooter.gold_compare(gold_dir, namespace.prefix, namespace.verbose)
+        return 0
 
     os.makedirs(out_dir, exist_ok=True)
     os.makedirs(os.path.dirname(trace_path), exist_ok=True)
@@ -1247,47 +1255,56 @@ def main() -> int:
             namespace.verbose, [f"{os.path.basename(report)} -> {out_dir}"]
         )
     written = shooter.shoot_all(namespace.prefix)
-    timing_lines = shooter.timing_lines()
+    timing_rows = shooter.timing_rows()
 
     with open(
-        os.path.join(perf2html_dir, "scripts", _INDEX_TEMPLATE_NAME)
+        os.path.join(
+            perf2html_dir, "scripts", test_settings.INDEX_TEMPLATE_NAME
+        )
     ) as template_file:
         index_template = template_file.read()
     shooter.index_write(
         namespace.prefix,
-        os.path.join(perf2html_dir, _INDEX_PAGE_NAME),
+        os.path.join(perf2html_dir, test_settings.INDEX_PAGE_NAME),
         index_template,
-        timing_lines,
+        timing_rows,
     )
     written += shooter.index_shoot(
-        namespace.prefix, os.path.join(perf2html_dir, _INDEX_PAGE_NAME)
+        namespace.prefix,
+        os.path.join(perf2html_dir, test_settings.INDEX_PAGE_NAME),
+        namespace.index_hash,
     )
     if namespace.verbose:
         verbose_print(namespace.verbose, [f"{written} screenshot(s)"])
-    if namespace.compare_gold and not shooter.gold_compare(
-        gold_dir, namespace.prefix, namespace.verbose
-    ):
-        return 1
+    if namespace.compare_gold:
+        shooter.gold_compare(gold_dir, namespace.prefix, namespace.verbose)
     if namespace.verbose:
-        verbose_print(namespace.verbose, timing_lines)
+        verbose_print(
+            namespace.verbose,
+            [timing_row.verbose_line() for timing_row in timing_rows],
+        )
     return 0
 
 
 # Prints success lines, below the raw level as one Markdown text block.
 def verbose_print(verbose_level: int, lines: list[str]) -> None:
-    if verbose_level >= _VERBOSE_RAW_LEVEL:
+    if verbose_level >= test_settings.VERBOSE_RAW_LEVEL:
         print("\n".join(lines), flush=True)
         return
     mark_run = max(
         (
             len(marks)
             for line in lines
-            for marks in re.findall(f"{_MARKDOWN_FENCE_MARK}+", line)
+            for marks in re.findall(
+                f"{test_settings.MARKDOWN_FENCE_MARK}+", line
+            )
         ),
         default=0,
     )
-    fence = _MARKDOWN_FENCE_MARK * max(_MARKDOWN_FENCE_MIN_MARKS, mark_run + 1)
-    fenced_lines = [fence + _MARKDOWN_FENCE_INFO, *lines, fence]
+    fence = test_settings.MARKDOWN_FENCE_MARK * max(
+        test_settings.MARKDOWN_FENCE_MIN_MARKS, mark_run + 1
+    )
+    fenced_lines = [fence + test_settings.MARKDOWN_FENCE_INFO, *lines, fence]
     print("\n" + "\n".join(fenced_lines), flush=True)
 
 

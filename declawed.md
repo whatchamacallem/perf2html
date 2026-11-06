@@ -106,6 +106,12 @@ scripts too."""
   sharing one tree corrupts comparisons.
 - No fake data - every value is a measurement or plain arithmetic on one. If a
   tool can't supply a view's data, the view isn't built.
+- There are two kinds of percentage. A regular report shows a file's, a
+  function's or a line's cost as a share of the test's global cost, through
+  `share_of_test()`; a regular share of any other whole, a file's, a
+  function's or a line's, is confusing and disallowed. A diff report shows
+  the simple percent difference of that thing between the two reports, its
+  change in cost over its own baseline cost, through `diff_share()`.
 - No combined test data: every number is one test's, or one diff's of one test.
   Nothing sums, merges or averages tests, and no page shows test data in a
   combined form where each test's own contribution is not explicit. The merged
@@ -140,8 +146,15 @@ scripts too."""
   you to reformat this document then it has to be disabled, inform the user.
 - Never add un-requested documentation because you saw some was missing. Only
   document new code and prefer 1 line comments.
-- `error_overlay.js` needs to function when the other modules didn't load
-  making it an exception to a lot of rules. Try not to mention it.
+- Every page loads `error_overlay.js` first and `settings.js` immediately
+  after it, then `utility.js` and `ui_strings.js`, so every later script
+  reads its values from the settings; a framed page's script that runs before
+  the top page relays the settings reads them through
+  `window.settings_opening_`, the settings the page opens under.
+- `error_overlay.js` needs to function when the other modules didn't load or
+  `settings.js` is malformed, making it an exception to a lot of rules: it is
+  the one script expected to hold hardcoded UI strings. Try not to mention
+  it.
 - Consider `speedscope` externally maintained and ignore it when applying the
   `perf2html` maintainers guidelines.
 - `CLAUDE.md`/`declawed.md` is not user documentation and is exempt from
@@ -152,6 +165,33 @@ scripts too."""
 - The perf2html_diff.sh script has to be able to run on a remote machine with
   only two `.txz` compressed reports as inputs. It has to work without access
   to any source code or repository involved in the report.
+- A message to the maintainer is understood without opening another file.
+  Every identifier it uses, such as a task, question or item number, a test,
+  a class or a file, comes with plain words saying what it is and why it
+  matters there; a number may follow that description for reference, never
+  replace it.
+- Never report a problem without its solutions. Anything that waits on the
+  maintainer, whether a decision, an approval, an install or a command only
+  they may run, is written as a question naming what is being decided, not
+  as a blocker, a problem or an instruction to run something.
+- Give a question's solutions as multiple choice: each option on a line of
+  its own that starts with `[ ]`, so that the maintainer can mark a choice
+  `[x]`, lettered from A. Option A is the default, taken when nothing is
+  marked, so A is the option recommended.
+- The maintainer holds the authority and the intent; the agent holds the
+  context, having written and read the code. A question carries authority
+  or intent back to the agent, and never makes the maintainer gather
+  context the agent already has. Before asking, spend the agent's own
+  means: the rules, the plans, the code, an experiment or a measurement.
+- Ask only when the answer is worth more than the maintainer's time to give
+  it: when only the maintainer may decide, when the right choice depends on
+  intent that nothing written settles, or when a wrong guess is costly or
+  hard to undo. Otherwise decide, and report the decision so that
+  overturning it is cheap. Ask first what blocks the most work, and say
+  what each answer unblocks.
+- Put a question in the maintainer's terms: the requirement at stake, what
+  each choice does and what it costs, with the code's names as references
+  only.
 
 ### Accidental-Requirements, Requirements-Data-Loss, and Requirements-Refusal
 
@@ -299,22 +339,26 @@ The single function/check owning each concern - never bypass or duplicate:
   its callgrind entry line when that line carries no counter and the
   function's counters span more than one line, else the entry line
   (callgrind_to_heatmap.py).
-- `report_source_database_` - the one list of the files the tests show and
-  the functions with a line, every test's union, names alone
-  (scripts/source_database.js).
+- `report_source_database_` - the one list of the files the tests show
+  and the functions with a line, every test's union, and of each test's
+  files and functions with a nonzero counter, the menu's file and
+  function pulldowns, names alone (scripts/source_database.js).
 - `text_clip()` - every cell text cut at its column's `clip`;
-  `table_slide_press()` every column width, a sideways drag of a body cell
-  setting the `min-width` of the title of the column left of it, a title
-  press sliding nothing (theme.js).
-- `checksum_compute`/`_REPORT_CHECKSUM_COMMAND` - report checksums, kept
+  `column_edge_drag()` every column width, a drag at the right edge grab of
+  a body cell or title of a `TABLE_RESIZABLE_COLUMN_NAMES` column setting
+  that column title's `min-width`, a column its bar sizes, the heat map's
+  tree, set by a sideways drag of that bar instead (theme.js).
+- `checksum_compute`/`REPORT_CHECKSUM_COMMAND` - report checksums, kept
   separate, re-verified on every open.
 - `number_exact_check()` - every settings number crossing into a page,
   a number the 64 bit float rounds refused, so every setting holds the
   code's own value and that value fits JSON storage (settings.py).
-- `share_of_test()` and `share_of_function()` - every regular heat map share,
-  a file's or a function's of the test, a line's of the summed self of the
-  functions costing it, `lineFunctions` of the model; a diff divides by the
-  thing's own baseline through `diff_share()` (heat_map.js).
+- `share_of_test(value, test_total)` - every regular share of a file, a
+  function or a line, a heat map tree folder's too, its value as a share of
+  the test's total of its counter, a calls count's of the test's calls,
+  for every page: the heat map, the database and the call graph, each
+  passing its test's total; a diff divides by the thing's own baseline
+  through `diff_share()` (theme.js).
 - `diff_share()` - every diff share, a fall past its baseline refused
   (theme.py/js).
 - `fixed_text()` - every decimal a page prints, the call graph's calls
@@ -324,29 +368,38 @@ The single function/check owning each concern - never bypass or duplicate:
   `uses_whitespace` false where nothing aligns: a database callers or
   callees cell; the call graph prints no zero share, its layout table
   aligning the shares.
-- `edge_share()` - every call graph share, an edge's inclusive CEst
-  (`RANKING_COUNTER_NAME`) summed over its call sites as a share of its
-  caller's cumulative CEst, the caller's self plus its calls to every
-  other function, a root none; `edge_multiple()` every calls multiple, an
+- `self_share_of_test()` - every call graph share, a function's self CEst
+  (`RANKING_COUNTER_NAME`) as a share of the test's total CEst, the call
+  graph model's `test_total`, through `share_of_test()`, a root none; `edge_multiple()` every calls
+  multiple, an
   edge's calls per invocation of its caller, the caller's root calls and
   incoming edge calls summed (call_graph.js); `call_graph_roots()` every
   uncalled caller a root, a call graph with none or with a called function
   none of them reaches refused (build_report.py).
 - `call_graph_open_set()` - the one open set of a fresh call graph view,
-  at its first render and every `view_reset`: the hottest path from the
-  root of greatest cumulative CEst, at each node its shown child of
-  greatest inclusive CEst (ties by call line, then name, whatever the
-  sort), each node on that path with shown children open, every other
-  closed; a shown child is a callee not already on the node's path
+  at its first render and every `view_reset`: every node with shown
+  children whose cumulative CEst, never shown, is at least
+  `CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT` of the test's total CEst
+  through `share_of_test()`, open, every other closed; a root's cumulative
+  CEst is its function's self plus its calls to every other function, a
+  callee's its call's inclusive CEst, the cost the `cumulative first` sort
+  orders by; a shown child is a callee not already on the node's path
   (call_graph.js).
 - `design_scale_stop_set()` - every scale change; `menu.js` then posts
   `layout_reset`, which resets column widths, pane widths and heading row
   counts.
 - `information_box_render(file_path, line_number)` - every file, function
-  and line info box, answering `{markup, copy_text}`, line 0 the file's
-  (heat_map.js).
+  and line info box, answering `{markup, copy_text}`, line 0 the file's,
+  which is part of the page: the first row of the source table, in the
+  source column, closed by no control (heat_map.js).
 - `hash_for_location()` - every heat map link into a file at a line, a
-  function's line written as the function's hash (heat_map.js).
+  function's line written as the function's hash (heat_map.js);
+  `report_ui_.address.function_hash(test_name, function_name)` every
+  function's hash, the menu's function pulldown, the heat map's function
+  links and the call graph heading's selected function link, the function
+  of the symbol button last pressed, none at first and after a
+  `view_reset`, shown after the heading's copy entry through
+  `report_ui_.page_heading_tail_set()` (theme.js).
 - `report_ui_.strip.render(strip_element, entries, status_entries)` - every
   strip cell: the menu and its status bar, an entry with an empty href a
   plain label there, the preference strip, the settings view's load log
@@ -374,14 +427,16 @@ The single function/check owning each concern - never bypass or duplicate:
 - `heat_cell_style(percent, curve, is_diff)` - every heat color, JS
   alone; Python paints nothing.
 - `table_sort.records()` - every table sort; `render_table`'s
-  `on_sort` the one column title click, its `on_column_move` the one
+  `on_sort` the one column title click, `table_column_drop()` the one
   column title drop, which moves a counters list's line (theme.js).
 - `report_preferences_.now()` - every read of the per-page counters lists
   (`counter_lists`, each line calls, callers, callees or a counter, in
-  order, shown or not), the heat scale and the heat sort preferences;
+  order, shown or not), the heat scale, the heat sort and the call graph
+  sort preferences;
   `preference_choose()` on the top page the one writer, through
   `counter_line_toggle()`, `counter_line_move()` (a view's title drop
-  posting the `counter_line_move` message up) and the heat choices,
+  posting the `counter_line_move` message up), the heat choices and the
+  call graph sort choice,
   relayed down on every message, a view taking it through
   `report_preferences_.relay_handler()` (preferences.js).
 - `report_preferences_.counter_readers()` - every counter's reader for the
@@ -427,6 +482,24 @@ The single function/check owning each concern - never bypass or duplicate:
   difference into `tests/perf2html/screenshots-diff/`; a difference is then
   the edit's own. Only `--regenerate` compares: a measuring run changes what
   the shots show, so after one copy its shots to `screenshots-gold/` again.
+- A shot differing from its gold twin is not a failure of the test suite but
+  an outcome the development process requires: a measuring run changes the
+  values the shots show and an edit changes what its pages draw.
+  `test_screenshot.py` names each differing shot on stdout with its
+  `compare_` image; `test_expected_behavior.sh` runs every other stage, then
+  explains the difference to the agent reading the run and exits
+  `SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE` (settings.sh), never 0, so that no
+  difference goes unseen. Any other non-zero exit is a failure.
+- `test_all.sh` measures once, through `test_expected_behavior.sh
+  --keep-artifacts`; `test_error_handling.sh` then regenerates from those
+  recordings with `--regenerate --keep-artifacts`, never measuring again, so
+  its run compares the shots with the gold. After a gold difference it runs
+  every other test, explains the difference again at its end and exits
+  `SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE`, which `test_all.sh` passes on.
+- An agent concluding whether a run passed or failed first looks at every
+  `compare_` image in `screenshots-diff/` not already inspected and reports
+  what each shows. It never deletes or moves the gold shots and never
+  challenges the maintainer over a difference.
 - The full run is `test_all.sh` and only run that when asked to "test".
 - More than one goal in a response ends with a done/not-done checklist.
 - Numbering of multi-item communication in summaries follows ISO 2145.
@@ -487,7 +560,8 @@ The single function/check owning each concern - never bypass or duplicate:
   read back as an input to itself.
 - `test_expected_behavior.sh` captures, redirects or reformats no output of its
   own or a child's - every child runs through `subprocess_run` and its lines
-  reach the terminal verbatim; a non-zero exit is `error_exit`. The one
+  reach the terminal verbatim; a non-zero exit is `error_exit`, the gold
+  comparison's `SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE` aside. The one
   exception is `pyright_filtered_run` at level 1.
 - `tools_resolve` (or equivalent) must find every formatter/linter and the
   screenshot browser before anything is deleted, naming every missing tool
@@ -528,8 +602,11 @@ The single function/check owning each concern - never bypass or duplicate:
   and any backtick code span, then faults the first other character on each
   comment line as `comment holds 'X' outside ENGLISH_PUNCT`.
 - ASCII plus the specific whitelisted glyphs (`© ≈ ∞ ▲◄►▼ … █ ░ ▒ ▓ ◼`,
-  the call graph's `─ │ └ ├ ┬` and a no-break space), written literally,
-  never as HTML entities.
+  the call graph's and the heat map tree's `━ ┃ ┗ ┣ ┳ ⊞` and a no-break
+  space), written literally, never as HTML entities.
+- A maintainer's explicit request for a Unicode character is also an
+  instruction to add it to the allowed glyphs, this list and the source
+  scan's `SOURCE_SCAN_ALLOWED_NON_ASCII_CHARS`, without mentioning it.
 - No unicode escapes or runtime character constructors in source, comments
   and header included: `\u`, `\U`, `\x`, `\N{`, octal `\NNN`, CSS hex
   escapes, numeric entities (`&#65;`), `String.fromCharCode`,
@@ -553,6 +630,9 @@ The single function/check owning each concern - never bypass or duplicate:
 - `error_exit` calls and other error messages must be only one line while
   printing relevant variables too. `tools_resolve`'s missing tools error is
   the single exception, a line per install command.
+- An error message states what failed and carries no advice: no fix, no next
+  step, no command to run. A missing tool named with its install command
+  (`tools_resolve` or equivalent) is the one exception.
 - `test_all.sh` should print significant run times, it is not "no news is good
   news".
 - Don't change code when unable to implement a request as specified. Do not
