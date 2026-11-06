@@ -26,12 +26,12 @@ EOF
 set -euo pipefail
 
 INVOKED_FROM="$PWD"
-_SCRIPT="$(readlink -f -- "$0")"
-cd -P -- "$(dirname -- "$_SCRIPT")"
+cd -- "$(dirname -- "$0")"
 _SCRIPT_DIR="$PWD"
+_SCRIPT="$PWD/${0##*/}"
 
 _DIR_PERF2HTML=..
-_DIR_REPO="$(cd -P -- ../../.. && pwd)"
+_DIR_REPO="$(cd -- ../../.. && pwd)"
 
 _COLUMNS_MAX=79
 _CLANG_FORMAT_CONFIG=../src/.clang-format

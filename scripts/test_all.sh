@@ -21,8 +21,7 @@ set -euo pipefail
 [ $# = 0 ] || { [[ $* =~ ^(-h|--help)$ ]] && usage_show && exit 0; } \
   || { echo "error: unknown option: $*" && usage_show && exit 2; } >&2
 
-_SCRIPT="$(readlink -f -- "$0")"
-_SCRIPT_DIR="$(dirname -- "$_SCRIPT")"
+_SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 
 PS4='\e[38;5;208m[${SECONDS}s] ${BASH_SOURCE}:${LINENO}: \e[0m'
 set -o xtrace

@@ -24,10 +24,10 @@ set -euo pipefail
 [ $# = 0 ] || { [[ $* =~ ^(-h|--help)$ ]] && usage_show && exit 0; } \
   || { echo "error: unknown option: $*" && usage_show && exit 2; } >&2
 
-_SCRIPT="$(readlink -f -- "$0")"
-_SCRIPT_DIR="$(dirname -- "$_SCRIPT")"
-_DIR_PERF2HTML="$(cd -P -- "$_SCRIPT_DIR/.." && pwd)"
-_REPO="$(cd -P -- "$_DIR_PERF2HTML/../.." && pwd)"
+_SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+_SCRIPT="$_SCRIPT_DIR/${0##*/}"
+_DIR_PERF2HTML="$(cd -- "$_SCRIPT_DIR/.." && pwd)"
+_REPO="$(cd -- "$_DIR_PERF2HTML/../.." && pwd)"
 _TEST_EXPECTED_BEHAVIOR="$_SCRIPT_DIR/test_expected_behavior.sh"
 
 . "$_SCRIPT_DIR/utility.sh"

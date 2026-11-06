@@ -36,14 +36,14 @@ set -euo pipefail
 
 TIMESTAMP="$(date +%s)"
 INVOKED_FROM="$PWD"
-_SCRIPT="$(readlink -f -- "$0")"
-cd -P -- "$(dirname -- "$_SCRIPT")"
+cd -- "$(dirname -- "$0")"
 PERF2HTML_DIR_="$PWD"
+_SCRIPT="$PWD/${0##*/}"
 
 . ./scripts/settings.sh
 . ./scripts/utility.sh
 
-_REPO="$(cd -P -- ../.. && pwd)"
+_REPO="$(cd -- ../.. && pwd)"
 
 args_parse() {
   local _remaining_argument
