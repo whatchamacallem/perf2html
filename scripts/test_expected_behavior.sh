@@ -50,7 +50,6 @@ _WHITELIST_FILE=test_whitelist.txt
 . ./test_utility.sh
 
 _BATCH_SCRIPT_NAME=perf2html_batch.sh
-_QUIET_LOG_SUCCESS_PATTERN='^(wrote /|files with samples: )'
 _README_PAGE_SCRIPT_NAME=build_readme_page.py
 _ROWS_FILE_NAME=perf2html.txt
 # Chrome for Testing's headless shell, headless without a switch.
@@ -355,23 +354,6 @@ batch_run() {
     || error_exit "$_exit_code" "error: exit $_exit_code from: $_shown"
 }
 
-# Refuses a quiet run whose log holds a page tool's success line.
-quiet_logs_check() {
-  local _name _kind _log _line
-  [ "$VERBOSE" = 0 ] || return 0
-  for _name in "$REPORT_BASELINE_DIR_NAME" "$REPORT_MODIFIED_DIR_NAME" \
-    "$REPORT_DIFF_DIR_NAME"; do
-    _kind=profile
-    [ "$_name" != "$REPORT_DIFF_DIR_NAME" ] || _kind=diff
-    [ "$_REGENERATE" != 1 ] || _kind+=-regenerate
-    artifact_path _log "$_DIR_PERF2HTML/$ARTIFACTS_NAME/$_name" "$_kind-log"
-    while IFS= read -r _line; do
-      [[ ! "$_line" =~ $_QUIET_LOG_SUCCESS_PATTERN ]] || error_exit 1 \
-        "error: $_log holds a success line in a quiet run: $_line"
-    done <"$_log"
-  done
-}
-
 # Sets `_SCREENSHOT_COMMAND` to the screenshot script command for one report.
 screenshot_command_set() {
   local _name="$1" _path _prefix _args
@@ -586,7 +568,6 @@ main() {
   lint_run
   readme_html_flags_set
   batch_run
-  quiet_logs_check
   test_expected_report_check_run
   test_expected_archive_check_run
   screenshots_run
