@@ -446,11 +446,14 @@ class Screenshots:
         compare_image.save(compare_path)
 
     # Returns the address of a report's entry page relative to the index.
+    # Resolves both paths, as one can run through a symlink the other skips.
     def entry_href(self, report_dir: str, index_path: str) -> str:
         return urllib.parse.quote(
             os.path.relpath(
-                os.path.join(report_dir, test_settings.ENTRY_PAGE),
-                os.path.dirname(index_path),
+                os.path.realpath(
+                    os.path.join(report_dir, test_settings.ENTRY_PAGE)
+                ),
+                os.path.realpath(os.path.dirname(index_path)),
             )
         )
 
