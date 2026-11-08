@@ -1,0 +1,406 @@
+/* SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+ * SPDX-License-Identifier: MIT
+ * This file is licensed under the terms of the LICENSE-MIT.md file. */
+
+*,
+::before,
+::after {
+  box-sizing: border-box;
+  font: inherit;
+  text-decoration: none;
+  outline: none;
+  border: 0;
+}
+[hidden] {
+  display: none !important;
+}
+* {
+  scrollbar-width: none;
+}
+::-webkit-scrollbar {
+  display: none;
+}
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+body {
+  font-family: var(--page-font-family-);
+  font-size: calc(var(--design-font-size-px-) * var(--design-font-fit-));
+  line-height: var(--page-body-line-height-);
+  height: var(--design-viewport-height-);
+}
+pre {
+  margin: 0;
+  white-space: pre;
+}
+
+/* The top page: the page column, scrolled sideways, over its bar. */
+#overview- {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+#overview-page-scroll-box- {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* The menu's two lines, the preference strip beside the status line. */
+#overview-page- {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+}
+/* The home panel, a view across the page's columns. */
+#overview-home- {
+  grid-column: 1 / -1;
+}
+/* The home page column, as wide as its widest line, centred in its box. */
+#overview-home-text- > .page- {
+  width: max-content;
+  margin-inline: auto;
+}
+#overview-view-frame- {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 100%;
+}
+
+/* A view: the scrolled page beside its bar, over the sideways bar's row. */
+.view- {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) [sideways-bar-] auto;
+}
+.view- > main {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+/* The sideways bar keeps its row while the bar beside the page hides. */
+.view- > .text-scrollbar-.horizontal- {
+  grid-row: sideways-bar-;
+}
+
+/* The call graph table, as wide as its longest row, in its clear border. */
+#call-graph-table- {
+  position: relative;
+  width: max-content;
+  border: var(--call-graph-border-width-) solid transparent;
+  border-collapse: separate;
+  border-spacing: 0;
+  white-space: pre;
+}
+#call-graph-table- td {
+  padding: 0;
+}
+/* A share or multiple sits right, so each lines up with those above it. */
+#call-graph-table- :is(.call-graph-share-, .call-graph-multiple-) {
+  text-align: right;
+}
+/* A symbol button has no room of its own, its template's spaces inside it. */
+#call-graph-table- .menu-button- {
+  padding: 0;
+}
+/* A cell taking a symbol's click shows the pointer, as the symbol does. */
+#call-graph-table- td.clickable- {
+  cursor: pointer;
+}
+/* A hovered row's frame draws over the symbol buttons it crosses. */
+#call-graph-table-::before {
+  z-index: var(--call-graph-hover-row-z-index-);
+}
+
+/* The database page grows with its table, so the bars redraw as it widens. */
+#database-page- > .page- {
+  min-width: max-content;
+}
+
+/* The heat map: its hottest lines over the panes. */
+#heat-map- {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+/* The panes: the main column, then the minimap and the main box's bar. */
+#heat-map-panes- {
+  display: flex;
+  min-height: 0;
+}
+/* The main column fills the row until its edge narrows it, sizing the tree. */
+#heat-map-main-column- {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+/* The main box, over its sideways bar, sizes the tree that hangs in it. */
+#heat-map-main- {
+  container-type: size;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+/* The tree's title is as wide as the tree, which hangs below it in view. */
+.heat-map-source-table- > thead > tr > th:first-child {
+  min-width: var(--heat-map-tree-width-);
+}
+/* The tree beside its bar, down to the main box bottom while titles stick. */
+.heat-map-tree-track- {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
+  height: calc(100cqh - 100%);
+}
+#heat-map-tree- {
+  overflow-x: hidden;
+  overflow-y: scroll;
+}
+
+/* No top inset: the status bar's half line gap is the room over a page. */
+.page- {
+  padding: 0 var(--page-inset-inline-) var(--page-inset-block-);
+}
+.page-emphasis- {
+  display: inline-block;
+  padding: 0 var(--page-emphasis-padding-inline-);
+  white-space: pre;
+}
+
+/* A character in one page character's room, whatever font draws it. */
+.character-cell- {
+  display: inline-block;
+  width: 1ch;
+}
+
+/* A strip: a line of buttons, a status line under the menu's. */
+.strip-line- {
+  white-space: pre;
+}
+#menu- {
+  display: contents;
+}
+/* The menu line: the logo at the left, the other buttons at the right. */
+#menu- > .strip-line- {
+  grid-column: 1 / -1;
+  margin-top: var(--menu-strip-blank-line-height-);
+  padding-right: var(--menu-strip-padding-right-);
+  text-align: right;
+}
+/* Its buttons keep their own text, pulldowns among them, left aligned. */
+#menu- > .strip-line- > .menu-button- {
+  text-align: left;
+}
+#menu- .menu-status-bar-,
+#menu-preference- {
+  margin-block: var(--menu-strip-blank-line-height-);
+}
+#menu-preference- {
+  padding-right: var(--menu-strip-padding-right-);
+}
+/* The status line, cut at its column, so a long one never widens the page. */
+#menu- .menu-status-bar- {
+  overflow: hidden;
+}
+/* A button: its pulldown hung from the box, side line room inside. */
+.menu-button- {
+  position: relative;
+  border-inline: var(--page-line-width-) solid transparent;
+  padding: 0 var(--menu-button-padding-inline-);
+  white-space: pre;
+}
+[data-entry-name-="str_report_name"] {
+  float: left;
+  padding-inline-end: 0;
+}
+.menu-button-[tabindex],
+.menu-button-widget- {
+  cursor: pointer;
+}
+/* A widget's glyphs, taller than a line, clipped to its button. */
+.menu-button-widget- {
+  display: inline-block;
+  vertical-align: top;
+  height: inherit;
+  overflow: clip;
+}
+.menu-status-bar- {
+  margin-left: var(--menu-status-bar-padding-left-);
+  margin-right: var(--menu-status-bar-padding-right-);
+  white-space: pre;
+}
+/* The search, label and placeholder share one place the last two size. */
+.menu-pulldown-text-box- {
+  display: inline-grid;
+}
+.menu-pulldown-text-box- > * {
+  grid-area: 1 / 1;
+}
+/* A search past its box shows its end, its start cut. */
+.menu-pulldown-search-box- {
+  display: flex;
+  justify-content: flex-end;
+  contain: inline-size;
+  overflow: clip;
+}
+/* A search that fits starts at the box start. */
+.menu-pulldown-search-box-::after {
+  content: "";
+  flex-grow: 1;
+}
+/* A shown search hides the label under it, the placeholder only sizing. */
+.menu-pulldown-search-box-:not([hidden]) ~ *,
+.menu-pulldown-placeholder-box- {
+  visibility: hidden;
+}
+.menu-pulldown-entry-box- {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--menu-pulldown-entry-list-z-index-);
+  display: flex;
+  min-width: 100%;
+  max-height: calc(
+    var(--menu-pulldown-entry-list-max-height-share-) *
+      var(--design-viewport-height-)
+  );
+}
+.menu-pulldown-entry-list- {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+}
+/* An entry clips its text box that overhangs its line, so a fit list fits. */
+.menu-pulldown-entry-list- > * {
+  flex: none;
+  overflow-y: clip;
+  padding: 0 var(--menu-pulldown-entry-padding-inline-);
+}
+
+/* A table: each column as wide as its text or a drag, titles in view. */
+table.table- {
+  position: relative;
+  border-collapse: collapse;
+}
+.table- th,
+.table- td {
+  padding: 0 var(--page-table-cell-padding-inline-);
+  white-space: pre;
+  text-align: left;
+  vertical-align: top;
+}
+.table- th {
+  position: sticky;
+  top: 0;
+  z-index: var(--page-table-title-z-index-);
+}
+.table- .numeric- {
+  text-align: right;
+}
+tr.row-link- {
+  cursor: pointer;
+}
+/* A cell or pane whose right edge the pointer may drag shows the cursor. */
+.table- :is(th, td).column-edge-grab-,
+.table- :is(th, td).column-edge-grab- *,
+#heat-map-main-column-.column-edge-grab-,
+#heat-map-main-column-.column-edge-grab- * {
+  cursor: col-resize;
+}
+/* A title's tool tip hangs under it, flipped to stay in the window. */
+.table- th[data-tool-tip-text-]:hover {
+  anchor-name: --table-title-tool-tip-anchor-;
+}
+.menu-button-.table-title-tool-tip- {
+  position: fixed;
+  position-anchor: --table-title-tool-tip-anchor-;
+  position-try-fallbacks: flip-inline;
+  top: anchor(bottom);
+  right: anchor(right);
+  z-index: var(--page-table-title-tool-tip-z-index-);
+  pointer-events: none;
+}
+/* A hovered link row, source line or call graph row anchors its frame. */
+.table- > tbody > :is(tr.row-link-, tr[data-line-number-]):hover,
+#call-graph-table- > tbody > tr:hover {
+  anchor-name: --table-hover-row-;
+}
+table.table-:has(
+    > tbody > :is(tr.row-link-, tr[data-line-number-]):hover
+  )::before,
+#call-graph-table-:has(> tbody > tr:hover)::before {
+  content: "";
+  position: absolute;
+  position-anchor: --table-hover-row-;
+  top: anchor(top);
+  pointer-events: none;
+  border-style: solid;
+}
+
+/* A link or button is one line high, its text set on the box bottom. */
+.page- a,
+.heat-map-source- a,
+.menu-button- {
+  display: inline-block;
+  height: 1lh;
+  align-content: unsafe end;
+}
+/* The raw data link takes a column cell's side room around its name. */
+#overview-raw-data- > a {
+  padding: 0 var(--page-table-cell-padding-inline-);
+}
+
+/* A text scrollbar: one cell per character, its characters design scaled. */
+.text-scrollbar- {
+  display: flex;
+  contain: size;
+  overflow: clip;
+  white-space: pre;
+  user-select: none;
+  touch-action: none;
+}
+.text-scrollbar-.horizontal- {
+  font-size: calc(
+    var(--design-font-size-px-) * var(--design-font-fit-) *
+      var(--page-text-scrollbar-horizontal-font-multiple-)
+  );
+  height: var(--page-text-scrollbar-horizontal-height-);
+}
+.text-scrollbar-.vertical- {
+  flex-direction: column;
+  font-size: calc(
+    var(--design-font-size-px-) * var(--design-font-fit-) *
+      var(--page-text-scrollbar-vertical-font-multiple-)
+  );
+  width: var(--page-text-scrollbar-vertical-width-);
+}
+/* The forward chevron sits at the bar's end, past the room of a part cell. */
+.text-scrollbar-.horizontal- > :last-child:not(:first-child) {
+  margin-left: auto;
+}
+.text-scrollbar-.vertical- > :last-child:not(:first-child) {
+  margin-top: auto;
+}
+/* A bar whose target shows all it holds takes no room. */
+.text-scrollbar-.target-fits- {
+  display: none;
+}
+/* The top page's bar takes no room while a view's bar holds its scroll. */
+.text-scrollbar-.lent-to-view- {
+  display: none;
+}
+
+.screenshot- {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  z-index: var(--screenshot-z-index-);
+  user-select: none;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: pre;
+}

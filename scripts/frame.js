@@ -1,0 +1,353 @@
+// SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+// SPDX-License-Identifier: MIT
+// This file is licensed under the terms of the LICENSE-MIT.md file.
+
+window.try_catch_handler_(function () {
+  "use strict";
+
+  const DARK_MODE_FRAME_QUERY_KEY_NAME = settings_(
+    "DARK_MODE_FRAME_QUERY_KEY_NAME",
+  );
+  const REGULAR_REPORT_VIEW_KEYS = settings_("REGULAR_REPORT_VIEW_KEYS");
+  const SCREENSHOT_MENU_KEY_NUMBER = settings_("SCREENSHOT_MENU_KEY_NUMBER");
+  const SETTINGS_DEBUG_ENABLED = settings_("SETTINGS_DEBUG_ENABLED");
+  const SETTINGS_DEBUG_HASH_KEY_NAME = settings_(
+    "SETTINGS_DEBUG_HASH_KEY_NAME",
+  );
+  const SETTINGS_DEBUG_QUERY_KEY_NAME = settings_(
+    "SETTINGS_DEBUG_QUERY_KEY_NAME",
+  );
+  const SETTINGS_DEBUG_QUERY_VALUES = settings_("SETTINGS_DEBUG_QUERY_VALUES");
+  const SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES = settings_(
+    "SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES",
+  );
+  const SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES = settings_(
+    "SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES",
+  );
+  const SETTINGS_LOAD_LOG_HISTORY_MAX_LINES = settings_(
+    "SETTINGS_LOAD_LOG_HISTORY_MAX_LINES",
+  );
+  const SETTINGS_VIEW_ENTRY = settings_("SETTINGS_VIEW_ENTRY");
+  const STORAGE_KEY_LOG_DISPLAY_LENGTH = settings_(
+    "STORAGE_KEY_LOG_DISPLAY_LENGTH",
+  );
+
+  const home_panel = window.report_ui_.home_panel;
+  const loaded_hash = location.hash;
+  const loaded_address = window.report_ui_.address.of_hash(loaded_hash);
+  const loaded_menu_entry_number = new URLSearchParams(location.search).get(
+    SCREENSHOT_MENU_KEY_NUMBER,
+  );
+  const menu_strip = document.getElementById("menu-");
+  const counter_names = JSON.parse(
+    menu_strip.getAttribute("data-counter-names-"),
+  );
+  const is_regular_report =
+    menu_strip.getAttribute("data-regular-report-") === "1";
+  const test_names = JSON.parse(menu_strip.getAttribute("data-test-names-"));
+  const view_frame = window.report_ui_.view_frame;
+
+  let current_address = null;
+  let focused_path_entries = [];
+  let load_log_shown_count = null;
+  let loaded_view_href = "";
+
+  function address_now() {
+    return current_address;
+  }
+  // Returns the focused path entries the call graph last sent, root first.
+  function focused_path_now() {
+    return focused_path_entries;
+  }
+  // Returns whether this report holds a view's page, a diff holding fewer.
+  function view_has_page(view_key) {
+    return is_regular_report || !REGULAR_REPORT_VIEW_KEYS.includes(view_key);
+  }
+  // Returns the query's menu entry number while the loaded address shows.
+  function menu_entry_number_now() {
+    return location.hash === loaded_hash ? loaded_menu_entry_number : null;
+  }
+  function address_check(parsed_address) {
+    if (
+      parsed_address.test !== null &&
+      !test_names.includes(parsed_address.test)
+    )
+      window.throw_exception_(
+        "str_error_hash_test_unknown",
+        parsed_address.test,
+      );
+    if (!view_has_page(parsed_address.view))
+      window.throw_exception_(
+        "str_error_hash_view_page_missing",
+        parsed_address.view,
+      );
+    if (
+      parsed_address.setting !== null &&
+      !window.settings_names_().includes(parsed_address.setting)
+    )
+      window.throw_exception_(
+        "str_error_hash_setting_unknown",
+        parsed_address.setting,
+      );
+  }
+  // Loads the top page again under the debug query, off dropping the values.
+  function settings_debug_load(debug_enabled) {
+    const loaded_url = new URL(location.href);
+    loaded_url.searchParams.set(
+      SETTINGS_DEBUG_QUERY_KEY_NAME,
+      debug_enabled
+        ? SETTINGS_DEBUG_QUERY_VALUES.enabled
+        : SETTINGS_DEBUG_QUERY_VALUES.disabled,
+    );
+    if (!debug_enabled)
+      loaded_url.hash =
+        window.report_ui_.address.settings_cleared_hash(current_address);
+    location.replace(loaded_url.href);
+  }
+  // Clears any settings debug query and values, loading the top page again.
+  function settings_debug_clear() {
+    const cleared_url = new URL(location.href);
+    if (
+      !cleared_url.searchParams.has(SETTINGS_DEBUG_QUERY_KEY_NAME) &&
+      current_address[SETTINGS_DEBUG_HASH_KEY_NAME] === null
+    )
+      return;
+    cleared_url.searchParams.delete(SETTINGS_DEBUG_QUERY_KEY_NAME);
+    cleared_url.hash =
+      window.report_ui_.address.settings_cleared_hash(current_address);
+    location.replace(cleared_url.href);
+  }
+  // Loads a new view page into the frame, clearing the focused path it held.
+  function view_page_load(shown_address) {
+    const page_href = window.report_ui_.address.page_href(shown_address);
+    const view_href = page_href + location.hash;
+    if (view_href === loaded_view_href) return;
+    // The view opens in the dark mode shown, before its first paint.
+    const mode_query = new URLSearchParams({
+      [DARK_MODE_FRAME_QUERY_KEY_NAME]: Number(
+        Boolean(window.report_ui_.dark_mode_enabled_now_()),
+      ),
+    });
+    view_frame.contentWindow.location.replace(
+      page_href + "?" + mode_query + location.hash,
+    );
+    loaded_view_href = view_href;
+    focused_path_entries = [];
+    // The new page claims the top page's sideways scroll at its first draw.
+    window.report_ui_.page_scroll.claim_set("frame", false);
+  }
+  function view_show() {
+    const shown_address = window.report_ui_.address.of_hash(location.hash);
+    address_check(shown_address);
+    current_address = shown_address;
+    // Installs the settings again when the hash changes those it applies.
+    if (
+      shown_address[SETTINGS_DEBUG_HASH_KEY_NAME] !==
+      loaded_address[SETTINGS_DEBUG_HASH_KEY_NAME]
+    ) {
+      location.reload();
+      return;
+    }
+    if (shown_address.view !== null) view_page_load(shown_address);
+    window.report_menu_.address_show();
+    if (shown_address.view === null) {
+      const frame_had_focus = document.activeElement === view_frame;
+      view_frame.hidden = true;
+      window.report_overview_.heat_colors_apply();
+      home_panel.hidden = false;
+      window.report_ui_.page_scroll.lend_show();
+      window.report_ui_.layout_refresh(home_panel);
+      if (frame_had_focus) {
+        const tab_stops = home_panel.querySelectorAll('[tabindex="0"]');
+        window.report_ui_.tab_stop_move(
+          null,
+          tab_stops[tab_stops.length - 1],
+          true,
+        );
+      }
+      return;
+    }
+    const home_had_focus = home_panel.contains(document.activeElement);
+    home_panel.hidden = true;
+    view_frame.hidden = false;
+    window.report_ui_.page_scroll.lend_show();
+    page_scroll_post();
+    if (home_had_focus) view_frame.focus();
+  }
+  function address_request(requested_hash) {
+    if (requested_hash !== (location.hash || "#")) {
+      location.hash = requested_hash;
+      return;
+    }
+    view_show();
+    if (current_address.view !== null) view_post("recenter");
+  }
+  // Requests the settings view, the setting's new value among those applied.
+  function settings_apply(setting_name, setting_value) {
+    window.settings_(setting_name);
+    const applied_values = window.settings_applied_values_();
+    applied_values[setting_name] = setting_value;
+    address_request(
+      window.report_ui_.address.hash({
+        test: current_address.test,
+        view: SETTINGS_VIEW_ENTRY[0],
+        setting: setting_name,
+        [SETTINGS_DEBUG_HASH_KEY_NAME]: new TextEncoder()
+          .encode(JSON.stringify(applied_values))
+          .toBase64(),
+      }),
+    );
+  }
+  // Posts a message down carrying the dark mode and preferences shown.
+  function view_post(message_name, message_fields = {}) {
+    if (message_name === "layout_reset")
+      window.report_ui_.layout_reset(home_panel);
+    if (loaded_view_href)
+      view_frame.contentWindow.postMessage(
+        {
+          report_ui: message_name,
+          dark_mode_enabled: window.report_ui_.dark_mode_enabled_now_(),
+          view_preferences: window.report_preferences_.now(),
+          ...message_fields,
+        },
+        "*",
+      );
+  }
+  // Shows the stored history count when offered, else its default.
+  function load_log_history() {
+    const stored_count = window.report_ui_.view_storage.value_read(
+      STORAGE_KEY_LOG_DISPLAY_LENGTH,
+    );
+    load_log_shown_count = SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES.includes(
+      stored_count,
+    )
+      ? stored_count
+      : SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES;
+  }
+  // Relays the newest history entries the view shows, and their count.
+  function load_log_relay_post() {
+    view_post("load_log_relay", {
+      load_log_entries: window.report_load_log_.newest_entries(
+        load_log_shown_count,
+      ),
+      load_log_line_count: load_log_shown_count,
+    });
+  }
+  // Stores the history count the view chose, then relays the history.
+  function load_log_history_set(line_count) {
+    if (!SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES.includes(line_count))
+      window.throw_exception_("str_error_internal");
+    window.report_ui_.view_storage.value_write(
+      STORAGE_KEY_LOG_DISPLAY_LENGTH,
+      line_count,
+    );
+    load_log_shown_count = line_count;
+    load_log_relay_post();
+  }
+  // Shows the shown view's chained bar the top page's sideways scroll.
+  function page_scroll_post() {
+    if (
+      window.report_ui_.page_scroll.is_claimed("frame") &&
+      !view_frame.hidden
+    )
+      view_post("page_scroll_show", window.report_ui_.page_scroll.state());
+  }
+  // Holds the focused path the view sent, then draws the menu with it.
+  function focused_path_set(path_entries) {
+    focused_path_entries = path_entries;
+    window.report_menu_.menu_render();
+  }
+  function view_message_handler(message_event) {
+    const message_data = message_event.data;
+    if (message_event.source !== view_frame.contentWindow || !message_data)
+      return;
+    const message_tag = message_data.report_ui;
+    if (message_tag === "address_request") address_request(message_data.hash);
+    else if (message_tag === "counter_line_move")
+      window.report_menu_.counter_line_move(
+        message_data.list_key,
+        message_data.line_name,
+        message_data.anchor_name,
+        message_data.lands_after,
+      );
+    else if (message_tag === "dark_mode_request") view_post("dark_mode_show");
+    else if (message_tag === "focused_path_set")
+      focused_path_set(message_data.path_entries);
+    else if (message_tag === "heat_sort_toggle")
+      window.report_menu_.heat_sort_toggle();
+    else if (message_tag === "load_log_history_set")
+      load_log_history_set(message_data.line_count);
+    else if (message_tag === "load_log_request") load_log_relay_post();
+    else if (message_tag === "menu_key_pressed") {
+      if (
+        !window.report_menu_.menu_key_handler(
+          message_data.key,
+          message_data.repeat,
+        )
+      )
+        view_post("tests_pulldown_closed");
+    } else if (message_tag === "page_scroll_claim") {
+      window.report_ui_.page_scroll.claim_set(
+        "frame",
+        message_data.is_claimed,
+      );
+      page_scroll_post();
+    } else if (message_tag === "page_scroll_set")
+      window.report_ui_.page_scroll.offset_set(
+        message_data.page_scroll_offset,
+      );
+    else if (message_tag === "settings_apply")
+      settings_apply(message_data.setting_name, message_data.setting_value);
+    else if (message_tag === "settings_debug_toggle")
+      settings_debug_load(!SETTINGS_DEBUG_ENABLED);
+    else if (
+      message_tag !== undefined &&
+      message_tag !== "load_log_entry" &&
+      message_tag !== "report_error" &&
+      message_tag !== "settings_request"
+    )
+      window.throw_exception_("str_error_internal");
+  }
+
+  function activate() {
+    if (
+      !SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES.includes(
+        SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES,
+      )
+    )
+      window.throw_exception_(
+        "str_error_setting_choice_unknown",
+        "SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES",
+        SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES,
+      );
+    window.report_load_log_.kept_line_count_set(
+      SETTINGS_LOAD_LOG_HISTORY_MAX_LINES,
+    );
+    load_log_history();
+    window.addEventListener(
+      "hashchange",
+      window.try_catch_handler_(view_show),
+    );
+    window.addEventListener(
+      "message",
+      window.try_catch_handler_(view_message_handler),
+    );
+    window.report_ui_.page_scroll.change_listen(page_scroll_post);
+    view_show();
+    window.report_load_log_.page_render_log(() => {});
+  }
+
+  window.report_frame_ = {
+    activate,
+    address_now,
+    address_request,
+    counter_names,
+    focused_path_now,
+    load_log_history,
+    menu_entry_number_now,
+    settings_debug_clear,
+    test_names,
+    view_has_page,
+    view_post,
+  };
+})();

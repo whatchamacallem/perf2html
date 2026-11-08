@@ -1,0 +1,154 @@
+/* SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+ * SPDX-License-Identifier: MIT
+ * This file is licensed under the terms of the LICENSE-MIT.md file. */
+
+/* A tree node, one line high: its bars and branch, name, share. */
+.heat-map-tree-node- {
+  display: flex;
+  height: 1lh;
+  align-items: unsafe end;
+  padding-right: var(--heat-map-tree-node-padding-right-);
+  cursor: pointer;
+  white-space: pre;
+}
+.heat-map-tree-node-branch- {
+  flex: none;
+}
+.heat-map-tree-node-name- {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.heat-map-tree-node-share-percent- {
+  flex: none;
+  width: var(--heat-map-tree-node-share-percent-width-);
+  text-align: right;
+}
+.heat-map-tree-node-.cold- .heat-map-tree-node-share-percent- {
+  visibility: hidden;
+}
+/* A hovered node a click acts on, lifted so its frame lies over the next. */
+.heat-map-tree-node-:not(.cold-):hover {
+  position: relative;
+  z-index: var(--heat-map-tree-node-hover-z-index-);
+}
+.heat-map-tree-node-:not(.cold-):hover::before {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+.heat-map-tree-node-child-group- {
+  display: none;
+}
+.heat-map-tree-node-child-group-.open- {
+  display: block;
+}
+
+.heat-map-source-information-box- {
+  position: relative;
+}
+.heat-map-source-information-box-close-symbol- {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+.heat-map-source-information-box-heading- {
+  white-space: pre;
+}
+/* A box's table titles stay on their tables. */
+.heat-map-source-information-box- th {
+  position: static;
+}
+:is(
+    tr.heat-map-source-line-detail-row-,
+    tr.heat-map-source-file-information-row-
+  )
+  > td {
+  white-space: normal;
+  padding: 0;
+}
+/* A box's table and first control take the source line as left. */
+:is(
+    tr.heat-map-source-line-detail-row-,
+    tr.heat-map-source-file-information-row-
+  )
+  .table-,
+:is(
+    tr.heat-map-source-line-detail-row-,
+    tr.heat-map-source-file-information-row-
+  )
+  .table-
+  :is(th, td):first-child,
+:is(
+    tr.heat-map-source-line-detail-row-,
+    tr.heat-map-source-file-information-row-
+  )
+  .heat-map-source-information-box-
+  > div
+  > .menu-button-:first-child {
+  border-left: 0;
+}
+td.heat-map-source-table-line-number-cell- {
+  user-select: none;
+}
+tr.has-callee- td.heat-map-source-table-line-number-cell-::before {
+  content: var(--heat-map-source-table-line-number-cell-callee-marker-text-);
+  display: inline-block;
+  width: var(--heat-map-source-table-line-number-cell-callee-marker-width-);
+}
+tr.clickable- {
+  cursor: pointer;
+}
+/* A hovered source line's tree cell ends where the line's frame starts. */
+tr[data-line-number-]:hover > td:first-child {
+  anchor-name: --heat-map-source-hover-tree-cell-;
+}
+/* The hottest lines keep their line with none, so no file moves the page. */
+#heat-map-ticker-tape-box- {
+  min-height: 1lh;
+}
+.heat-map-source-ticker-tape- {
+  display: flex;
+  gap: var(--heat-map-source-ticker-tape-gap-);
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.heat-map-source-ticker-tape- > * {
+  flex: none;
+}
+
+/* The minimap: the source scaled into its column, the shown part boxed. */
+#heat-map-minimap- {
+  position: relative;
+  width: var(--heat-map-minimap-width-);
+  overflow: hidden;
+  cursor: pointer;
+}
+#heat-map-minimap-.empty- {
+  display: none;
+}
+#heat-map-minimap-box- {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+#heat-map-minimap-box- table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+#heat-map-minimap-box- td {
+  padding: 0;
+  white-space: pre;
+}
+#heat-map-minimap-viewport- {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-style: solid;
+  cursor: grab;
+}
+#heat-map-minimap-viewport-.drag- {
+  cursor: grabbing;
+}

@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+     SPDX-License-Identifier: MIT
+     This file is licensed under the terms of the LICENSE-MIT.md file. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <script src="../scripts/error_overlay.js"></script>
+    <script src="../scripts/settings.js"></script>
+    <script src="../scripts/utility.js"></script>
+    <script src="../scripts/ui_strings.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>maprintf</title>
+    <link rel="stylesheet" href="../scripts/theme.css" />
+    <link rel="stylesheet" href="../scripts/light_mode.css" />
+    <link rel="stylesheet" href="../scripts/dark_mode.css" />
+  </head>
+  <body class="view-">
+    <main id="call-graph-page-">
+      <div class="page-"><div class="page-heading-" data-download-file-name-="maprintf_call_graph.svg"></div><table id="call-graph-table-" data-model-="{&quot;functions&quot;:[[&quot;_IO_default_xsputn&quot;,954],[&quot;_IO_do_write@@GLIBC_2.2.5&quot;,115],[&quot;_IO_doallocbuf&quot;,363],[&quot;_IO_file_doallocate&quot;,621],[&quot;_IO_file_overflow@@GLIBC_2.2.5&quot;,820],[&quot;_IO_file_stat&quot;,113],[&quot;_IO_file_xsputn@@GLIBC_2.2.5&quot;,1156],[&quot;_IO_setb&quot;,129],[&quot;__glibc_morecore&quot;,240],[&quot;__libc_malloc2&quot;,399],[&quot;__memcpy_avx_unaligned_erms&quot;,13650],[&quot;__mempcpy_avx_unaligned_erms&quot;,373],[&quot;__strcmp_avx2&quot;,520],[&quot;__strlen_avx2&quot;,4510],[&quot;_dl_fixup&quot;,1988],[&quot;_dl_lookup_symbol_x&quot;,1348],[&quot;_dl_runtime_resolve_xsave&quot;,2154],[&quot;_int_malloc&quot;,4854],[&quot;alloc_addrun&quot;,41695],[&quot;alloc_perturb&quot;,115],[&quot;brk&quot;,128],[&quot;check_match&quot;,579],[&quot;clock_gettime@@GLIBC_2.17&quot;,242],[&quot;curl_free&quot;,410],[&quot;curl_maprintf&quot;,3305],[&quot;curl_mprintf&quot;,716],[&quot;curl_mvaprintf&quot;,5350],[&quot;curl_mvfprintf&quot;,350],[&quot;curlx_dyn_addn&quot;,310],[&quot;curlx_dyn_init&quot;,710],[&quot;curlx_dyn_len&quot;,410],[&quot;curlx_dyn_ptr&quot;,410],[&quot;curlx_pnow&quot;,396],[&quot;curlx_str_number&quot;,416],[&quot;do_lookup_x&quot;,1621],[&quot;dyn_nappend&quot;,5960],[&quot;formatf&quot;,149273],[&quot;free&quot;,3955],[&quot;free'2&quot;,33],[&quot;fstat&quot;,116],[&quot;fwrite&quot;,2129],[&quot;fwrite_wrapper&quot;,400],[&quot;libcurl.so.4.8.0/str_num_base&quot;,2674],[&quot;main&quot;,525],[&quot;malloc&quot;,3553],[&quot;memcpy@@GLIBC_2.14&quot;,22],[&quot;out_number.isra.0&quot;,18049],[&quot;perf/str_num_base&quot;,751],[&quot;realloc&quot;,820],[&quot;sbrk&quot;,600],[&quot;strcmp&quot;,322],[&quot;stream_pad&quot;,3991],[&quot;strlen&quot;,25],[&quot;tcache_free_init&quot;,1791],[&quot;test_maprintf&quot;,3215]],&quot;roots&quot;:[[43,1]],&quot;edges&quot;:[[2,3,1,373,1228],[3,5,1,74,229],[3,7,1,94,129],[3,44,1,91,249],[4,1,2,810,115],[4,2,1,779,1591],[5,39,1,1208,116],[6,0,1,1326,954],[6,4,1,1305,2526],[6,11,9,1297,373],[8,49,2,29,728],[9,17,3,3253,5937],[14,15,4,95,3870],[14,45,1,32,22],[14,52,1,32,25],[15,34,4,787,2522],[16,14,4,98,5905],[17,8,2,2477,968],[17,19,1,4336,115],[18,10,800,29,11330],[18,16,1,29,1512],[21,50,5,89,322],[23,37,100,341,6137],[24,16,1,1422,2223],[24,26,100,1422,258823],[25,16,1,1503,855],[25,27,1,1503,11556],[26,28,100,1288,18692],[26,29,100,1400,710],[26,30,100,1412,410],[26,31,100,1413,410],[26,36,100,1404,233251],[27,36,1,1482,11206],[28,35,100,167,18382],[32,22,2,80,242],[33,42,102,215,2674],[34,21,5,429,901],[35,10,100,29,2320],[35,48,100,105,10102],[36,13,300,1001,4510],[36,16,1,1001,3469],[36,18,700,679,47937],[36,33,102,154,3090],[36,41,5,679,6503],[36,46,104,1172,26755],[36,51,300,1009,2920],[37,53,1,3365,2182],[40,6,10,44,5009],[41,40,10,1471,7138],[43,12,4,48,520],[43,54,1,64,288629],[44,9,2,3306,5978],[46,18,100,679,6600],[46,41,4,679,874],[46,51,104,930,1232],[48,44,100,3388,9282],[49,20,2,59,128],[51,41,1,679,161],[53,9,1,3218,358],[53,38,1,3314,33],[54,23,100,62,6547],[54,24,100,53,264351],[54,25,1,67,13127],[54,32,2,176,638],[54,47,1,215,751]],&quot;test_total&quot;:289676}"></table></div>
+    </main>
+    <div
+      class="text-scrollbar- vertical-"
+      data-scrolls-="call-graph-page-"
+      aria-hidden="true"
+    ></div>
+    <div
+      class="text-scrollbar- horizontal-"
+      data-scrolls-="call-graph-page-"
+      data-chains-page-
+      aria-hidden="true"
+    ></div>
+    <template id="page-held-script-">
+      <script src="../scripts/debug.js"></script>
+      <script src="../scripts/theme.js"></script>
+      <script src="../scripts/preferences.js"></script>
+      <script src="../scripts/call_graph.js"></script>
+    </template>
+  </body>
+</html>
