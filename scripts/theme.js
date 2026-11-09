@@ -3001,21 +3001,32 @@ window.report_ui_ = window.try_catch_handler_(function () {
   }
   // Places each layout table cell in its row's line, padded to its column.
   function layout_table_lines(layout_table) {
-    const table_rows = [...layout_table.rows];
-    const column_widths = new Array(
-      Math.max(...table_rows.map((table_row) => table_row.cells.length)),
-    ).fill(0);
-    for (const table_row of table_rows)
-      [...table_row.cells].forEach((table_cell, cell_index) => {
-        column_widths[cell_index] = Math.max(
-          column_widths[cell_index],
-          table_cell.textContent.length,
-        );
+    const column_cells = layout_table.tHead.rows[0].cells;
+    const column_widths = new Array(column_cells.length).fill(0);
+    // Lists a row's cells, an empty spanning cell as each column it covers.
+    function row_column_runs(table_row) {
+      let next_column = 0;
+      return [...table_row.cells].flatMap((table_cell) => {
+        const first_column = next_column;
+        next_column += table_cell.colSpan;
+        if (table_cell.colSpan === 1)
+          return [{ column_index: first_column, table_cell }];
+        return Array.from({ length: table_cell.colSpan }, (_, span_index) => ({
+          column_index: first_column + span_index,
+          table_cell: column_cells[first_column + span_index],
+        }));
       });
-    return table_rows.map((table_row) => {
+    }
+    const row_runs = [...layout_table.tBodies[0].rows].map(row_column_runs);
+    for (const { column_index, table_cell } of row_runs.flat())
+      column_widths[column_index] = Math.max(
+        column_widths[column_index],
+        table_cell.textContent.length,
+      );
+    return row_runs.map((column_runs) => {
       let column_start = 0;
-      return [...table_row.cells].map((table_cell, cell_index) => {
-        const column_width = column_widths[cell_index];
+      return column_runs.map(({ column_index, table_cell }) => {
+        const column_width = column_widths[column_index];
         const right_room =
           getComputedStyle(table_cell).textAlign === "right"
             ? column_width - table_cell.textContent.length
@@ -3699,20 +3710,37 @@ window.report_ui_ = window.try_catch_handler_(function () {
       const thumb_first = Math.round(bar_geometry.thumb_position);
       return [thumb_first, thumb_first + bar_geometry.thumb_length];
     }
-    // Fits a chained bar to the part of its place the window shows.
-    function chained_bar_fit() {
+    // Returns a chained bar's style for the part of its place shown, or null.
+    function chained_bar_fit_style() {
       const shown_range = page_chain.shown_range();
       const target_rect = target_element.getBoundingClientRect();
-      if (!shown_range || !target_rect.width) return;
+      if (!shown_range || !target_rect.width) return null;
       const fit_start = Math.max(target_rect.left, shown_range[0]);
       const fit_end = Math.max(
         fit_start,
         Math.min(target_rect.right, shown_range[1]),
       );
       const units_per_px = target_units_per_px();
-      bar_element.style.marginLeft =
-        (fit_start - target_rect.left) * units_per_px + "px";
-      bar_element.style.width = (fit_end - fit_start) * units_per_px + "px";
+      return {
+        marginLeft: (fit_start - target_rect.left) * units_per_px + "px",
+        width: (fit_end - fit_start) * units_per_px + "px",
+      };
+    }
+    // Fits a chained bar to the part of its place the window shows.
+    function chained_bar_fit() {
+      const fit_style = chained_bar_fit_style();
+      if (fit_style) Object.assign(bar_element.style, fit_style);
+    }
+    // Returns whether a draw now would change the bar's own size.
+    function draw_sizes_bar() {
+      const is_shown = !bar_element.classList.contains("target-fits-");
+      if (is_shown !== target_scrolls()) return true;
+      const fit_style = page_chain && chained_bar_fit_style();
+      return Boolean(
+        fit_style &&
+        (fit_style.marginLeft !== bar_element.style.marginLeft ||
+          fit_style.width !== bar_element.style.width),
+      );
     }
     // Hides the bar while its target fits, else draws chevrons, track, thumb.
     function scrollbar_draw() {
@@ -3929,10 +3957,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
       draw_frame = 0;
       scrollbar_draw();
     }
-    // Draws a bar that shows or hides next frame, so no observed size changes.
+    // Draws a bar next frame if its size would change, so none changes here.
     function resize_draw() {
-      const is_shown = !bar_element.classList.contains("target-fits-");
-      if (is_shown === target_scrolls()) scrollbar_draw();
+      if (!draw_sizes_bar()) scrollbar_draw();
       else if (!draw_frame)
         draw_frame = requestAnimationFrame(
           window.try_catch_handler_(frame_draw),

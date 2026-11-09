@@ -35,9 +35,9 @@ set -euo pipefail
 
 TIMESTAMP="$(date +%s)"
 INVOKED_FROM="$PWD"
-_SCRIPT="$(readlink -f -- "$0")"
-cd -P -- "$(dirname -- "$_SCRIPT")"
+cd -- "$(dirname -- "$0")"
 PERF2HTML_DIR_="$PWD"
+_SCRIPT="$PWD/${0##*/}"
 
 . ./scripts/settings.sh
 . ./scripts/utility.sh
@@ -67,7 +67,7 @@ input_archives_extract() {
 input_path_display() {
   local _dir="$1" _inside="${1#"$EXTRACTED_ROOT/"}"
   if [ -z "$EXTRACTED_ROOT" ] || [ "$_inside" = "$_dir" ]; then
-    path_display "$_dir"
+    path_display "$_dir" "$PERF2HTML_BUILD_ROOT"
   else
     echo "$DIFF_EXTRACTED_ROOT_DISPLAY_NAME/$_inside"
   fi
@@ -160,6 +160,7 @@ inputs_check() {
 }
 
 report_prepare() {
+  readme_converter_resolve
   if [ "$REGENERATE" = 1 ]; then
     [ -d "$REPORT_ARTIFACTS_DIR" ] || error_exit 2 \
       "error: --regenerate: no recordings at $REPORT_ARTIFACTS_DIR"

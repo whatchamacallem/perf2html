@@ -53,7 +53,7 @@ report generators. Start by running the tests and checking the results.
 - `dark-mode`: Query key of a view frame's address, `1` or `0`, that the top
   page writes so the view opens in the dark mode it shows.
 - `debug`: Query key, value `1`, that unfreezes the settings so the settings
-  view can apply a setting.
+  view can apply a setting, and points the menu logo at the settings view.
 - `file`: Hash key, heat map view only, that names the source file to open.
 - `function`: Hash key, heat map view only, that names the function to open and
   excludes `file` and `line`.
@@ -122,9 +122,8 @@ in the directory. A diff report lacks the `call-graph/`, `flame-graph/`,
 - `heat-map/index.html`: The one heat map page for every test.
 - `index.html`: The overview, the top page with the menu, home panel and frame.
 - `MANIFEST.txt`: The version line, then the `LABEL=VALUE` rows, written last.
-- `README.html`: The user contract as HTML, copied when `build/README.html` is
-  newer than `README.md`, which the help link then opens.
-- `README.md`: A copy of the user contract.
+- `README.html`: The user contract as HTML, built by `cmark-gfm`.
+- `README.md`: The user contract as Markdown.
 - `scripts/source_database.js`: The report's files and functions, no counter.
 - `settings/index.html`: The settings view page.
 - `sources/<path>.js`: A source file's text, the path's non-alphanumerics `_`.
@@ -273,6 +272,8 @@ A diff report's run keeps these.
 |                 | backup, or restores the checkout from one beside it.  |
 | `../clean.sh`   | Deletes every generated file under `tests/perf2html/` |
 |                 | and the ccache entries the builds made.               |
+| `publish.sh`    | Force pushes a report to the `gh-pages` branch as one |
+|                 | commit with no parent, then purges that commit here.  |
 
 ## Error Overlay
 
@@ -380,8 +381,8 @@ A diff report's run keeps these.
 | `test_error_handling.sh`    | Proves the cached and regenerated runs, then |
 |                             | checks the exit code of each failure mode.   |
 | `test_expected_behavior.sh` | Formats, lints and scans the sources, runs   |
-|                             | the batch, checks the reports, takes         |
-|                             | screenshots, then builds `README.html`.      |
+|                             | the batch, checks the reports, then takes    |
+|                             | screenshots.                                 |
 | `test_report.py`            | Checks the pages, manifest, checksum, heat   |
 |                             | map, flame graph and timer artifacts of one  |
 |                             | report.                                      |

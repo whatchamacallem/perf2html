@@ -3,8 +3,15 @@
 `perf2html` is a collection of scripts that profile `perf` and generate html
 reports about the results.
 
+The latest version and an example report can be found here:
+
+- [Repository](https://github.com/whatchamacallem/perf2html)
+- [Example Report](https://whatchamacallem.github.io/perf2html/)
+
+## Table Of Contents
+
 - [Using A Report](#using-a-report)
-- [Running the Generator Scripts](#running-the-generator-scripts)
+- [Running The Generator Scripts](#running-the-generator-scripts)
 - [Callgrind Counters](#callgrind-counters)
 - [Reading A Diff Report](#reading-a-diff-report)
 - [Flame Graph (speedscope)](#flame-graph-speedscope)
@@ -27,11 +34,14 @@ are immutable (so bookmarks work) and the module URLs used by JavaScript on the
 back end are also immutable (so no server is needed and perfect caching is
 possible).
 
-## Running the Generator Scripts
+## Running The Generator Scripts
 
 These are the scripts for using `perf2html`. While the scripts directory does
 contain a few more interesting files, none of them should be needed to use the
 generators.
+
+Run the scripts from `tests/perf2html/` in a curl checkout, which is the
+project root, as the scripts find curl two directories up.
 
 - `perf2html.sh` : Capture timing data and generate a report.
 - `perf2html_diff.sh` : Generate a report about the difference between two

@@ -16,6 +16,10 @@ window.try_catch_handler_(function () {
   const CALL_GRAPH_BRANCH_PASS_TEXT = settings_("CALL_GRAPH_BRANCH_PASS_TEXT");
   const CALL_GRAPH_CLOSED_TEXT = settings_("CALL_GRAPH_CLOSED_TEXT");
   const CALL_GRAPH_LINE_TEXT = settings_("CALL_GRAPH_LINE_TEXT");
+  const CALL_GRAPH_MOST_DRAWN_NODES = settings_("CALL_GRAPH_MOST_DRAWN_NODES");
+  const CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT = settings_(
+    "CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT",
+  );
   const CALL_GRAPH_PAD_TEXT = settings_("CALL_GRAPH_PAD_TEXT");
   const CALL_GRAPH_REVEAL_CLEARANCE_CHARS = settings_(
     "CALL_GRAPH_REVEAL_CLEARANCE_CHARS",
@@ -34,14 +38,18 @@ window.try_catch_handler_(function () {
     0,
     NUMBER_FRACTION_DIGITS,
   ).length;
+  const MULTIPLE_COLUMN = { class: "call-graph-multiple-" };
+  const SHARE_COLUMN = { class: "call-graph-share-" };
+  const SYMBOL_COLUMN = { class: "call-graph-symbol-" };
+  // Holds a group's columns in order, each with the attributes of its cells.
+  const GROUP_COLUMNS = [{}, MULTIPLE_COLUMN, SHARE_COLUMN, SYMBOL_COLUMN];
   // Writes a share cell, the share on its heat color, empty for no share.
   function share_cell_markup(share_percent) {
-    const cell_attributes = { class: "call-graph-share-" };
-    if (!share_percent) return render_element("td", cell_attributes, "");
+    if (!share_percent) return render_element("td", SHARE_COLUMN, "");
     return render_element(
       "td",
       {
-        ...cell_attributes,
+        ...SHARE_COLUMN,
         style: window.report_ui_.heat_cell_style(
           share_percent,
           heat_curve_name,
@@ -49,24 +57,6 @@ window.try_catch_handler_(function () {
         ),
       },
       render_html_escape(window.report_ui_.percent_text(share_percent)),
-    );
-  }
-  // Writes a group's cells: branch, multiple, share and symbol.
-  function group_markup(
-    branch_cell_markup,
-    multiple_cell_markup,
-    share_percent,
-    symbol_cell_markup,
-  ) {
-    return (
-      render_element("td", {}, branch_cell_markup) +
-      render_element(
-        "td",
-        { class: "call-graph-multiple-" },
-        multiple_cell_markup,
-      ) +
-      share_cell_markup(share_percent) +
-      render_element("td", { class: "call-graph-symbol-" }, symbol_cell_markup)
     );
   }
   // Marks a layout group a branch passes through, holding no node.
@@ -80,6 +70,9 @@ window.try_catch_handler_(function () {
   const call_graph_model = JSON.parse(graph_table.getAttribute("data-model-"));
   const graph_body = window.render_element_of_(
     render_element("tbody", {}, ""),
+  );
+  const graph_head = window.render_element_of_(
+    render_element("thead", {}, ""),
   );
 
   // Reads one function's row, its calls summed below.
@@ -105,6 +98,17 @@ window.try_catch_handler_(function () {
   function call_root_read(root_row) {
     return { function_index: root_row[0], calls: root_row[1] };
   }
+  // Reads one branch from its row, its path from the branch it hangs from.
+  function call_branch_read(branch_row, read_branches) {
+    const parent_index = branch_row[0];
+    return {
+      node_path:
+        parent_index === null
+          ? [branch_row[1]]
+          : [...read_branches[parent_index].node_path, branch_row[1]],
+      inclusive_cost: branch_row[2],
+    };
+  }
   const function_records = call_graph_model.functions.map(
     function_record_read,
   );
@@ -118,6 +122,20 @@ window.try_catch_handler_(function () {
     function_records[call_edge.callee_index].invocation_count +=
       call_edge.calls;
   }
+  const call_branches = [];
+  for (const branch_row of call_graph_model.branches)
+    call_branches.push(call_branch_read(branch_row, call_branches));
+  // Lists each branch drawing a node, a root branch drawing none.
+  const node_branches = call_branches.filter(
+    (call_branch) => call_branch.node_path.length > 1,
+  );
+  // Holds each drawn branch's cost, the inclusive cost of its own calls.
+  const branch_costs = new Map(
+    node_branches.map((call_branch) => [
+      path_key(call_branch.node_path),
+      call_branch.inclusive_cost,
+    ]),
+  );
 
   // Returns a function's self cost as a percent of the test's total cost.
   function self_share_of_test(function_record) {
@@ -181,28 +199,42 @@ window.try_catch_handler_(function () {
       (call_edge) => !node_path.includes(call_edge.callee_index),
     );
   }
-  // Lists a path's shown children as the open set reads them.
-  function path_open_edges(node_path) {
-    return shown_callee_edges(node_path).map((call_edge) => ({
-      child_node: [...node_path, call_edge.callee_index],
-      cumulative_cost: call_edge.inclusive_cost,
-    }));
+  // Returns a branch's cost, zero for a call the branch never made.
+  function branch_cost(node_path) {
+    return branch_costs.get(path_key(node_path)) ?? 0;
   }
-  // Returns a fresh open set, each root's calls its top nodes.
+  // Returns whether a branch has a shown child of enough cost to open it.
+  function branch_opens(node_path) {
+    return shown_callee_edges(node_path).some(
+      (call_edge) =>
+        window.report_ui_.share_of_test(
+          branch_cost([...node_path, call_edge.callee_index]),
+          test_total,
+        ) >= CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT,
+    );
+  }
+  // Returns a fresh open set, each function open only at its costliest branch.
   function call_graph_open_set() {
-    return window.report_preferences_.tree_open_set(
-      call_roots.flatMap((call_root) =>
-        path_open_edges([call_root.function_index]).map(
-          (open_edge) => open_edge.child_node,
-        ),
-      ),
-      path_open_edges,
-      path_key,
-      test_total,
+    const costliest_branches = new Map();
+    for (const call_branch of node_branches) {
+      const function_index = call_branch.node_path.at(-1);
+      const known_branch = costliest_branches.get(function_index);
+      // A tie keeps the first branch, the earliest by its path's names.
+      if (
+        !known_branch ||
+        call_branch.inclusive_cost > known_branch.inclusive_cost
+      )
+        costliest_branches.set(function_index, call_branch);
+    }
+    return new Set(
+      [...costliest_branches.values()]
+        .filter((call_branch) => branch_opens(call_branch.node_path))
+        .map((call_branch) => path_key(call_branch.node_path)),
     );
   }
   let button_graph_nodes = new WeakMap(),
     cell_symbol_buttons = new WeakMap(),
+    drawn_rows = new Map(),
     heat_curve_name = null,
     node_places = new Map(),
     open_path_keys = call_graph_open_set(),
@@ -243,6 +275,7 @@ window.try_catch_handler_(function () {
   function graph_layout() {
     const layout_rows = [];
     const next_free_rows = [];
+    let placed_node_count = 0;
     // Places a path's children from a row, their branch passing between them.
     function children_place(node_path, least_row) {
       const child_rows = path_children(node_path).map((child_node) =>
@@ -258,6 +291,14 @@ window.try_catch_handler_(function () {
     }
     // Places a node, then its children when open, and returns its row.
     function node_place(graph_node, least_row) {
+      placed_node_count++;
+      // A count refuses the draw alike at any speed, before the page stalls.
+      if (placed_node_count > CALL_GRAPH_MOST_DRAWN_NODES)
+        window.throw_exception_(
+          "str_error_call_graph_too_large",
+          shown_test_name,
+          CALL_GRAPH_MOST_DRAWN_NODES,
+        );
       const group_index = graph_node.node_path.length - 2;
       const is_open = node_is_open(graph_node);
       // An open node sits below every branch right of it, any other beside.
@@ -303,9 +344,8 @@ window.try_catch_handler_(function () {
       layout_row[group_index + 1] === undefined
     );
   }
-  // Returns a place's branch text: a node's, a passing branch's, or none.
+  // Returns a place's branch text: a node's or a passing branch's.
   function place_branch_text(layout_place) {
-    if (layout_place === undefined) return "";
     if (layout_place === PASS_PLACE) return CALL_GRAPH_BRANCH_PASS_TEXT;
     return layout_place.branch_text;
   }
@@ -395,42 +435,115 @@ window.try_catch_handler_(function () {
         CALL_GRAPH_PAD_TEXT,
     );
   }
-  // Writes a layout row's groups: a node's, a passing branch's, or empty.
+  // Writes a layout row's cells, one empty cell spanning each run of empties.
   function layout_row_markup(layout_row, symbol_widths) {
-    return Array.from(layout_row, (layout_place, group_index) => {
+    let row_markup = "";
+    let empty_span = 0;
+    // Adds cells after the empty cell of the run before them, if any.
+    function cells_add(cells_markup) {
+      if (empty_span)
+        row_markup += render_element("td", { colspan: empty_span }, "");
+      empty_span = 0;
+      row_markup += cells_markup;
+    }
+    for (let group_index = 0; group_index < layout_row.length; group_index++) {
+      const layout_place = layout_row[group_index];
       // A closed node's mark takes the empty branch cell right of it.
-      const branch_cell_markup = mark_fits_right(layout_row, group_index - 1)
-        ? render_character_cells(CALL_GRAPH_CLOSED_TEXT)
-        : render_html_escape(place_branch_text(layout_place));
-      if (layout_place === undefined || layout_place === PASS_PLACE)
-        return group_markup(branch_cell_markup, "", null, "");
-      return group_markup(
-        branch_cell_markup,
-        multiple_markup(layout_place),
-        self_share_of_test(path_function(layout_place.node_path)),
-        symbol_markup(layout_row, group_index, symbol_widths[group_index]),
+      if (mark_fits_right(layout_row, group_index - 1))
+        cells_add(
+          render_element(
+            "td",
+            {},
+            render_character_cells(CALL_GRAPH_CLOSED_TEXT),
+          ),
+        );
+      else if (layout_place === undefined) empty_span++;
+      else
+        cells_add(
+          render_element(
+            "td",
+            {},
+            render_html_escape(place_branch_text(layout_place)),
+          ),
+        );
+      if (layout_place === undefined || layout_place === PASS_PLACE) {
+        empty_span += GROUP_COLUMNS.length - 1;
+        continue;
+      }
+      cells_add(
+        render_element("td", MULTIPLE_COLUMN, multiple_markup(layout_place)) +
+          share_cell_markup(
+            self_share_of_test(path_function(layout_place.node_path)),
+          ) +
+          render_element(
+            "td",
+            SYMBOL_COLUMN,
+            symbol_markup(layout_row, group_index, symbol_widths[group_index]),
+          ),
       );
-    }).join("");
+    }
+    cells_add("");
+    return row_markup;
   }
-  // Draws every layout row, keeping each placed node's cells and button.
+  // Lists a row's cells by the column each starts at.
+  function row_column_cells(graph_row) {
+    const column_cells = [];
+    let column_index = 0;
+    for (const row_cell of graph_row.cells) {
+      column_cells[column_index] = row_cell;
+      column_index += row_cell.colSpan;
+    }
+    return column_cells;
+  }
+  // Writes the head row of no height, a cell per column, for each group held.
+  function head_draw(group_count) {
+    const column_count = group_count * GROUP_COLUMNS.length;
+    if (graph_head.rows[0]?.cells.length === column_count) return;
+    graph_head.innerHTML = render_element(
+      "tr",
+      {},
+      GROUP_COLUMNS.map((group_column) =>
+        render_element("td", group_column, ""),
+      )
+        .join("")
+        .repeat(group_count),
+    );
+  }
+  // Puts the rows in the body in order, moving only a row out of place.
+  function rows_place(graph_rows) {
+    let next_row = graph_body.firstElementChild;
+    for (const graph_row of graph_rows) {
+      if (graph_row === next_row) next_row = next_row.nextElementSibling;
+      else graph_body.insertBefore(graph_row, next_row);
+    }
+  }
+  // Draws every layout row, making only a row whose markup changed.
   function graph_render() {
     button_graph_nodes = new WeakMap();
     cell_symbol_buttons = new WeakMap();
     node_places = new Map();
     const layout_rows = graph_layout();
     const symbol_widths = symbol_column_widths(layout_rows);
+    const stale_rows = drawn_rows;
+    drawn_rows = new Map();
     const graph_rows = layout_rows.map((layout_row) => {
-      const graph_row = window.render_element_of_(
-        render_element("tr", {}, layout_row_markup(layout_row, symbol_widths)),
+      const row_markup = render_element(
+        "tr",
+        {},
+        layout_row_markup(layout_row, symbol_widths),
       );
-      const row_cells = [...graph_row.cells];
-      const group_size = row_cells.length / layout_row.length;
+      const graph_row =
+        stale_rows.get(row_markup)?.shift() ??
+        window.render_element_of_(row_markup);
+      if (!drawn_rows.has(row_markup)) drawn_rows.set(row_markup, []);
+      drawn_rows.get(row_markup).push(graph_row);
+      const column_cells = row_column_cells(graph_row);
       layout_row.forEach((layout_place, group_index) => {
         if (layout_place === PASS_PLACE) return;
         // A node's cells end with the next group's branch cell if its mark's.
-        const node_cells = row_cells.slice(
-          group_index * group_size,
-          (group_index + 1) * group_size +
+        const node_cells = column_cells.slice(
+          group_index * GROUP_COLUMNS.length,
+          (group_index + 1) * GROUP_COLUMNS.length +
             (mark_fits_right(layout_row, group_index) ? 1 : 0),
         );
         const symbol_button = node_cells
@@ -450,7 +563,10 @@ window.try_catch_handler_(function () {
       });
       return graph_row;
     });
-    graph_body.replaceChildren(...graph_rows);
+    for (const stale_row of [...stale_rows.values()].flat())
+      stale_row.remove();
+    rows_place(graph_rows);
+    head_draw(layout_rows[0].length);
     window.report_ui_.layout_activate();
   }
 
@@ -581,7 +697,7 @@ window.try_catch_handler_(function () {
   graph_table.style.scrollMarginTop = CALL_GRAPH_REVEAL_CLEARANCE_LINES + "lh";
   graph_table.style.scrollMarginLeft =
     CALL_GRAPH_REVEAL_CLEARANCE_CHARS + "ch";
-  graph_table.append(graph_body);
+  graph_table.append(graph_head, graph_body);
   graph_table.addEventListener(
     "click",
     window.try_catch_handler_((click_event) => {

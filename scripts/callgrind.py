@@ -23,6 +23,7 @@ _CALLGRIND_FORMAT_CALLEE_FUNCTION_KEY: str = ""
 _CALLGRIND_FORMAT_CALLEE_IMAGE_KEY: str = ""
 _CALLGRIND_FORMAT_CALLS_KEY: str = ""
 _CALLGRIND_FORMAT_COMMAND_KEY: str = ""
+_CALLGRIND_FORMAT_CONTEXT_SEPARATOR: str = ""
 _CALLGRIND_FORMAT_COUNTERS_KEY: str = ""
 _CALLGRIND_FORMAT_FILE_KEY: str = ""
 _CALLGRIND_FORMAT_FUNCTION_KEY: str = ""
@@ -66,6 +67,13 @@ def external_source_roots() -> tuple[str, ...]:
     return tuple(found)
 
 
+# Holds a call graph branch: the branch it hangs from, its function and costs.
+class CallBranch(NamedTuple):
+    parent: int | None
+    function: str
+    costs: Costs | None
+
+
 class Caller(NamedTuple):
     function: str
     file: str
@@ -91,6 +99,20 @@ class CallSite(NamedTuple):
     file: str
     line: int
     callee: str
+
+
+# Holds a counted call from one context to another, its calls and costs.
+class ContextCall(NamedTuple):
+    caller: ContextKey
+    callee: ContextKey
+    call_count: int
+    costs: Costs
+
+
+# Holds a function context: its image and its name, the function's first.
+class ContextKey(NamedTuple):
+    image_path: str
+    name: str
 
 
 class CounterSchema:
@@ -302,14 +324,19 @@ class Profile(LineProfile):
     function_keys: dict[str, FunctionKey] = dataclasses.field(
         default_factory=dict
     )
+    context_calls: list[ContextCall] = dataclasses.field(default_factory=list)
+    context_functions: dict[ContextKey, str] = dataclasses.field(
+        default_factory=dict
+    )
 
 
-# Holds a recording's header, cost lines and the line each callee is entered.
+# Holds a recording's header, cost lines, entry lines and context calls.
 class Recording(NamedTuple):
     path: str
     profile: Profile
     records: dict[FunctionKey, FunctionRecords]
     entries: dict[FunctionKey, SourceLine]
+    context_calls: list[ContextCall]
 
 
 class ResolvedDerivedCounter(NamedTuple):
@@ -369,7 +396,7 @@ class Callgrind:
     class PendingCall(NamedTuple):
         call_count: int
         target_line: int
-        callee: FunctionKey
+        callee: ContextKey
 
     class PositionDecoder:
         def __init__(self) -> None:
@@ -481,20 +508,27 @@ class Callgrind:
                 call.callee_file, call.callee.image_path
             )
 
-    # Refuses a function in no image, which the recording bills to its caller.
-    def function_key(
+    # Returns the function of a context, its name before its callers'.
+    def context_function(self, context: ContextKey) -> FunctionKey:
+        return FunctionKey(
+            context.image_path,
+            context.name.partition(_CALLGRIND_FORMAT_CONTEXT_SEPARATOR)[0],
+        )
+
+    # Refuses a context in no image, which the recording bills to its caller.
+    def context_key(
         self,
         names: Callgrind.CompressedNames,
         compressed_name: str,
         image_path: str,
         path: str,
-    ) -> FunctionKey:
+    ) -> ContextKey:
         name = names.uncompress(
             _CALLGRIND_FORMAT_FUNCTION_KEY, compressed_name
         )
         if image_path == _CALLGRIND_UNKNOWN_NAME:
             sys.exit(f"error: {path}: function {name} lies in no image")
-        return FunctionKey(image_path, name)
+        return ContextKey(image_path, name)
 
     # Returns each function's shown name, a shared one under its image's.
     def function_names(
@@ -547,6 +581,12 @@ class Callgrind:
                 recording.profile.file_image.setdefault(
                     line.file, key.image_path
                 )
+        recording.profile.context_calls = recording.context_calls
+        for context_call in recording.context_calls:
+            for context in (context_call.caller, context_call.callee):
+                recording.profile.context_functions[context] = names[
+                    self.context_function(context)
+                ]
         return recording.profile
 
     # Reads a test's recording or delta of a directory.
@@ -565,14 +605,17 @@ class Callgrind:
     def recording_read(self, text: str, path: str) -> Recording:
         profile = Profile()
         entries: dict[FunctionKey, SourceLine] = {}
-        records = self.records_read(text, path, profile, entries)
+        context_calls: list[ContextCall] = []
+        records = self.records_read(
+            text, path, profile, entries, context_calls
+        )
         if not profile.counters:
             sys.exit(
                 f"error: no 'events:' line -- not a callgrind file? ({path})"
             )
         self.summary_check(profile, records, path)
         self.callees_check(records, path)
-        return Recording(path, profile, records, entries)
+        return Recording(path, profile, records, entries, context_calls)
 
     # Reads the header, each function's cost lines and the line calls enter.
     def records_read(
@@ -581,6 +624,7 @@ class Callgrind:
         path: str,
         profile: Profile,
         entries: dict[FunctionKey, SourceLine],
+        context_calls: list[ContextCall],
     ) -> dict[FunctionKey, FunctionRecords]:
         records: dict[FunctionKey, FunctionRecords] = {}
         names = Callgrind.CompressedNames()
@@ -588,13 +632,14 @@ class Callgrind:
 
         counter_count = 0
         current: FunctionRecords | None = None
+        current_context: ContextKey | None = None
         current_function: FunctionKey | None = None
         current_home = _CALLGRIND_UNKNOWN_NAME
         current_file = _CALLGRIND_UNKNOWN_NAME
         current_image = _CALLGRIND_UNKNOWN_NAME
         current_callee_image: str | None = None
         cur_callee_file: str | None = None
-        cur_callee_function: FunctionKey | None = None
+        current_callee_context: ContextKey | None = None
         pending_call: Callgrind.PendingCall | None = None
 
         for raw_line in text.split("\n"):
@@ -602,7 +647,7 @@ class Callgrind:
                 continue
             first_char = raw_line[0]
             if first_char.isdigit() or first_char in "+-*":
-                if current_function is None:
+                if current_context is None or current_function is None:
                     sys.exit(
                         f"error: {path}: a cost line before the first fn="
                         f" line: {raw_line}"
@@ -620,27 +665,39 @@ class Callgrind:
                         if cur_callee_file is not None
                         else current_file
                     )
+                    callee_function = self.context_function(
+                        pending_call.callee
+                    )
                     self.entry_record(
                         entries,
-                        pending_call.callee,
+                        callee_function,
                         SourceLine(callee_file, pending_call.target_line),
                         path,
                     )
                     call_record = CallRecord(
                         key,
                         current_image,
-                        pending_call.callee,
+                        callee_function,
                         callee_file,
                         pending_call.call_count,
                         costs,
                     )
+                    callee_context = pending_call.callee
                     cur_callee_file = None
                     current_callee_image = None
-                    cur_callee_function = None
+                    current_callee_context = None
                     pending_call = None
                     # A call counting no calls began before collection did.
                     if not call_record.call_count:
                         continue
+                    context_calls.append(
+                        ContextCall(
+                            current_context,
+                            callee_context,
+                            call_record.call_count,
+                            costs,
+                        )
+                    )
                 # Homes a function where its first block with a record starts.
                 if current is None:
                     current = records[current_function] = FunctionRecords(
@@ -674,9 +731,10 @@ class Callgrind:
                         current_image,
                     )
                 elif key == _CALLGRIND_FORMAT_FUNCTION_KEY:
-                    current_function = self.function_key(
+                    current_context = self.context_key(
                         names, specification_value, current_image, path
                     )
+                    current_function = self.context_function(current_context)
                     current = records.get(current_function)
                     current_home = current_file
                     cur_callee_file = None
@@ -696,7 +754,7 @@ class Callgrind:
                         current_callee_image or current_image,
                     )
                 elif key == _CALLGRIND_FORMAT_CALLEE_FUNCTION_KEY:
-                    cur_callee_function = self.function_key(
+                    current_callee_context = self.context_key(
                         names,
                         specification_value,
                         current_callee_image or current_image,
@@ -714,7 +772,7 @@ class Callgrind:
                     parts = specification_value.split()
                     if len(parts) <= 1 + positions.line_index:
                         sys.exit(f"error: malformed 'calls=' line: {raw_line}")
-                    if cur_callee_function is None:
+                    if current_callee_context is None:
                         sys.exit(
                             f"error: {path}: a {_CALLGRIND_FORMAT_CALLS_KEY}="
                             " line with no"
@@ -725,7 +783,7 @@ class Callgrind:
                         parts[1 + positions.line_index], positions.line_index
                     )
                     pending_call = Callgrind.PendingCall(
-                        int(parts[0]), target_line, cur_callee_function
+                        int(parts[0]), target_line, current_callee_context
                     )
                 continue
             if colon_index == -1:
@@ -783,6 +841,81 @@ _profile_parser = Callgrind()
 
 def baseline_line_key(display: str, line: int | str) -> str:
     return f"{display}\n{line}"
+
+
+# Returns each call graph branch from the roots, its own calls' costs summed.
+def call_branches(
+    profile: Profile, root_names: Collection[str], path: str
+) -> list[CallBranch]:
+    caller_contexts: dict[ContextKey, ContextKey] = {}
+    for context_call in profile.context_calls:
+        # A direct recursion stays inside its own context.
+        if context_call.callee == context_call.caller:
+            continue
+        callee_chain = context_call.callee.name.partition(
+            _CALLGRIND_FORMAT_CONTEXT_SEPARATOR
+        )[2]
+        known_caller = caller_contexts.setdefault(
+            context_call.callee, context_call.caller
+        )
+        if (
+            callee_chain != context_call.caller.name
+            or known_caller != context_call.caller
+        ):
+            sys.exit(
+                f"error: {path}: {context_call.callee.name} of"
+                f" {context_call.callee.image_path} is called from"
+                f" {context_call.caller.name} of"
+                f" {context_call.caller.image_path}, not from the one context"
+                " its chain names"
+            )
+    branch_paths: dict[ContextKey, tuple[str, ...] | None] = {}
+
+    # Returns a context's branch, none where the call graph shows none.
+    def branch_path(context: ContextKey) -> tuple[str, ...] | None:
+        if context not in branch_paths:
+            function_name = profile.context_functions[context]
+            caller_context = caller_contexts.get(context)
+            if caller_context is None:
+                branch_paths[context] = (
+                    (function_name,) if function_name in root_names else None
+                )
+            else:
+                caller_path = branch_path(caller_context)
+                branch_paths[context] = (
+                    None
+                    if caller_path is None or function_name in caller_path
+                    else (*caller_path, function_name)
+                )
+        return branch_paths[context]
+
+    root_paths: set[tuple[str, ...]] = set()
+    branch_costs: dict[tuple[str, ...], Costs] = {}
+    for context_call in profile.context_calls:
+        caller_path = branch_path(context_call.caller)
+        if caller_path is not None and len(caller_path) == 1:
+            root_paths.add(caller_path)
+        if context_call.callee == context_call.caller:
+            continue
+        callee_path = branch_path(context_call.callee)
+        if callee_path is not None:
+            costs_accumulate(branch_costs, callee_path, context_call.costs)
+    # Sorts each branch after the branch it hangs from.
+    sorted_paths = sorted(root_paths | branch_costs.keys())
+    path_rows = {
+        sorted_path: row_index
+        for row_index, sorted_path in enumerate(sorted_paths)
+    }
+    return [
+        CallBranch(None, sorted_path[0], None)
+        if len(sorted_path) == 1
+        else CallBranch(
+            path_rows[sorted_path[:-1]],
+            sorted_path[-1],
+            branch_costs[sorted_path],
+        )
+        for sorted_path in sorted_paths
+    ]
 
 
 # Returns each caller of the callee, its calls, first call line and costs.
@@ -1120,6 +1253,13 @@ def ranking_counter_check(counters: Sequence[str], source: str) -> None:
         f" counter every page ranks and divides by: it records"
         f" {' '.join(counters)}"
     )
+
+
+# Returns the file key a recording gives a paths document's path in an image.
+def recorded_file_key(file_path: str, image_path: str) -> str:
+    if file_path == _CALLGRIND_UNKNOWN_DISPLAY_PATH:
+        return file_key(_CALLGRIND_UNKNOWN_NAME, image_path)
+    return file_path
 
 
 # Cuts the repository root as the archived recordings have it cut.

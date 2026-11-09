@@ -80,6 +80,29 @@
   #call-graph-table- :is(td.call-graph-multiple-, td.call-graph-symbol-) {
     background: var(--dark-mode-panel-bg-);
   }
+  /* A head cell paints its column's color behind every row of the table. */
+  #call-graph-table-
+    > thead
+    > tr
+    > :is(td.call-graph-multiple-, td.call-graph-symbol-) {
+    anchor-name: --call-graph-column-;
+    anchor-scope: --call-graph-column-;
+  }
+  #call-graph-table-
+    > thead
+    > tr
+    > :is(td.call-graph-multiple-, td.call-graph-symbol-)::after {
+    content: "";
+    position: absolute;
+    position-anchor: --call-graph-column-;
+    top: 0;
+    bottom: 0;
+    left: anchor(left);
+    right: anchor(right);
+    z-index: -1;
+    background: inherit;
+    pointer-events: none;
+  }
   /* The manifest labels and raw data link take the odd column color. */
   #overview-raw-data- > a:not(:focus-visible),
   .overview-manifest-label- {

@@ -6,6 +6,11 @@ from __future__ import annotations
 
 import html.entities, re
 
+# Holds an error report in the browser's log, its first line of text a group.
+BROWSER_LOG_ERROR_REPORT_PATTERN = re.compile(
+    r'"perf2html error\n\n(?:[a-z]+ +[^\n]*\n)+\n([^\n]*)'
+)
+
 COMMENT_BLOCK_MAX_LINES = 1
 COMMENT_FIRST_WORD_REPLACEMENTS = {"Answers": "Returns"}
 
@@ -23,6 +28,11 @@ COMPARE_PANELS_MAX_HEIGHT_SHARE = 2
 COMPARE_REGION_TILE_PX = 16
 
 DEBUG_SCRIPT_ASSET: tuple[str, ...] = ("scripts/debug.js",)
+
+DRAW_LIMIT_ERROR_TEXT = "draws more than 1 nodes"
+DRAW_LIMIT_SETTING_LOWERED = '"CALL_GRAPH_MOST_DRAWN_NODES": 1,'
+DRAW_LIMIT_SETTING_PATTERN = re.compile(r'"CALL_GRAPH_MOST_DRAWN_NODES": \d+,')
+DRAW_LIMIT_SETTINGS_FILE_PATH = "scripts/settings.js"
 
 ENGLISH_PUNCT = """.,"'?:!()/"""
 
@@ -58,6 +68,19 @@ MARKDOWN_FENCE_INFO = "txt"
 MARKDOWN_FENCE_MARK = "`"
 MARKDOWN_FENCE_MIN_MARKS = 3
 
+MENU_LOGO_LINK_PATTERN = re.compile(
+    r'<nav id="menu-"[^>]*>.*?<a ([^>]*)>', re.DOTALL
+)
+MENU_LOGO_REPOSITORY_LINK = (
+    'href="https://github.com/whatchamacallem/perf2html" target="_blank"'
+    ' tabindex="-1"'
+)
+MENU_LOGO_LINKS: dict[str, str] = {
+    "": MENU_LOGO_REPOSITORY_LINK,
+    "?debug=0": MENU_LOGO_REPOSITORY_LINK,
+    "?debug=1": 'href="#view=settings" tabindex="-1"',
+}
+
 REPORT_CHECKSUM_COMMAND = (
     "find . -type f ! -name MANIFEST.txt -print"
     " | LC_ALL=C sort | LC_ALL=C tr '\\n' '\\0'"
@@ -80,6 +103,7 @@ SCREENSHOT_VIEWPORTS: tuple[tuple[str, int, int], ...] = (
     ("720p", 1280, 720),
     ("4k", 3840, 2160),
 )
+SCREENSHOT_VIEW_CHECK_FILE_PATH = "build/screenshots_view_check.png"
 
 SHOOT_DIFF_REPORT = 1 << 0
 # Shoots the index page of the finished run at 4k, once.
@@ -87,10 +111,23 @@ SHOOT_INDEX_PAGE = 1 << 3
 # Shoots 720p dark, once.
 SHOOT_ONE_VARIANT = 1 << 1
 SHOOT_REGULAR_REPORT = 1 << 2
+# Lists the address parts of each view a test opens, by the report offering it.
+SHOOT_TEST_VIEW_PARTS: dict[int, tuple[str, ...]] = {
+    SHOOT_DIFF_REPORT: ("view=database", "view=heat-map&file={first_file}"),
+    SHOOT_REGULAR_REPORT: (
+        "view=call-graph",
+        "view=database",
+        "view=flame-graph&localProfilePath=profile",
+        "view=heat-map&file={first_file}",
+    ),
+}
 
 SHOT_MODE_NAME_PARTS: dict[str, str] = {"0": "dark", "1": "light"}
 SHOT_NAME_SEPARATOR = "-"
 SHOT_NUMBER_DIGITS = 2
+
+SOURCE_DATABASE_FILE_PATH = "scripts/source_database.js"
+SOURCE_DATABASE_PATTERN = re.compile(r"= (\{.*\});", re.DOTALL)
 
 SOURCE_SCAN_ALLOWED_NON_ASCII_CHARS = (
     "©",
@@ -164,6 +201,10 @@ SOURCE_SCAN_COMMENT_MARKUP = (
 
 TEST_BELOW_MAIN_FUNCTION_NAME = "(below main)"
 
+TEST_CALL_GRAPH_BRANCH_FIELDS = 3
+TEST_CALL_GRAPH_BRANCH_FUNCTION_FIELD = 1
+TEST_CALL_GRAPH_BRANCH_INCLUSIVE_FIELD = 2
+TEST_CALL_GRAPH_BRANCH_PARENT_FIELD = 0
 TEST_CALL_GRAPH_EDGE_CALLEE_FIELD = 1
 TEST_CALL_GRAPH_EDGE_CALLER_FIELD = 0
 TEST_CALL_GRAPH_EDGE_FIELDS = 5
@@ -172,7 +213,13 @@ TEST_CALL_GRAPH_EDGE_INCLUSIVE_FIELD = 4
 TEST_CALL_GRAPH_FUNCTION_FIELDS = 2
 TEST_CALL_GRAPH_FUNCTION_NAME_FIELD = 0
 TEST_CALL_GRAPH_FUNCTION_SELF_FIELD = 1
-TEST_CALL_GRAPH_MODEL_KEYS = ("edges", "functions", "roots", "test_total")
+TEST_CALL_GRAPH_MODEL_KEYS = (
+    "branches",
+    "edges",
+    "functions",
+    "roots",
+    "test_total",
+)
 TEST_CALL_GRAPH_PAGE_DIR_NAME = "call-graph"
 TEST_CALL_GRAPH_PAGE_LEAST_BYTES = 2000
 TEST_CALL_GRAPH_ROOT_CALLS_FIELD = 1
@@ -210,8 +257,17 @@ TEST_DELTA_HOME_RECORDING_NAME = "delta_home.callgrind_diff.out"
 
 TEST_DERIVED_COUNTER_NAMES = ("D1m", "DLm", "L1m", "LLm", "Bm", "CEst")
 
+TEST_DIFF_UNKNOWN_FILE = "(unknown)"
+TEST_DIFF_UNKNOWN_PLACES = (
+    ("first_unknown", "/opt/line/libfirst.so", "libfirst.so/(unknown)"),
+    ("second_unknown", "/opt/line/libsecond.so", "libsecond.so/(unknown)"),
+)
+
 TEST_FLAME_GRAPH_PAGE_LEAST_BYTES = 300
 TEST_FLAME_GRAPH_SCRIPT_LEAST_BYTES = 200
+
+TEST_FUNCTION_COUNTED_LINE = ("lib/counted.c", 7)
+TEST_FUNCTION_COUNTED_NAME = "counted_function"
 
 TEST_FUNCTION_DATA_CALL_COUNT_FIELD = 1
 TEST_FUNCTION_DATA_CALL_PAIR_FIELDS = 2
@@ -469,6 +525,8 @@ TEST_OVERVIEW_CHANGE_LARGEST_ERROR = 0.0050001
 TEST_OVERVIEW_CHANGE_PATTERN = (
     r"(?:0\.00%|[▲▼] *(?:≈0\.00%|-?\d+\.\d{2}%|∞%|≈∞%|\d+\.\d{2}x))?"
 )
+TEST_OVERVIEW_DUTY_CYCLE_FIELD = 1
+TEST_OVERVIEW_DUTY_CYCLE_PATTERN = r"\d+\.\d{2}(?:s|ms|us|ns|ps)"
 TEST_OVERVIEW_PAGE_LEAST_BYTES = 2000
 TEST_OVERVIEW_PAGE_TITLE = ""
 TEST_OVERVIEW_RATIO_FIELDS = (2, 3, 4, 5)
@@ -481,8 +539,6 @@ TEST_OVERVIEW_TESTS_HEADING_MARKUP = (
 )
 TEST_OVERVIEW_TESTS_TABLE_DATA_ID = "overview-tests-table-"
 TEST_OVERVIEW_TIME_LARGEST_ERROR = 0.0050001
-TEST_OVERVIEW_TIME_PER_LOOP_FIELD = 1
-TEST_OVERVIEW_TIME_PER_LOOP_PATTERN = r"(?:\d+\.\d{2}(?:s|ms|us|ns|ps))?"
 TEST_OVERVIEW_TIME_UNIT_SECONDS = {
     "s": 1.0,
     "ms": 1e-3,
@@ -555,7 +611,7 @@ TEST_TIMER_ARTIFACTS_PREFIX = "timer-artifacts-"
 
 TEST_TIMING_DOCUMENT_NAME = "0_timing_data.json"
 TEST_TIMING_VALUE_NAMES = (
-    "time_per_loop",
+    "duty_cycle",
     "instructions_per_cycle",
     "loads_per_instruction",
     "branch_miss_ratio",
@@ -596,3 +652,5 @@ TRACE_SLICE_TYPES: tuple[str, ...] = (
 )
 
 VERBOSE_RAW_LEVEL = 2
+
+VIEW_CHECK_ERROR_HASH = "#view=database"

@@ -127,6 +127,15 @@ block_lead() {
     || echo >&2
 }
 
+# Refuses a build directory the README page cannot be written to.
+build_root_writable_check() {
+  local directory="$PERF2HTML_BUILD_ROOT/$BUILD_OUTPUT_DIR_NAME"
+  mkdir -p "$directory" || error_exit 1 \
+    "error: could not make the build directory at $directory"
+  [ -w "$directory" ] || error_exit 1 \
+    "error: the build directory is not writable: $directory"
+}
+
 checksum_compute() {
   local dir="$1"
   (
@@ -438,6 +447,12 @@ raw_data_archive_path() {
   printf -v "$1" '%s%s' "$root" "$REPORT_RAW_ARCHIVE_SUFFIX"
 }
 
+# Sets `README_CONVERTER` to the absolute path the freshness check wants.
+readme_converter_resolve() {
+  README_CONVERTER="$(command -v cmark-gfm)" || error_exit 127 \
+    "error: not found on PATH: cmark-gfm -> $(install_command cmark-gfm)"
+}
+
 recorded_time_read() {
   local recorded_time
   recorded_time="$(manifest_value "$2" recorded)"
@@ -457,11 +472,12 @@ report_begin() {
   RUN_LOG="$log_file"
   echo "$opening_line" >"$RUN_LOG"
   local markdown="$PERF2HTML_DIR_/$README_MARKDOWN_NAME"
-  local html="$PERF2HTML_DIR_/$README_HTML_BUILD_PATH"
+  local html="$PERF2HTML_BUILD_ROOT/$BUILD_OUTPUT_DIR_NAME/$README_HTML_NAME"
+  heading_print "python3 $README_PAGE_SCRIPT_NAME"
+  command_run python3 "$PERF2HTML_DIR_/scripts/$README_PAGE_SCRIPT_NAME" \
+    "--converter=$README_CONVERTER" "--markdown=$markdown" "--out=$html" \
+    "${VERBOSE_FLAGS[@]}"
   cp "$markdown" "$dir/$README_MARKDOWN_NAME"
-  README_HTML_FLAGS=()
-  # The HTML is copied only when built from the README as it stands now.
-  [ "$html" -nt "$markdown" ] || return 0
   cp "$html" "$dir/$README_HTML_NAME"
   README_HTML_FLAGS=(--readme-html)
 }
@@ -469,6 +485,7 @@ report_begin() {
 report_delete() {
   local dir="$1" answer present=0
   local archive="$dir$REPORT_RAW_ARCHIVE_SUFFIX" checked_paths=("$dir" report)
+  build_root_writable_check
   [ -z "$REPORT_ARTIFACTS_DIR" ] \
     || checked_paths+=("$REPORT_ARTIFACTS_DIR" "artifacts dir")
   path_overlap_check "${checked_paths[@]}"
@@ -718,11 +735,12 @@ title_print() {
 toolchain_check() {
   local tool missing=''
   for tool in cmake ninja ccache cc valgrind perf taskset python3 \
-    addr2line readelf speedscope cksum curl tar xz dpkg-query; do
+    addr2line readelf speedscope cksum curl tar xz dpkg-query cmark-gfm; do
     command -v "$tool" >/dev/null 2>&1 \
       || missing+="${missing:+, }$tool -> $(install_command "$tool")"
   done
   [ -z "$missing" ] || error_exit 127 "error: not found on PATH: $missing"
+  readme_converter_resolve
   SPEEDSCOPE_RELEASE="$(dirname \
     "$(dirname "$(readlink -f "$(command -v speedscope)")")")/dist/release"
   local reason="error: no speedscope bundle at $SPEEDSCOPE_RELEASE/index.html"
@@ -735,6 +753,8 @@ verbose_begin() {
   export PERF2HTML_HEADER_DEPTH=$((${PERF2HTML_HEADER_DEPTH:-0} + 1))
   PERF2HTML_CLOCK_START_US="${PERF2HTML_CLOCK_START_US:-$(clock_microseconds)}"
   export PERF2HTML_CLOCK_START_US
+  # Holds `build/`, the outermost script's invocation directory.
+  export PERF2HTML_BUILD_ROOT="${PERF2HTML_BUILD_ROOT:-$INVOKED_FROM}"
   export PERF2HTML_STEP_NUMBER="${PERF2HTML_STEP_NUMBER-}"
   shopt -s lastpipe
   VERBOSE_COMMAND_NUMBER=1

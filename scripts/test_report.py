@@ -59,6 +59,110 @@ class TestReport:
         readme_html: bool
         verbose: bool
 
+    # Checks each call graph branch against the call edges, by another route.
+    def call_graph_branches_check(
+        self,
+        call_graph_model: dict[str, Any],
+        root_indexes: list[int],
+        label: str,
+        path: str,
+    ) -> None:
+        edge_values = {
+            (
+                edge_row[test_settings.TEST_CALL_GRAPH_EDGE_CALLER_FIELD],
+                edge_row[test_settings.TEST_CALL_GRAPH_EDGE_CALLEE_FIELD],
+            ): edge_row[test_settings.TEST_CALL_GRAPH_EDGE_INCLUSIVE_FIELD]
+            for edge_row in call_graph_model["edges"]
+        }
+        branch_paths: list[tuple[int, ...]] = []
+        branch_values: list[int | None] = []
+        edge_branch_sums: dict[tuple[int, int], int] = {}
+        for row_index, branch_row in enumerate(call_graph_model["branches"]):
+            if len(branch_row) != test_settings.TEST_CALL_GRAPH_BRANCH_FIELDS:
+                self.fail(
+                    f"{label}'s call graph has a branch of {len(branch_row)}"
+                    " fields, expected"
+                    f" {test_settings.TEST_CALL_GRAPH_BRANCH_FIELDS}: {path}"
+                )
+            parent_row = branch_row[
+                test_settings.TEST_CALL_GRAPH_BRANCH_PARENT_FIELD
+            ]
+            function_index = branch_row[
+                test_settings.TEST_CALL_GRAPH_BRANCH_FUNCTION_FIELD
+            ]
+            inclusive_value = branch_row[
+                test_settings.TEST_CALL_GRAPH_BRANCH_INCLUSIVE_FIELD
+            ]
+            if parent_row is None:
+                if (
+                    function_index not in root_indexes
+                    or inclusive_value is not None
+                ):
+                    self.fail(
+                        f"{label}'s call graph branch {branch_row} hangs from"
+                        " nothing but is no root's branch without a cost:"
+                        f" {path}"
+                    )
+                branch_paths.append((function_index,))
+                branch_values.append(None)
+                continue
+            if not isinstance(parent_row, int) or not (
+                0 <= parent_row < row_index
+            ):
+                self.fail(
+                    f"{label}'s call graph branch {branch_row} hangs from no"
+                    f" earlier branch: {path}"
+                )
+            parent_path = branch_paths[parent_row]
+            edge_pair = (parent_path[-1], function_index)
+            if edge_pair not in edge_values or function_index in parent_path:
+                self.fail(
+                    f"{label}'s call graph branch {branch_row} follows no"
+                    f" edge, or calls a function already on its path: {path}"
+                )
+            parent_value = branch_values[parent_row]
+            # A branch's calls run inside its parent's calls.
+            if (
+                not isinstance(inclusive_value, int)
+                or inclusive_value < 0
+                or (
+                    parent_value is not None and inclusive_value > parent_value
+                )
+            ):
+                self.fail(
+                    f"{label}'s call graph branch {branch_row} costs"
+                    f" {inclusive_value!r}, expected an integer from 0 to its"
+                    f" parent branch's {parent_value!r}: {path}"
+                )
+            branch_paths.append((*parent_path, function_index))
+            branch_values.append(inclusive_value)
+            edge_branch_sums[edge_pair] = (
+                edge_branch_sums.get(edge_pair, 0) + inclusive_value
+            )
+        if len(set(branch_paths)) != len(branch_paths):
+            self.fail(f"{label}'s call graph lists a branch twice: {path}")
+        root_branch_indexes = sorted(
+            branch_path[0]
+            for branch_path in branch_paths
+            if len(branch_path) == 1
+        )
+        if root_branch_indexes != sorted(root_indexes):
+            self.fail(
+                f"{label}'s call graph root branches {root_branch_indexes} are"
+                f" not its roots {sorted(root_indexes)}: {path}"
+            )
+        # A root runs once, so every call it makes lies on its one branch.
+        for edge_pair, edge_value in edge_values.items():
+            branch_sum = edge_branch_sums.get(edge_pair, 0)
+            if branch_sum > edge_value or (
+                edge_pair[0] in root_indexes and branch_sum != edge_value
+            ):
+                self.fail(
+                    f"{label}'s call graph branches along the edge"
+                    f" {edge_pair} cost {branch_sum}, against the edge's"
+                    f" {edge_value}: {path}"
+                )
+
     # Checks the rows, costs, total and window of a call graph.
     def call_graph_model_check(
         self,
@@ -175,6 +279,9 @@ class TestReport:
                     f"{label}'s call graph root {root_name} counts the calls"
                     f" {counted_calls}, expected {root_calls}: {path}"
                 )
+        self.call_graph_branches_check(
+            call_graph_model, root_indexes, label, path
+        )
         if (
             test_settings.TEST_CALL_GRAPH_START_FUNCTION_NAME
             not in function_names
@@ -838,6 +945,54 @@ class TestReport:
             out_dir,
         )
 
+    # Checks a diff shows each image's unknown file apart, as a report does.
+    def diff_unknown_places_check(self) -> None:
+        places = test_settings.TEST_DIFF_UNKNOWN_PLACES
+        unknown_file = test_settings.TEST_DIFF_UNKNOWN_FILE
+        derived_paths = callgrind.DerivedPaths.__new__(callgrind.DerivedPaths)
+        derived_paths.files = {
+            unknown_file: callgrind.DerivedPath(
+                unknown_file,
+                test_settings.TEST_PATHS_DOCUMENT_ERROR_CODE,
+                False,
+                True,
+            )
+        }
+        function_diff: callgrind_diff.FunctionDiffDocument = {
+            "counters": [],
+            "images": [image_path for _, image_path, _ in places],
+            "files": [unknown_file],
+            "functions": [
+                callgrind_diff.FunctionDiffRow(
+                    function_name, image_index, 0, 0, [], [], [], []
+                )
+                for image_index, (function_name, _, _) in enumerate(places)
+            ],
+            "lineBaseline": {},
+            "fileBaseline": {},
+        }
+        heat_map = callgrind_to_heatmap.CallgrindToHeatmap(0)
+        try:
+            shown_places = heat_map.diff_places(
+                function_diff,
+                heat_map.diff_place_infos(
+                    function_diff,
+                    callgrind_to_heatmap.CallgrindToHeatmap.Derive(
+                        derived_paths, "", ""
+                    ),
+                    {},
+                ),
+            )
+        except SystemExit as error:
+            self.fail(f"a diff refuses two images' unknown files: {error}")
+        for function_name, _, shown_path in places:
+            if shown_places[function_name].file != shown_path:
+                self.fail(
+                    f"a diff shows {function_name} in"
+                    f" {shown_places[function_name].file!r}, expected"
+                    f" {shown_path!r}"
+                )
+
     # Returns the attributes of the element the id names, none without one.
     def element_attributes(
         self, page_text: str, element_id: str
@@ -986,6 +1141,26 @@ class TestReport:
                 f" {_FLAME_GRAPH_EXPORTER_NAME} (exporter"
                 f" {document.get('exporter')!r}, profiles {kinds}): {path}"
             )
+
+    # Checks a function counts only at a line whose costs do not cancel.
+    def function_counted_check(self) -> None:
+        function_name = test_settings.TEST_FUNCTION_COUNTED_NAME
+        line = callgrind.SourceLine(*test_settings.TEST_FUNCTION_COUNTED_LINE)
+        function: Any = {"name": function_name, "self": [], "calls": []}
+        for line_total, is_wanted in ((0, False), (1, True)):
+            profile = callgrind.Profile()
+            profile.function_lines[function_name][line] = [1]
+            profile.line_self[line] = [line_total]
+            is_counted = (
+                callgrind_to_heatmap.CallgrindToHeatmap.function_counted(
+                    profile, function
+                )
+            )
+            if is_counted != is_wanted:
+                self.fail(
+                    f"{function_name} costs a line totalling {line_total} and"
+                    f" counts as {is_counted}, expected {is_wanted}"
+                )
 
     # Checks a golden recording's function data document.
     def function_data_builder_check(self) -> None:
@@ -1888,8 +2063,8 @@ class TestReport:
             field_patterns = (
                 [
                     (
-                        test_settings.TEST_OVERVIEW_TIME_PER_LOOP_FIELD,
-                        test_settings.TEST_OVERVIEW_TIME_PER_LOOP_PATTERN,
+                        test_settings.TEST_OVERVIEW_DUTY_CYCLE_FIELD,
+                        test_settings.TEST_OVERVIEW_DUTY_CYCLE_PATTERN,
                     ),
                     *(
                         (
@@ -1993,7 +2168,7 @@ class TestReport:
             unit_seconds = 1.0
             largest_error = test_settings.TEST_OVERVIEW_RATIO_LARGEST_ERROR
             is_time = (
-                value_field == test_settings.TEST_OVERVIEW_TIME_PER_LOOP_FIELD
+                value_field == test_settings.TEST_OVERVIEW_DUTY_CYCLE_FIELD
             )
             if is_time and value_text:
                 unit_text = value_text.lstrip("0123456789.")
@@ -2331,6 +2506,8 @@ class TestReport:
         self.shared_images_check()
         self.function_line_check()
         self.delta_home_check()
+        self.diff_unknown_places_check()
+        self.function_counted_check()
         self.function_data_builder_check()
         self.function_diff_check()
         self.home_dir_check(out_dir)

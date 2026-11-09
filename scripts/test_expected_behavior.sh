@@ -26,12 +26,11 @@ EOF
 set -euo pipefail
 
 INVOKED_FROM="$PWD"
-_SCRIPT="$(readlink -f -- "$0")"
-cd -P -- "$(dirname -- "$_SCRIPT")"
+cd -- "$(dirname -- "$0")"
 _SCRIPT_DIR="$PWD"
+_SCRIPT="$PWD/${0##*/}"
 
 _DIR_PERF2HTML=..
-_DIR_REPO="$(cd -P -- ../../.. && pwd)"
 
 _COLUMNS_MAX=79
 _CLANG_FORMAT_CONFIG=../src/.clang-format
@@ -50,8 +49,11 @@ _WHITELIST_FILE=test_whitelist.txt
 . ./test_utility.sh
 
 _BATCH_SCRIPT_NAME=perf2html_batch.sh
-_QUIET_LOG_SUCCESS_PATTERN='^(wrote /|files with samples: )'
-_README_PAGE_SCRIPT_NAME=build_readme_page.py
+_BUILD_LOCATION_EXECUTABLE_PATH=tests/perf/perf
+_BUILD_LOCATION_RELEASE_TREES=build-relwithdebinfo
+_BUILD_LOCATION_ROOT_NAME=build
+_BUILD_LOCATION_SCRATCH_NAME=test_expected_build_location_scratch
+_BUILD_LOCATION_TRACE_TREES=build-instr
 _ROWS_FILE_NAME=perf2html.txt
 # Chrome for Testing's headless shell, headless without a switch.
 _SCREENSHOT_BROWSER_NAME=chrome-headless-shell
@@ -80,19 +82,19 @@ tools_resolve() {
   _CLANG_FORMAT="$(tool_find clang-format)" || _missing+=(clang-format)
   _PRETTIER="$(tool_find prettier)" || _missing+=(prettier)
   _PYRIGHT="$(tool_find pyright)" || _missing+=(pyright)
-  _CMARK_GFM="$(tool_find cmark-gfm)" || _missing+=(cmark-gfm)
   _SCREENSHOT_BROWSER="$(tool_find "$_SCREENSHOT_BROWSER_NAME")" \
     || _missing+=("$_SCREENSHOT_BROWSER_NAME")
   [ "${#_missing[@]}" = 0 ] || error_exit 127 \
     "error: ${#_missing[@]} tool(s) missing, so nothing is verified:" \
     "${_missing[*]}" \
-    "  sudo apt-get install -y shfmt clang-format cmark-gfm" \
+    "  sudo apt-get install -y shfmt clang-format" \
     "  pip3 install --user --break-system-packages ruff" \
     "  npm install -g prettier pyright" \
     "  sudo apt-get install -y libasound2t64 unzip" \
     "  curl -fsSLo $_SCREENSHOT_BROWSER_ZIP $_SCREENSHOT_BROWSER_URL" \
     "  sudo unzip -q -o $_SCREENSHOT_BROWSER_ZIP -d /opt" \
     "  sudo ln -sf $_SCREENSHOT_BROWSER_PATH /usr/local/bin"
+  readme_converter_resolve
 }
 
 subprocess_run() {
@@ -286,7 +288,7 @@ report_version() {
 }
 
 test_expected_report_check_run() {
-  local _path _args _flags=("${VERBOSE_FLAGS[@]}" "${_README_HTML_FLAGS[@]}")
+  local _path _args _flags=("${VERBOSE_FLAGS[@]}" --readme-html)
 
   heading_print test_report.py
   for _path in "${_DEFAULT_REPORTS[@]}"; do
@@ -305,28 +307,55 @@ test_expected_report_check_run() {
   done
 }
 
-test_expected_archive_check_run() {
-  local _path _archive _root _name _extracted
+# Refuses a directory holding a file that names the build directory.
+test_expected_build_location_unnamed_check() {
+  local _directory="$1" _build_directory="$2" _named _exit_code=0
+  _named="$(grep -rlF "$_build_directory/" "$_directory")" || _exit_code=$?
+  [ "$_exit_code" = 1 ] || error_exit 1 "error: grep exit $_exit_code, \
+$_directory names $_build_directory in: $_named"
+}
 
-  heading_print "$REPORT_RAW_ARCHIVE_SUFFIX archives"
+# Checks the trees lie under the invocation point and no output names that.
+test_expected_build_location_check() {
+  local _name _path _manifest _executable _tree _recorded _archive
+  local _trace _build_directory _scratch
 
-  _root="$(mktemp -d)" || error_exit 1 \
-    "error: mktemp could not make the archive check directory"
+  heading_print "build tree location"
+  _build_directory="$(realpath -- \
+    "$PERF2HTML_BUILD_ROOT/$_BUILD_LOCATION_ROOT_NAME")"
+  _scratch="$_build_directory/$_BUILD_LOCATION_SCRATCH_NAME"
 
-  for _path in "${_DEFAULT_REPORTS[@]}"; do
-    _name="$(basename "$_path")"
-    _archive="$_path$REPORT_RAW_ARCHIVE_SUFFIX"
-    [ -f "$_archive" ] || error_exit 1 \
-      "error: --txz wrote no archive for $_name: $_archive"
+  for _name in "$REPORT_BASELINE_DIR_NAME" "$REPORT_MODIFIED_DIR_NAME"; do
+    _path="$_DIR_PERF2HTML/$_name"
+    _manifest="$_path/MANIFEST.txt"
+    _executable="$(header_row "$_manifest" executable)"
+    case "$_executable" in
+      "$_BUILD_LOCATION_RELEASE_TREES"/*/"$_BUILD_LOCATION_EXECUTABLE_PATH") ;;
+      *) error_exit 1 "error: $_manifest names the executable $_executable" ;;
+    esac
+    [ -f "$_build_directory/$_executable" ] || error_exit 1 \
+      "error: $_name has no executable at $_build_directory/$_executable"
 
-    _extracted="$(archive_extract "$_archive" "$_name" "$_root")"
-    manifest_verify "$_extracted" "$_name" \
-      "$REPORT_MANIFEST_VERSION_FULL" "$REPORT_MANIFEST_VERSION_DIFF"
-    log_verbose "$_archive -> $_extracted"
+    _tree="${_executable#"$_BUILD_LOCATION_RELEASE_TREES"/}"
+    _tree="${_tree%%/*}"
+    _trace="$_build_directory/$_BUILD_LOCATION_TRACE_TREES/$_tree"
+    _trace+="/$_BUILD_LOCATION_EXECUTABLE_PATH"
+    [ -f "$_trace" ] || error_exit 1 \
+      "error: $_name has no traced executable at $_trace"
+
+    _recorded="$(header_row "$_manifest" recorded)"
+    raw_data_archive_path _archive "$_path" "${_recorded%% *}"
+    rm -rf "$_scratch"
+    mkdir "$_scratch"
+    tar xJf "$_archive" -C "$_scratch"
+    test_expected_build_location_unnamed_check "$_scratch" "$_build_directory"
+    rm -r "$_scratch"
   done
 
-  rm -rf "$_root" || error_exit 1 \
-    "error: could not remove the archive check directory: $_root"
+  for _path in "${_DEFAULT_REPORTS[@]}"; do
+    test_expected_build_location_unnamed_check "$_path" "$_build_directory"
+  done
+  log_verbose "build trees: under $_build_directory, named by no output"
 }
 
 test_source_scan_run() {
@@ -344,7 +373,6 @@ batch_run() {
 
   if [ "$_KEEP_ARTIFACTS" = 1 ]; then _flags+=(--keep-artifacts); fi
 
-  _flags+=(--txz)
   _shown="$_BATCH_SCRIPT_NAME ${_flags[*]} --target-dir=$_target"
 
   log_verbose "$_shown"
@@ -353,23 +381,6 @@ batch_run() {
     "--target-dir=$_target" || _exit_code=$?
   [ "$_exit_code" = 0 ] \
     || error_exit "$_exit_code" "error: exit $_exit_code from: $_shown"
-}
-
-# Refuses a quiet run whose log holds a page tool's success line.
-quiet_logs_check() {
-  local _name _kind _log _line
-  [ "$VERBOSE" = 0 ] || return 0
-  for _name in "$REPORT_BASELINE_DIR_NAME" "$REPORT_MODIFIED_DIR_NAME" \
-    "$REPORT_DIFF_DIR_NAME"; do
-    _kind=profile
-    [ "$_name" != "$REPORT_DIFF_DIR_NAME" ] || _kind=diff
-    [ "$_REGENERATE" != 1 ] || _kind+=-regenerate
-    artifact_path _log "$_DIR_PERF2HTML/$ARTIFACTS_NAME/$_name" "$_kind-log"
-    while IFS= read -r _line; do
-      [[ ! "$_line" =~ $_QUIET_LOG_SUCCESS_PATTERN ]] || error_exit 1 \
-        "error: $_log holds a success line in a quiet run: $_line"
-    done <"$_log"
-  done
 }
 
 # Sets `_SCREENSHOT_COMMAND` to the screenshot script command for one report.
@@ -387,7 +398,8 @@ screenshot_command_set() {
   fi
 
   _SCREENSHOT_COMMAND=(python3 "$_SCRIPT_DIR/$_SCREENSHOT_SCRIPT_NAME"
-    "${VERBOSE_FLAGS[@]}" "${_args[@]}" "$@")
+    "${VERBOSE_FLAGS[@]}" "--build-root=$PERF2HTML_BUILD_ROOT"
+    "${_args[@]}" "$@")
 }
 
 screenshots_run() {
@@ -427,26 +439,6 @@ screenshots_run() {
   else
     log_verbose "screenshots: no $_SCREENSHOT_GOLD_DIR, not compared"
   fi
-}
-
-# Sets `_README_HTML_FLAGS` to what the batch's reports show of the README.
-readme_html_flags_set() {
-  _README_HTML_FLAGS=()
-  if [ "$_DIR_PERF2HTML/$README_HTML_BUILD_PATH" \
-    -nt "$_DIR_PERF2HTML/$README_MARKDOWN_NAME" ]; then
-    _README_HTML_FLAGS=(--readme-html)
-  fi
-}
-
-readme_html_build() {
-  local _converter
-  _converter="$(command -v "$_CMARK_GFM")"
-
-  heading_print "$_README_PAGE_SCRIPT_NAME"
-  subprocess_run python3 "$_SCRIPT_DIR/$_README_PAGE_SCRIPT_NAME" \
-    "${VERBOSE_FLAGS[@]}" "--converter=$_converter" \
-    "--markdown=$_DIR_PERF2HTML/$README_MARKDOWN_NAME" \
-    "--out=$_DIR_PERF2HTML/$README_HTML_BUILD_PATH"
 }
 
 regenerate_refuse() {
@@ -504,7 +496,7 @@ regenerate_check() {
     if [ -z "$_binary" ]; then
       regenerate_refuse "$_name records no executable= row in $_rows"
     fi
-    _binary="$_DIR_REPO/${_binary%% *}"
+    _binary="$PERF2HTML_BUILD_ROOT/$_BUILD_LOCATION_ROOT_NAME/${_binary%% *}"
     if [ ! -f "$_binary" ]; then
       regenerate_refuse "$_name has no executable at $_binary"
     fi
@@ -584,13 +576,10 @@ main() {
   long_lines_report
   test_source_scan_run
   lint_run
-  readme_html_flags_set
   batch_run
-  quiet_logs_check
   test_expected_report_check_run
-  test_expected_archive_check_run
+  test_expected_build_location_check
   screenshots_run
-  readme_html_build
   # Only a shot differing from its gold twin makes the shot diffs directory.
   if [ -d "$_SCREENSHOT_DIFF_DIR" ]; then
     screenshot_gold_notice "$_SCREENSHOT_GOLD_DIR" "$_SCREENSHOT_DIFF_DIR"

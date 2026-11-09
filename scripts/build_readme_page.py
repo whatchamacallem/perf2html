@@ -17,7 +17,9 @@ _README_PAGE_CONVERTER_EXTENSION_ARGUMENTS: tuple[str, ...] = ()
 _README_PAGE_HEADING_ANCHOR_DROPPED_PATTERN: str = ""
 _README_PAGE_HEADING_PATTERN: str = ""
 _README_PAGE_HEADING_TEXT_DROPPED_PATTERN: str = ""
+_README_PAGE_INPUTS_RECORD_SUFFIX: str = ""
 _README_PAGE_ROOT_VALUES_MARKER: str = ""
+_README_PAGE_STAGED_FILE_SUFFIX: str = ""
 _STYLE_README_PAGE_VALUE_ENTRIES: dict[str, str] = {}
 settings.load_into(__name__)
 
@@ -37,7 +39,11 @@ class BuildReadmePage:
             args.markdown,
         ]
         completed = subprocess.run(
-            command, check=False, stdout=subprocess.PIPE, text=True
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
         )
         if completed.returncode != 0:
             command_text = " ".join(command)
@@ -74,25 +80,41 @@ class BuildReadmePage:
             _README_PAGE_HEADING_PATTERN, heading_anchored, body_markup
         )
 
-    # Returns whether the page is newer than every file it is built from.
-    def is_current(self, args: BuildReadmePage.PageArgs) -> bool:
-        input_times = [
-            os.path.getmtime(input_path)
-            for input_path in (
-                args.markdown,
-                args.converter,
-                os.path.abspath(__file__),
-                os.path.join(
-                    theme.Theme.DIRECTORY, _ASSET_TEMPLATE_README_PAGE_NAME
-                ),
-                settings.__file__,
-                theme.__file__,
-            )
-        ]
-        return os.path.isfile(args.out) and all(
-            input_time < os.path.getmtime(args.out)
-            for input_time in input_times
+    # Returns every file the page is built from.
+    def input_paths(self, args: BuildReadmePage.PageArgs) -> tuple[str, ...]:
+        return (
+            args.markdown,
+            args.converter,
+            os.path.abspath(__file__),
+            os.path.join(
+                theme.Theme.DIRECTORY, _ASSET_TEMPLATE_README_PAGE_NAME
+            ),
+            settings.__file__,
+            theme.__file__,
         )
+
+    # Returns whether these inputs built the page and are all older than that.
+    def is_current(self, args: BuildReadmePage.PageArgs) -> bool:
+        input_paths = self.input_paths(args)
+        input_times = [
+            os.path.getmtime(input_path) for input_path in input_paths
+        ]
+        return (
+            os.path.isfile(args.out)
+            and self.recorded_inputs(args) == "\n".join(input_paths)
+            and all(
+                input_time < os.path.getmtime(args.out)
+                for input_time in input_times
+            )
+        )
+
+    # Returns the input paths the page's record names, empty with no record.
+    def recorded_inputs(self, args: BuildReadmePage.PageArgs) -> str:
+        record_path = args.out + _README_PAGE_INPUTS_RECORD_SUFFIX
+        if not os.path.isfile(record_path):
+            return ""
+        with open(record_path, encoding="utf-8") as record_file:
+            return record_file.read()
 
     # Writes the page unless current, the old page gone before a rebuild.
     def write(self, args: BuildReadmePage.PageArgs) -> None:
@@ -118,8 +140,13 @@ class BuildReadmePage:
             },
         )
         os.makedirs(os.path.dirname(args.out), exist_ok=True)
-        with open(args.out, "w", encoding="utf-8") as page_file:
+        staged_path = args.out + _README_PAGE_STAGED_FILE_SUFFIX
+        with open(staged_path, "w", encoding="utf-8") as page_file:
             page_file.write(page_markup)
+        record_path = args.out + _README_PAGE_INPUTS_RECORD_SUFFIX
+        with open(record_path, "w", encoding="utf-8") as record_file:
+            record_file.write("\n".join(self.input_paths(args)))
+        os.replace(staged_path, args.out)
         if args.verbose:
             print(f"{args.out}: built from {args.markdown}")
 

@@ -2,7 +2,9 @@
   "cSpell.words": [
     "callees",
     "callgrind",
-    "Overconstrained"
+    "mispredicted",
+    "Overconstrained",
+    "speedscope"
   ],
   "editor.rulers": [79]
 }

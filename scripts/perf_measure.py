@@ -14,8 +14,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import artifacts, settings, theme, trace_to_speedscope
 
 _CALLGRIND_LAST_LEVEL_CACHE: str = ""
+_CALLGRIND_SEPARATE_CALLERS: int = 0
+_CALLGRIND_SEPARATE_RECURSIONS: int = 0
 _DATABASE_TIME_SUFFIX_SECONDS: dict[str, float] = {}
 _PERF_TOOL_TIME_LABEL: str = ""
+_PERF_TOOL_TIME_ROW_OPENING_PATTERN: str = ""
 _PROFILE_PINNED_CPU: int = 0
 _PROFILE_SKIPPED_FUNCTION_PATTERN: str = ""
 _PROFILE_START_FUNCTION_NAME: str = ""
@@ -28,13 +31,13 @@ _TEST_LOOPS: int = 0
 _TIMING_COLUMN_NAMES: tuple[str, ...] = ()
 _TIMING_COUNTER_RATIOS: tuple[tuple[str, str, str], ...] = ()
 _TIMING_DATA_INDENT_CHARS: int = 0
+_TIMING_DUTY_CYCLE_NAME: str = ""
 _TIMING_PERF_STAT_EVENTS: tuple[str, ...] = ()
 _TIMING_PERF_STAT_METRIC_FRACTION_DIGITS: int = 0
 _TIMING_PERF_STAT_METRICS: tuple[tuple[str, str, str, int], ...] = ()
 _TIMING_PERF_STAT_NUMBER_PATTERN: str = ""
 _TIMING_PERF_STAT_RUNS: int = 0
 _TIMING_PERF_STAT_UNCOUNTED_VALUES: tuple[str, ...] = ()
-_TIMING_TIME_PER_LOOP_NAME: str = ""
 _TRACE_OUT_VARIABLE: str = ""
 _TRACE_SKIP_ALL: int = 0
 _TRACE_SKIP_VARIABLE: str = ""
@@ -46,15 +49,16 @@ _PERF_STAT_EVENT_NAMES = tuple(
 )
 
 _PERF_TOOL_TIME_LINE = re.compile(
-    rf"{re.escape(_PERF_TOOL_TIME_LABEL)}:\s+(\d+(?:\.\d+)?)\s*("
+    rf"(?:{re.escape(_PERF_TOOL_TIME_LABEL)}:\s+"
+    rf"|{_PERF_TOOL_TIME_ROW_OPENING_PATTERN})(\d+(?:\.\d+)?)\s*("
     + "|".join(map(re.escape, sorted(_DATABASE_TIME_SUFFIX_SECONDS)))
-    + r")\s*"
+    + r")(?:\s*|,.*)"
 )
 
 _PINNED_COMMAND = ("taskset", "-c", str(_PROFILE_PINNED_CPU))
 
 _TIMING_VALUE_NAMES = (
-    _TIMING_TIME_PER_LOOP_NAME,
+    _TIMING_DUTY_CYCLE_NAME,
     *(metric_entry[0] for metric_entry in _TIMING_PERF_STAT_METRICS),
     *(ratio_entry[0] for ratio_entry in _TIMING_COUNTER_RATIOS),
 )
@@ -76,7 +80,9 @@ class PerfMeasure:
         metric_texts: list[str]
 
     # Records the test under callgrind, the profiled window alone.
-    def callgrind_measure(self, args: PerfMeasure.MeasureArgs) -> None:
+    def callgrind_measure(
+        self, args: PerfMeasure.MeasureArgs, build_output_dir: str
+    ) -> None:
         artifacts_dir = artifacts.report_artifacts_dir(
             args.artifacts, args.report
         )
@@ -99,6 +105,8 @@ class PerfMeasure:
             f"--toggle-collect={_PROFILE_STOP_FUNCTION_NAME}",
             "--collect-atstart=yes",
             f"--LL={_CALLGRIND_LAST_LEVEL_CACHE}",
+            f"--separate-callers={_CALLGRIND_SEPARATE_CALLERS}",
+            f"--separate-recs={_CALLGRIND_SEPARATE_RECURSIONS}",
             f"--callgrind-out-file={callgrind_path}",
             f"--log-file={log_path}",
             args.executable,
@@ -108,6 +116,11 @@ class PerfMeasure:
         self.line_print(" ".join(["$", *command_words]))
         completed = subprocess.run(command_words, check=False)
         self.exit_check(completed.returncode, command_words)
+        # Cuts the build directory, so a recording is the same from anywhere.
+        with open(callgrind_path, encoding="utf-8") as handle:
+            recording = handle.read()
+        with open(callgrind_path, "w", encoding="utf-8") as handle:
+            handle.write(recording.replace(f"{build_output_dir}/", ""))
 
     # Returns each counter ratio, one over a 0 being 0.
     def counter_ratios(self, counters: dict[str, float]) -> list[float]:
@@ -288,8 +301,8 @@ class PerfMeasure:
             ],
         )
 
-    # Returns the median over the runs of the perf tool's time over its loops.
-    def perf_tool_time_per_loop(
+    # Returns the median of each run's summed time per loop or per frame.
+    def perf_tool_duty_cycle(
         self, page_path: str, page_lines: Sequence[str], test_name: str
     ) -> float:
         command_words = page_lines[0].split() if page_lines else []
@@ -308,19 +321,35 @@ class PerfMeasure:
             for line_match in map(_PERF_TOOL_TIME_LINE.fullmatch, page_lines)
             if line_match
         ]
-        if len(time_matches) != _TIMING_PERF_STAT_RUNS:
+        lines_per_run, uneven_lines = divmod(
+            len(time_matches), _TIMING_PERF_STAT_RUNS
+        )
+        if not lines_per_run or uneven_lines:
             sys.exit(
-                f"error: {page_path} holds {len(time_matches)}"
-                f" {_PERF_TOOL_TIME_LABEL}: lines with a time unit"
-                f" of {sorted(_DATABASE_TIME_SUFFIX_SECONDS)}, expected"
-                f" {_TIMING_PERF_STAT_RUNS}"
+                f"error: {page_path} holds {len(time_matches)} time lines"
+                " with a time unit of"
+                f" {sorted(_DATABASE_TIME_SUFFIX_SECONDS)}, expected the same"
+                f" count above 0 from each of {_TIMING_PERF_STAT_RUNS} runs"
             )
-        run_seconds = [
-            float(time_match.group(1))
-            * _DATABASE_TIME_SUFFIX_SECONDS[time_match.group(2)]
+        line_counts = [
+            int(time_match.group(1) or command_words[-1])
             for time_match in time_matches
         ]
-        return statistics.median(run_seconds) / int(command_words[-1])
+        if not all(line_counts):
+            sys.exit(f"error: {page_path} holds a time line with a count of 0")
+        line_seconds = [
+            float(time_match.group(2))
+            * _DATABASE_TIME_SUFFIX_SECONDS[time_match.group(3)]
+            / line_count
+            for time_match, line_count in zip(
+                time_matches, line_counts, strict=True
+            )
+        ]
+        run_seconds = [
+            sum(line_seconds[run_start : run_start + lines_per_run])
+            for run_start in range(0, len(line_seconds), lines_per_run)
+        ]
+        return statistics.median(run_seconds)
 
     # Returns a timing document, refusing one unlike its tests or values.
     def timing_data_read(self, directory: str) -> dict[str, dict[str, float]]:
@@ -496,7 +525,7 @@ class PerfMeasure:
             zip(
                 _TIMING_VALUE_NAMES,
                 [
-                    self.perf_tool_time_per_loop(
+                    self.perf_tool_duty_cycle(
                         page_path, page_lines, test_name
                     ),
                     *self.metric_ratios(perf_stat.metric_texts),
@@ -582,7 +611,7 @@ class PerfMeasure:
         for value_name, value in timing.items():
             if not value:
                 value_text = ""
-            elif value_name == _TIMING_TIME_PER_LOOP_NAME:
+            elif value_name == _TIMING_DUTY_CYCLE_NAME:
                 value_text = theme.num_time(value)
             else:
                 value_text = theme.fixed_text(
@@ -700,6 +729,13 @@ def main() -> None:
             metavar="PATH",
             help="the perf test executable the run measures",
         )
+    callgrind_parser.add_argument(
+        "--build-output-dir",
+        required=True,
+        metavar="DIR",
+        help="the physical directory the build trees lie in, cut from the"
+        " recording",
+    )
     timing_parser.add_argument("--verbose", action="count", default=0)
     for page_parser in (timing_parser, trace_parser):
         page_parser.add_argument(
@@ -723,7 +759,9 @@ def main() -> None:
         executable=namespace.executable,
     )
     if namespace.cmd == "callgrind":
-        PerfMeasure().callgrind_measure(measure_args)
+        PerfMeasure().callgrind_measure(
+            measure_args, namespace.build_output_dir
+        )
     elif namespace.cmd == "timing":
         PerfMeasure().timing_measure(
             measure_args, namespace.executable_shown, namespace.verbose

@@ -11,7 +11,9 @@ window.try_catch_handler_(function () {
   const HEAT_MAP_VIEW_ENTRY = settings_("HEAT_MAP_VIEW_ENTRY");
   const MENU_ENTRY_NEEDS = settings_("MENU_ENTRY_NEEDS");
   const MENU_ENTRY_VIEW_KEYS = settings_("MENU_ENTRY_VIEW_KEYS");
+  const MENU_LOGO_REPOSITORY_URL = settings_("MENU_LOGO_REPOSITORY_URL");
   const MENU_SCALE_KEY_STEPS = settings_("MENU_SCALE_KEY_STEPS");
+  const SETTINGS_DEBUG_ENABLED = settings_("SETTINGS_DEBUG_ENABLED");
   const SETTINGS_VIEW_ENTRY = settings_("SETTINGS_VIEW_ENTRY");
   const STYLE_MENU_LOGO_START_SHARE = settings_("STYLE_MENU_LOGO_START_SHARE");
 
@@ -339,11 +341,14 @@ window.try_catch_handler_(function () {
     return [
       entry("str_report_name", "link", address, null, {
         is_numbered: false,
-        href: view_hash(SETTINGS_VIEW_KEY),
+        href: SETTINGS_DEBUG_ENABLED
+          ? view_hash(SETTINGS_VIEW_KEY)
+          : MENU_LOGO_REPOSITORY_URL,
         label_markup: logo_letters_markup(
           REPORT_NAME_TEXT,
           STYLE_MENU_LOGO_START_SHARE,
         ),
+        opens_new_tab: !SETTINGS_DEBUG_ENABLED,
         withholds_tab_stop: true,
       }),
       view_entry(

@@ -63,6 +63,11 @@ class BuildReport:
         artifacts: str
         report: str
 
+    class CallGraphBranch(NamedTuple):
+        parent: int | None
+        function: int
+        inclusive_value: int | None
+
     class CallGraphEdge(NamedTuple):
         caller: int
         callee: int
@@ -78,6 +83,7 @@ class BuildReport:
         functions: list[BuildReport.CallGraphFunction]
         roots: list[BuildReport.CallGraphRoot]
         edges: list[BuildReport.CallGraphEdge]
+        branches: list[BuildReport.CallGraphBranch]
         test_total: int
 
     class CallGraphRoot(NamedTuple):
@@ -179,7 +185,13 @@ class BuildReport:
             self.call_graph_page(
                 args.report,
                 test_name,
-                self.call_graph_model(test_name, profile),
+                self.call_graph_model(
+                    test_name,
+                    profile,
+                    artifacts.artifact_path(
+                        artifacts_dir, "callgrind", test_name
+                    ),
+                ),
             )
 
     # Returns each caller and callee pair's calls, first call line and costs.
@@ -194,11 +206,12 @@ class BuildReport:
                 edges[(caller_name, callee_name)] = entry
         return edges
 
-    # Lists the test's functions and call edges, their costs, roots and total.
+    # Lists the test's functions, edges, roots and branches, costs and total.
     def call_graph_model(
-        self, test_name: str, profile: callgrind.Profile
+        self, test_name: str, profile: callgrind.Profile, path: str
     ) -> BuildReport.CallGraphModel:
         edges = self.call_graph_edges(profile)
+        root_names = self.call_graph_roots(test_name, edges)
         call_graph_functions = [
             BuildReport.CallGraphFunction(
                 function_name,
@@ -223,7 +236,7 @@ class BuildReport:
                 BuildReport.CallGraphRoot(
                     index_by_name[root_name], self.function_calls(root_name, 0)
                 )
-                for root_name in self.call_graph_roots(test_name, edges)
+                for root_name in root_names
             ],
             "edges": [
                 BuildReport.CallGraphEdge(
@@ -236,6 +249,23 @@ class BuildReport:
                     ),
                 )
                 for (caller_name, callee_name), tally in sorted(edges.items())
+            ],
+            # A root branch draws no node, so it holds no cost of its own.
+            "branches": [
+                BuildReport.CallGraphBranch(
+                    call_branch.parent,
+                    index_by_name[call_branch.function],
+                    None
+                    if call_branch.costs is None
+                    else callgrind.counter_value(
+                        profile.counters,
+                        call_branch.costs,
+                        _RANKING_COUNTER_NAME,
+                    ),
+                )
+                for call_branch in callgrind.call_branches(
+                    profile, root_names, path
+                )
             ],
             "test_total": callgrind.counter_value(
                 profile.counters, profile.totals(), _RANKING_COUNTER_NAME
@@ -914,7 +944,7 @@ class BuildReport:
             theme.num_signed_pct(change_share), heat_percent=change_share
         )
 
-    # Returns a row per test, its timing document's time per loop and ratios.
+    # Returns a row per test, its timing document's duty cycle and ratios.
     def timing_rows(
         self, artifacts_dir: str, test_names: Sequence[str]
     ) -> list[list[theme.CellOrText]]:

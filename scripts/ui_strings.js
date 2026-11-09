@@ -18,6 +18,7 @@ window.ui_strings_ = (function () {
     str_column_count: "count",
     str_column_counter: "counter",
     str_column_defined_at: "defined at",
+    str_column_duty_cycle: "duty cycle",
     str_column_function: "function",
     str_column_instructions_per_cycle: "instructions/cycle",
     str_column_l1d_miss_ratio: "L1D miss",
@@ -28,7 +29,6 @@ window.ui_strings_ = (function () {
     str_column_self: "self",
     str_column_source: "source",
     str_column_test_share: "test %",
-    str_column_time_per_loop: "time/loop",
     str_counter_bc: "conditional branches executed",
     str_counter_bcm: "conditional branches mispredicted",
     str_counter_bi: "indirect branches executed",
@@ -49,6 +49,8 @@ window.ui_strings_ = (function () {
     str_counter_l1m: "L1 cache misses, all",
     str_counter_label: "{description} ({counter})",
     str_counter_llm: "last level cache misses, all",
+    str_error_call_graph_too_large:
+      "the call graph of {0} draws more than {1} nodes",
     str_error_hash_file_missing: "url names line {0} but no file",
     str_error_hash_file_unknown:
       "url encodes a file this report never profiled: {0}",

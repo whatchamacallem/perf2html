@@ -268,6 +268,7 @@ class Screenshots:
         compare_dir: str,
         scratch_dir: str,
         trace_path: str,
+        view_check_path: str,
     ) -> None:
         self.browser = browser
         self.report = report
@@ -276,8 +277,30 @@ class Screenshots:
         self.compare_dir = compare_dir
         self.scratch_dir = scratch_dir
         self.trace_path = trace_path
+        self.view_check_path = view_check_path
         self.report_views = self.report_views_select()
         self.page_timings: list[PageTiming] = []
+
+    # Returns the browser's output and log for a page, once the page finishes.
+    def browser_output(
+        self, browser_flags: list[str], page_address: str
+    ) -> tuple[str, str]:
+        assert self.browser, "a compare only run opens no page"
+        browser_run = subprocess.run(
+            [
+                self.browser,
+                "--disable-gpu",
+                "--no-sandbox",
+                "--incognito",
+                "--virtual-time-budget="
+                f"{test_settings.SCREENSHOT_RENDER_BUDGET_MS}",
+                *browser_flags,
+                page_address,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        return browser_run.stdout, browser_run.stderr
 
     def copy_shoot(
         self,
@@ -445,18 +468,58 @@ class Screenshots:
         os.makedirs(self.compare_dir, exist_ok=True)
         compare_image.save(compare_path)
 
-    # Returns the address of a report's entry page relative to the index.
+    # Refuses a call graph that draws past a limit of one with no error report.
+    def draw_limit_check(self, test_name: str) -> None:
+        if os.path.exists(self.scratch_dir):
+            shutil.rmtree(self.scratch_dir)
+        shutil.copytree(self.report, self.scratch_dir)
+        try:
+            settings_path = os.path.join(
+                self.scratch_dir, test_settings.DRAW_LIMIT_SETTINGS_FILE_PATH
+            )
+            with open(settings_path, encoding="utf-8") as settings_file:
+                settings_text = settings_file.read()
+            lowered_text, change_count = (
+                test_settings.DRAW_LIMIT_SETTING_PATTERN.subn(
+                    test_settings.DRAW_LIMIT_SETTING_LOWERED, settings_text
+                )
+            )
+            if change_count != 1:
+                raise RuntimeError(f"{settings_path}: holds no draw limit")
+            with open(settings_path, "w", encoding="utf-8") as settings_file:
+                settings_file.write(lowered_text)
+            page_address = (
+                self.file_url(
+                    os.path.join(self.scratch_dir, test_settings.ENTRY_PAGE)
+                )
+                + f"#test={test_name}&view=call-graph"
+            )
+            error_report = self.page_error_report(page_address)
+            if (
+                not error_report
+                or test_settings.DRAW_LIMIT_ERROR_TEXT not in error_report
+            ):
+                raise RuntimeError(
+                    f"{page_address}: reports {error_report!r},"
+                    f" expected {test_settings.DRAW_LIMIT_ERROR_TEXT!r}"
+                )
+        finally:
+            shutil.rmtree(self.scratch_dir)
+
+    # Returns the entry page's href relative to the index, symlinks resolved.
     def entry_href(self, report_dir: str, index_path: str) -> str:
         return urllib.parse.quote(
             os.path.relpath(
-                os.path.join(report_dir, test_settings.ENTRY_PAGE),
-                os.path.dirname(index_path),
+                os.path.realpath(
+                    os.path.join(report_dir, test_settings.ENTRY_PAGE)
+                ),
+                os.path.realpath(os.path.dirname(index_path)),
             )
         )
 
     # Returns the address the browser opens a file or directory at.
     def file_url(self, path: str) -> str:
-        return "file://" + path
+        return "file://" + urllib.parse.quote(path)
 
     # Names each shot that differs from its gold twin, each one missing.
     def gold_compare(
@@ -557,6 +620,36 @@ class Screenshots:
             f" compare image {compare_path}"
         )
         return False
+
+    # Writes the image of a page once the page finishes, returning its log.
+    def image_write(
+        self,
+        image_path: str,
+        fault_label: str,
+        width_px: int,
+        height_px: int,
+        browser_flags: list[str],
+        page_address: str,
+    ) -> str:
+        if os.path.exists(image_path):
+            os.remove(image_path)
+        browser_log = self.browser_output(
+            [
+                "--hide-scrollbars",
+                # Draws a frame only after the page's own work for it.
+                "--run-all-compositor-stages-before-draw",
+                f"--window-size={width_px},{height_px}",
+                f"--screenshot={image_path}",
+                *browser_flags,
+            ],
+            page_address,
+        )[1]
+        if os.path.exists(image_path) and os.path.getsize(image_path):
+            return browser_log
+        raise RuntimeError(
+            f"{fault_label} wrote no image:"
+            f" {browser_log.strip()[-test_settings.FAULT_TAIL_CHARS :]}"
+        )
 
     # Merges this report's pages and timings into the index, keeping others'.
     def index_write(
@@ -667,6 +760,27 @@ class Screenshots:
                 template.replace(test_settings.INDEX_MARKER, data_script)
             )
 
+    # Refuses a logo link other than each debug query value's golden one.
+    def logo_links_check(self) -> None:
+        entry_url = self.file_url(
+            os.path.join(self.report, test_settings.ENTRY_PAGE)
+        )
+        for query_text, link_text in test_settings.MENU_LOGO_LINKS.items():
+            browser_text, browser_errors = self.browser_output(
+                ["--dump-dom"], entry_url + query_text
+            )
+            link_match = test_settings.MENU_LOGO_LINK_PATTERN.search(
+                browser_text
+            )
+            found_text = link_match.group(1) if link_match else None
+            if found_text == link_text:
+                continue
+            raise RuntimeError(
+                f"{entry_url + query_text}: the logo link holds"
+                f" {found_text!r}, expected {link_text!r}:"
+                f" {browser_errors.strip()[-test_settings.FAULT_TAIL_CHARS :]}"
+            )
+
     # Returns the query and hash a page is shot at.
     def page_address(
         self, view_hash: str, menu_entry_number: str, toggle_dark_value: str
@@ -682,6 +796,21 @@ class Screenshots:
                 menu_entry_number
             )
         return "?" + urllib.parse.urlencode(query_values) + view_hash
+
+    # Returns the error report a page writes to the browser's log, if any.
+    def page_error_report(self, page_address: str) -> str | None:
+        _, width_px, height_px = test_settings.SCREENSHOT_VIEWPORTS[0]
+        error_match = test_settings.BROWSER_LOG_ERROR_REPORT_PATTERN.search(
+            self.image_write(
+                self.view_check_path,
+                page_address,
+                width_px,
+                height_px,
+                ["--enable-logging=stderr"],
+                page_address,
+            )
+        )
+        return error_match.group(1) if error_match else None
 
     # Keeps the longer of the timings of one page file and phase.
     def page_timing_keep(
@@ -846,10 +975,6 @@ class Screenshots:
         out_path = os.path.join(
             self.out_dir, shot + test_settings.IMAGE_SUFFIX
         )
-        if os.path.exists(out_path):
-            os.remove(out_path)
-        assert self.browser, "a compare only run shoots nothing"
-        window = f"{width_px},{height_px}"
         trace_flags: list[str] = []
         if trace_path:
             if os.path.exists(trace_path):
@@ -861,32 +986,15 @@ class Screenshots:
                 # Zero traces until the browser exits after the shot.
                 "--trace-startup-duration=0",
             ]
-        result = subprocess.run(
-            [
-                self.browser,
-                "--disable-gpu",
-                "--no-sandbox",
-                "--hide-scrollbars",
-                "--incognito",
-                # Draws a frame only after the page's own work for it.
-                "--run-all-compositor-stages-before-draw",
-                f"--window-size={window}",
-                f"--screenshot={out_path}",
-                "--virtual-time-budget="
-                f"{test_settings.SCREENSHOT_RENDER_BUDGET_MS}",
-                *trace_flags,
-                self.page_url(
-                    page_dir, view_hash, menu_entry_number, toggle_dark_value
-                ),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if os.path.exists(out_path) and os.path.getsize(out_path):
-            return
-        raise RuntimeError(
-            f"{shot}: {view_hash or '(entry page)'} wrote no image:"
-            f" {result.stderr.strip()[-test_settings.FAULT_TAIL_CHARS :]}"
+        self.image_write(
+            out_path,
+            f"{shot}: {view_hash or '(entry page)'}",
+            width_px,
+            height_px,
+            trace_flags,
+            self.page_url(
+                page_dir, view_hash, menu_entry_number, toggle_dark_value
+            ),
         )
 
     # Names a shot, leaving out the resolution when the size is empty.
@@ -924,6 +1032,42 @@ class Screenshots:
             for view_index, view in self.report_views
             for variant in view.shot_variants()
         ]
+
+    # Refuses an error report from any view of any test the report holds.
+    def test_views_check(self) -> None:
+        entry_path = os.path.join(self.report, test_settings.ENTRY_PAGE)
+        database_path = os.path.join(
+            self.report, test_settings.SOURCE_DATABASE_FILE_PATH
+        )
+        with open(database_path, encoding="utf-8") as database_file:
+            database_match = test_settings.SOURCE_DATABASE_PATTERN.search(
+                database_file.read()
+            )
+        if not database_match:
+            raise RuntimeError(f"{database_path}: holds no source database")
+        test_files = json.loads(database_match.group(1))["filesWithCounters"]
+        for test_name, file_names in test_files.items():
+            for view_part in test_settings.SHOOT_TEST_VIEW_PARTS[
+                self.report_flag
+            ]:
+                page_address = self.file_url(entry_path) + (
+                    f"#test={test_name}&"
+                    + view_part.format(
+                        first_file=urllib.parse.quote(file_names[0])
+                    )
+                )
+                error_report = self.page_error_report(page_address)
+                if error_report:
+                    raise RuntimeError(f"{page_address}: {error_report}")
+        # A page holding an error proves that this browser's log shows reports.
+        error_address = (
+            self.file_url(entry_path) + test_settings.VIEW_CHECK_ERROR_HASH
+        )
+        if not self.page_error_report(error_address):
+            raise RuntimeError(f"{error_address}: wrote no error report")
+        if self.report_flag == test_settings.SHOOT_REGULAR_REPORT:
+            self.draw_limit_check(next(iter(test_files)))
+        os.remove(self.view_check_path)
 
     # Returns each page file's slowest load, then its largest phases.
     def timing_rows(self) -> list[TimingRow]:
@@ -1131,6 +1275,8 @@ class Screenshots:
                 self.page_timings += self.trace_timings(
                     trace_path, page_dir, shot
                 )
+            # Only the first shot traces, as a trace holds the browser open.
+            trace_path = ""
         return len(shot_variants)
 
 
@@ -1139,6 +1285,12 @@ def main() -> int:
     parser.add_argument("report", help="a report directory to shoot")
     parser.add_argument("prefix", help="what every file name starts with")
     parser.add_argument("--browser", default="", metavar="PATH")
+    parser.add_argument(
+        "--build-root",
+        default="",
+        metavar="DIR",
+        help="the directory build/ lies in",
+    )
     parser.add_argument(
         "--compare-gold",
         default="",
@@ -1215,6 +1367,10 @@ def main() -> int:
         print("error: shooting needs --browser", file=sys.stderr)
         return 2
 
+    if not namespace.build_root and not namespace.compare_only:
+        print("error: shooting needs --build-root", file=sys.stderr)
+        return 2
+
     perf2html_dir = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), ".."
     )
@@ -1223,10 +1379,19 @@ def main() -> int:
     )
     out_dir = os.path.abspath(out_dir)
     scratch_dir = os.path.abspath(
-        os.path.join(perf2html_dir, test_settings.SCREENSHOT_SCRATCH_DIR_PATH)
+        os.path.join(
+            namespace.build_root, test_settings.SCREENSHOT_SCRATCH_DIR_PATH
+        )
     )
     trace_path = os.path.abspath(
-        os.path.join(perf2html_dir, test_settings.SCREENSHOT_TRACE_FILE_PATH)
+        os.path.join(
+            namespace.build_root, test_settings.SCREENSHOT_TRACE_FILE_PATH
+        )
+    )
+    view_check_path = os.path.abspath(
+        os.path.join(
+            namespace.build_root, test_settings.SCREENSHOT_VIEW_CHECK_FILE_PATH
+        )
     )
 
     report_flag = (
@@ -1243,6 +1408,7 @@ def main() -> int:
         compare_dir,
         scratch_dir,
         trace_path,
+        view_check_path,
     )
     if namespace.compare_only:
         shooter.gold_compare(gold_dir, namespace.prefix, namespace.verbose)
@@ -1254,7 +1420,9 @@ def main() -> int:
         verbose_print(
             namespace.verbose, [f"{os.path.basename(report)} -> {out_dir}"]
         )
+    shooter.test_views_check()
     written = shooter.shoot_all(namespace.prefix)
+    shooter.logo_links_check()
     timing_rows = shooter.timing_rows()
 
     with open(

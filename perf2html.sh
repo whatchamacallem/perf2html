@@ -36,14 +36,14 @@ set -euo pipefail
 
 TIMESTAMP="$(date +%s)"
 INVOKED_FROM="$PWD"
-_SCRIPT="$(readlink -f -- "$0")"
-cd -P -- "$(dirname -- "$_SCRIPT")"
+cd -- "$(dirname -- "$0")"
 PERF2HTML_DIR_="$PWD"
+_SCRIPT="$PWD/${0##*/}"
 
 . ./scripts/settings.sh
 . ./scripts/utility.sh
 
-_REPO="$(cd -P -- ../.. && pwd)"
+_REPO="$(cd -- ../.. && pwd)"
 
 args_parse() {
   local _remaining_argument
@@ -139,18 +139,11 @@ build_manifest() {
   if [ "$REGENERATE" = 1 ]; then
     local _header_rows
     artifact_path _header_rows "$REPORT_ARTIFACTS_DIR" header-rows
-    _REVISION="$(manifest_value "$_header_rows" revision)"
-    _CPU_MODEL="$(manifest_value "$_header_rows" cpu)"
-    _MEMORY_USAGE="$(manifest_value "$_header_rows" memory)"
-    _OPERATING_SYSTEM="$(manifest_value "$_header_rows" os)"
+    # A regenerate keeps the rows recorded, whatever cmake flags it got.
+    mapfile -t _HEADER_ROWS <"$_header_rows"
     _COMPILER_NAME="$(manifest_value "$_header_rows" compiler)"
-    _BUILD_DESC="$(manifest_value "$_header_rows" build)"
-    if [ -z "$_REVISION" ] || [ -z "$_CPU_MODEL" ] \
-      || [ -z "$_MEMORY_USAGE" ] || [ -z "$_OPERATING_SYSTEM" ] \
-      || [ -z "$_COMPILER_NAME" ] || [ -z "$_BUILD_DESC" ]; then
-      error_exit 2 "error: --regenerate: $_header_rows is missing one of its \
-revision=, cpu=, memory=, os=, compiler= or build= rows"
-    fi
+    [ -n "$_COMPILER_NAME" ] || error_exit 2 \
+      "error: --regenerate: $_header_rows holds no compiler= row"
     return
   fi
   _REVISION="$(revision_describe "$_REPO")"
@@ -210,12 +203,15 @@ build_paths() {
   local _flag_string="${_CMAKE_FLAGS[*]}"
   _TREE_NAME="${_COMPILER_NAME//[^[:alnum:]]/-}-${#_flag_string}_"
   _TREE_NAME+="${_flag_string//[^[:alnum:]]/}"
-  _BUILD_TREE="$_REPO/$BUILD_DIR/$_TREE_NAME"
-  _TRACE_TREE="$_REPO/$TRACE_BUILD_DIR/$_TREE_NAME"
+  # Physical, as valgrind records an image by its physical path.
+  _BUILD_OUTPUT_DIR="$(realpath -- \
+    "$PERF2HTML_BUILD_ROOT/$BUILD_OUTPUT_DIR_NAME")"
+  _BUILD_TREE="$_BUILD_OUTPUT_DIR/$BUILD_DIR/$_TREE_NAME"
+  _TRACE_TREE="$_BUILD_OUTPUT_DIR/$TRACE_BUILD_DIR/$_TREE_NAME"
   _BIN="$_BUILD_TREE/tests/perf/perf"
-  _BIN_REL="$(path_display "$_BIN" "$_REPO")"
+  _BIN_REL="$(path_display "$_BIN" "$_BUILD_OUTPUT_DIR")"
   _TRACE_BIN="$_TRACE_TREE/tests/perf/perf"
-  _TRACE_BIN_REL="$(path_display "$_TRACE_BIN" "$_REPO")"
+  _TRACE_BIN_REL="$(path_display "$_TRACE_BIN" "$_BUILD_OUTPUT_DIR")"
 }
 
 trees_compile() {
@@ -223,7 +219,8 @@ trees_compile() {
     log_verbose "reused build ${_CMAKE_FLAGS[*]}"
     return
   fi
-  heading_print "cmake -B {$BUILD_DIR,$TRACE_BUILD_DIR}/$_TREE_NAME"
+  heading_print "cmake -B" \
+    "$_BUILD_OUTPUT_DIR/{$BUILD_DIR,$TRACE_BUILD_DIR}/$_TREE_NAME"
   local _flag _trace_flags=()
   tree_build "$_BUILD_TREE" "${_CMAKE_FLAGS[@]}"
   for _flag in "${_CMAKE_FLAGS[@]}"; do
@@ -242,11 +239,12 @@ trees_compile() {
   rm -f "$_TRACE_BIN"
   local _hook="$_TRACE_TREE/cyg_callback.o"
   tree_build "$_TRACE_TREE" "${_trace_flags[@]}" \
-    "-DCMAKE_EXE_LINKER_FLAGS=$_hook -Wl,--export-dynamic"
+    "-DCMAKE_EXE_LINKER_FLAGS=\"$_hook\" -Wl,--export-dynamic"
   _BUILD_DESC="${_CMAKE_FLAGS[*]}"
 }
 
 header_rows_write() {
+  [ "$REGENERATE" = 0 ] || return 0
   local _header_rows
   _HEADER_ROWS=(
     "revision=$_REVISION"
@@ -258,7 +256,6 @@ header_rows_write() {
     "$REPORT_MANIFEST_EXECUTABLE_LABEL=$_BIN_REL"
     "$(manifest_recorded_row)"
   )
-  [ "$REGENERATE" = 0 ] || return 0
   artifact_path _header_rows "$REPORT_ARTIFACTS_DIR" header-rows
   printf '%s\n' "${_HEADER_ROWS[@]}" >"$_header_rows"
 }
@@ -316,7 +313,7 @@ callgrind_measure() {
   heading_print "valgrind --tool=callgrind perf $_test $TEST_LOOPS"
   command_run python3 "$PERF2HTML_DIR_/scripts/perf_measure.py" callgrind \
     "--artifacts=$ARTIFACTS_DIR" "--report=$_OUT_DIR" "--test=$_test" \
-    "--executable=$_BIN"
+    "--executable=$_BIN" "--build-output-dir=$_BUILD_OUTPUT_DIR"
 }
 
 timing_measure() {

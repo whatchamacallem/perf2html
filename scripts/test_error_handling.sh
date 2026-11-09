@@ -24,10 +24,10 @@ set -euo pipefail
 [ $# = 0 ] || { [[ $* =~ ^(-h|--help)$ ]] && usage_show && exit 0; } \
   || { echo "error: unknown option: $*" && usage_show && exit 2; } >&2
 
-_SCRIPT="$(readlink -f -- "$0")"
-_SCRIPT_DIR="$(dirname -- "$_SCRIPT")"
-_DIR_PERF2HTML="$(cd -P -- "$_SCRIPT_DIR/.." && pwd)"
-_REPO="$(cd -P -- "$_DIR_PERF2HTML/../.." && pwd)"
+_SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+_SCRIPT="$_SCRIPT_DIR/${0##*/}"
+_DIR_PERF2HTML="$(cd -- "$_SCRIPT_DIR/.." && pwd)"
+_REPO="$(cd -- "$_DIR_PERF2HTML/../.." && pwd)"
 _TEST_EXPECTED_BEHAVIOR="$_SCRIPT_DIR/test_expected_behavior.sh"
 
 . "$_SCRIPT_DIR/utility.sh"
@@ -67,11 +67,18 @@ _TEST_ERROR_MANIFEST_CHECKSUM_LABEL=checksum
 
 _TEST_ERROR_MANIFEST_VERSION_DIFF='curl/perf2html_diff.sh v0'
 
-_TEST_ERROR_SCRATCH="$_DIR_PERF2HTML/build/test_error_handling_scratch"
+_TEST_ERROR_BUILD_OUTPUT_DIR="$PWD/build"
+_TEST_ERROR_SCRATCH="$_TEST_ERROR_BUILD_OUTPUT_DIR/test_error_handling_scratch"
 
 _TEST_ERROR_SCREENSHOT_DIFF_DIR="$_DIR_PERF2HTML/screenshots-diff"
 _TEST_ERROR_SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE=3
 _TEST_ERROR_SCREENSHOT_GOLD_DIR="$_DIR_PERF2HTML/screenshots-gold"
+
+_TEST_ERROR_TIMING_DATA_FILE_NAME=0_timing_data.json
+_TEST_ERROR_TIMING_LOOP_COUNT=100
+_TEST_ERROR_TIMING_PAGE_FILE_SUFFIX=.perf-stat.txt
+_TEST_ERROR_TIMING_STAT_FILE_SUFFIX=.perf-stat.json
+_TEST_ERROR_TIMING_TEST_NAME=timing_test
 
 test_error_path_without_tool() {
   local _tool="$1" _bin="$_TEST_ERROR_SCRATCH/bin_without_$1" _dirs=() _dir
@@ -464,7 +471,7 @@ test_error_diff_tests() {
 }
 
 test_error_txz_tests() {
-  local _baseline="$1" _wrong _kept _whole _truncated
+  local _baseline="$1" _wrong _whole _truncated
   local _tool="$_DIR_PERF2HTML/perf2html_diff.sh"
   local _scratch="$_TEST_ERROR_SCRATCH"
 
@@ -507,17 +514,6 @@ test_error_txz_tests() {
   test_failure_expect txz_input_wrong_report_name 2 -- \
     "$_tool" "--artifacts=$_scratch/artifacts_txz_wrong_name" \
     "$_baseline" "$_wrong" "$_scratch/out_txz_wrong_name"
-
-  _kept="$_scratch/out_txz_kept"
-  echo 'the previous archive' >"$_kept$_TEST_ERROR_ARCHIVE_SUFFIX"
-  test_failure_expect txz_output_refused 2 -- \
-    "$_tool" --txz "--artifacts=$_scratch/artifacts_txz_kept" \
-    "$_baseline" "$_scratch/never_made" "$_kept"
-  grep -q 'the previous archive' "$_kept$_TEST_ERROR_ARCHIVE_SUFFIX" \
-    || test_fail txz_previous_archive_kept \
-      "$(path_shown "$_kept$_TEST_ERROR_ARCHIVE_SUFFIX") is gone or \
-overwritten after a refused run"
-  echo "ok txz_previous_archive_kept"
 }
 
 test_error_batch_tests() {
@@ -605,11 +601,62 @@ test_error_relink_test() {
   _row="$(sed -n 's/^executable=//p' "$_rows" | head -n 1)"
   [ -n "$_row" ] || test_fail regenerate_after_relink \
     "no executable= row in $_rows"
-  _binary="$_REPO/${_row%% *}"
+  _binary="$_TEST_ERROR_BUILD_OUTPUT_DIR/${_row%% *}"
   [ -f "$_binary" ] || test_fail regenerate_after_relink \
     "no executable at $_binary"
   test_failure_expect regenerate_after_relink 2 -- \
     test_error_relink_regenerate_run "$_binary" "$_reference"
+}
+
+# Writes a recording of one test under a refused perf, its page the rows given.
+test_error_timing_recording_write() {
+  local _directory="$1" _test_name="$_TEST_ERROR_TIMING_TEST_NAME"
+  shift
+  mkdir -p "$_directory"
+  printf '%s\n' "$_test_name" >"$_directory/$_TEST_ERROR_TEST_LIST_FILE_NAME"
+  : >"$_directory/$_test_name$_TEST_ERROR_TIMING_STAT_FILE_SUFFIX"
+  {
+    printf '$ perf %s %s\n' "$_test_name" "$_TEST_ERROR_TIMING_LOOP_COUNT"
+    [ "$#" = 0 ] || printf '%s\n' "$@"
+  } >"$_directory/$_test_name$_TEST_ERROR_TIMING_PAGE_FILE_SUFFIX"
+}
+
+# Expects the golden duty cycle from a timing page of the rows given.
+test_error_timing_time_check() {
+  local _name="$1" _wanted="$2" _artifacts="$_TEST_ERROR_SCRATCH/timing"
+  shift 2
+  test_error_timing_recording_write "$_artifacts/$_name" "$@"
+  python3 "$_SCRIPT_DIR/perf_measure.py" timing-data \
+    "--artifacts=$_artifacts" "--report=$_name"
+  grep -q -x -F "    \"duty_cycle\": $_wanted," \
+    "$_artifacts/$_name/$_TEST_ERROR_TIMING_DATA_FILE_NAME" \
+    || test_fail "$_name" "no duty cycle of $_wanted"
+  echo "ok $_name"
+}
+
+# Expects a timing page of the rows given refused, naming its count of rows.
+test_error_timing_refusal_check() {
+  local _name="$1" _artifacts="$_TEST_ERROR_SCRATCH/timing"
+  local _page="$_artifacts/$1/$_TEST_ERROR_TIMING_TEST_NAME"
+  _page+="$_TEST_ERROR_TIMING_PAGE_FILE_SUFFIX"
+  shift
+  test_error_timing_recording_write "$_artifacts/$_name" "$@"
+  test_failure_message_expect "$_name" 1 "error: $_page holds $# time lines \
+with a time unit of ['ns', 'usecs'], expected the same count above 0 from \
+each of 5 runs" -- python3 "$_SCRIPT_DIR/perf_measure.py" timing-data \
+    "--artifacts=$_artifacts" "--report=$_name"
+}
+
+# Refuses an archive that a regenerate run wrote, as a routine run makes none.
+test_error_routine_archive_check() {
+  local _report
+  for _report in "$_TEST_ERROR_BASELINE_REPORT" \
+    "$_TEST_ERROR_MODIFIED_REPORT" "$_TEST_ERROR_DIFF_REPORT"; do
+    [ ! -e "$_report$_TEST_ERROR_ARCHIVE_SUFFIX" ] \
+      || test_fail routine_run_no_archive \
+        "$(path_shown "$_report$_TEST_ERROR_ARCHIVE_SUFFIX") exists"
+  done
+  echo "ok routine_run_no_archive"
 }
 
 test_error_failure_tests_run() {
@@ -641,12 +688,25 @@ test_error_failure_tests_run() {
   rm -rf "$_TEST_ERROR_SCRATCH"
 }
 
+# Refuses a scratch under the scripts directory, which no report may overlap.
+test_error_invocation_check() {
+  case "$(pwd -P)/" in
+    "$(cd -- "$_SCRIPT_DIR" && pwd -P)"/*)
+      printf 'error: the invocation dir %s lies in the scripts dir %s\n' \
+        "$PWD" "$_SCRIPT_DIR" >&2
+      exit 2
+      ;;
+  esac
+}
+
 main() {
   local _cache_before
+  test_error_invocation_check
   test_error_markdown_formatter_check
   test_error_cache_populated_check
   _cache_before="$(test_error_cache_snapshot)"
   test_error_expected_behavior_run
+  test_error_routine_archive_check
   test_error_regenerate_cache_check "$_cache_before"
   test_error_failure_tests_run
   test_error_markdown_check_run

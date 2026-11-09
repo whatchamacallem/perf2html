@@ -131,6 +131,8 @@
       "",
       manifest_text,
     ].join("\n");
+    // Writes the report to the browser's log too, where no page can hide it.
+    console.error(copy_text);
     const font_size =
       Math.round(
         (DESIGN_FONT_SIZE_PX * window.innerWidth) /

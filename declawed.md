@@ -59,8 +59,9 @@ scripts too."""
   each metric absent) and the run goes on. A ratio over a 0 is 0, and the overview prints
   every 0 and every absent metric as an empty cell, the data not being
   available. Any other non-zero perf exit is a hard error.
-- The overview's per test table shows the time per loop, the median over the
-  `TIMING_PERF_STAT_RUNS` runs of the curl perf tool's own `Time:` lines, then
+- The overview's per test table shows the duty cycle, the median over the
+  `TIMING_PERF_STAT_RUNS` runs of the curl perf tool's own `Time:` lines and
+  rows such as `16 100 frames, 282 usecs`, each divided by its own count, then
   `TIMING_PERF_STAT_METRICS`, perf stat's own `metric-value` texts as perf
   writes them, full precision and unchanged, each on its event's line under
   its `metric-unit`: instructions/cycle (`insn per cycle`), branch miss %
@@ -170,6 +171,9 @@ scripts too."""
   a class or a file, comes with plain words saying what it is and why it
   matters there; a number may follow that description for reference, never
   replace it.
+- A message to the maintainer that refers to a place in a file quotes the
+  words it is about. A file and line number may follow the quote for
+  reference, never replace it.
 - Never report a problem without its solutions. Anything that waits on the
   maintainer, whether a decision, an approval, an install or a command only
   they may run, is written as a question naming what is being decided, not
@@ -324,7 +328,10 @@ The single function/check owning each concern - never bypass or duplicate:
   valgrind's own `--zero-before`, `--toggle-collect` and
   `--collect-atstart` options naming `PROFILE_START_FUNCTION_NAME` and
   `PROFILE_STOP_FUNCTION_NAME` (settings.sh), so nothing outside the
-  window is recorded and nothing cuts a recording after (perf_measure.py);
+  window is recorded and nothing cuts a recording after, and its call
+  chains, `--separate-callers=CALLGRIND_SEPARATE_CALLERS` and
+  `--separate-recs=CALLGRIND_SEPARATE_RECURSIONS`, each function context
+  named by its whole caller chain and no recursion level (perf_measure.py);
   `function_calls()` every database row's and call graph root's calls, an
   uncalled start function's `PROFILE_START_FUNCTION_UNRECORDED_CALLS`
   (build_report.py); `caller_calls()` every calls per caller aggregation,
@@ -376,15 +383,25 @@ The single function/check owning each concern - never bypass or duplicate:
   incoming edge calls summed (call_graph.js); `call_graph_roots()` every
   uncalled caller a root, a call graph with none or with a called function
   none of them reaches refused (build_report.py).
+- `call_branches()` - every call graph branch and its cost, the inclusive
+  CEst of the calls made along exactly that path from its root, summed from
+  the recording's call contexts; every other view reads each context folded
+  into its function, the name before its first caller; a call whose
+  callee's chain is not its caller's chain plus one is refused, so a
+  recording without chains or with a chain cut at
+  `CALLGRIND_SEPARATE_CALLERS` fails (callgrind.py).
 - `call_graph_open_set()` - the one open set of a fresh call graph view,
-  at its first render and every `view_reset`: every node with shown
-  children whose cumulative CEst, never shown, is at least
-  `CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT` of the test's total CEst
-  through `share_of_test()`, open, every other closed; a root's cumulative
-  CEst is its function's self plus its calls to every other function, a
-  callee's its call's inclusive CEst, the cost the `cumulative first` sort
-  orders by; a shown child is a callee not already on the node's path
-  (call_graph.js).
+  at its first render and every `view_reset`: each function opens only at
+  its costliest branch over the whole graph, a tie the earliest by its
+  path's names, and there only when a shown child's branch cost from
+  `call_branches()`, never shown, is at least
+  `CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT` of the test's total CEst through
+  `share_of_test()`, every other node closed; a function whose costliest
+  branch lies under a closed node stays closed wherever it is shown; a call
+  a branch never made costs zero there; a shown child is a callee not
+  already on the node's path; the `cumulative first` sort still orders by a
+  caller and callee pair's inclusive CEst summed over every branch
+  (call_graph.js). The heat map tree shares none of it.
 - `design_scale_stop_set()` - every scale change; `menu.js` then posts
   `layout_reset`, which resets column widths, pane widths and heading row
   counts.
@@ -392,6 +409,12 @@ The single function/check owning each concern - never bypass or duplicate:
   and line info box, answering `{markup, copy_text}`, line 0 the file's,
   which is part of the page: the first row of the source table, in the
   source column, closed by no control (heat_map.js).
+- `tree_build()` - the heat map tree of a test's files, a folder holding
+  one folder and no file joined with it into one node named by the joined
+  path, such as `tests/perf/`, opening and closing as one;
+  `ranking_tree_build()` the tree's fresh open set, each top level node open
+  and every other node closed, no cost read; `tree_reveal()` then opens the
+  folders above the file the address shows (heat_map.js).
 - `hash_for_location()` - every heat map link into a file at a line, a
   function's line written as the function's hash (heat_map.js);
   `report_ui_.address.function_hash(test_name, function_name)` every
@@ -459,6 +482,10 @@ The single function/check owning each concern - never bypass or duplicate:
   `perf2html.sh --regenerate --verbose 2> tmp/perf2html\.md`
   from `tests/perf2html/`. Use `--keep-artifacts` to flush artifact cache and
   then keep the new ones.
+- The project root is `tests/perf2html/` in a curl checkout, on the maintainer's
+  machine `~/curl/tests/perf2html`, a link to `~/perf2html` holding the same
+  files. Every script runs from the project root, as the scripts find curl two
+  directories up, which from `~/perf2html` is not curl.
 - Mandated workflow: use `--keep-artifacts` and `--regenerate` whenever
   possible, every run of `perf2html_batch.sh` or
   `test_expected_behavior.sh` after the first measuring run, unless the
@@ -501,6 +528,12 @@ The single function/check owning each concern - never bypass or duplicate:
   what each shows. It never deletes or moves the gold shots and never
   challenges the maintainer over a difference.
 - The full run is `test_all.sh` and only run that when asked to "test".
+- No testing of `--txz` is allowed outside `scripts/publish.sh`. `publish.sh`
+  takes no such argument: it always passes `--txz` to the script that makes the
+  report it publishes, unconditionally, then compares the archive to the report.
+- `scripts/publish.sh` is not part of normal testing and runs only when the
+  maintainer decides to use it. No other script calls it, no test and no agent
+  runs it, and no source stage touches it, so that it holds up no run.
 - More than one goal in a response ends with a done/not-done checklist.
 - Numbering of multi-item communication in summaries follows ISO 2145.
 - Don't update usage text, tell the user to do that.

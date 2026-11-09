@@ -44,6 +44,8 @@ CALL_GRAPH_BRANCH_PASS_TEXT = "┃"
 CALL_GRAPH_CLOSED_TEXT = "⊞"
 CALL_GRAPH_DOWNLOAD_FILE_NAME_SUFFIX = "_call_graph.svg"
 CALL_GRAPH_LINE_TEXT = "━"
+CALL_GRAPH_MOST_DRAWN_NODES = 20000
+CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT = 1.0
 CALL_GRAPH_PAD_TEXT = " "
 CALL_GRAPH_PAGE_DIR_NAME = "call-graph"
 CALL_GRAPH_REVEAL_CLEARANCE_CHARS = 1
@@ -62,6 +64,7 @@ CALLGRIND_FORMAT_CALLEE_FUNCTION_KEY = "cfn"
 CALLGRIND_FORMAT_CALLEE_IMAGE_KEY = "cob"
 CALLGRIND_FORMAT_CALLS_KEY = "calls"
 CALLGRIND_FORMAT_COMMAND_KEY = "cmd"
+CALLGRIND_FORMAT_CONTEXT_SEPARATOR = "'"
 CALLGRIND_FORMAT_COUNTERS_KEY = "events"
 CALLGRIND_FORMAT_FILE_KEY = "fl"
 CALLGRIND_FORMAT_FUNCTION_KEY = "fn"
@@ -219,6 +222,7 @@ MENU_ENTRY_VIEW_KEYS: dict[str, list[str]] = {
     "heat_sort": [HEAT_MAP_VIEW_ENTRY[0]],
 }
 MENU_FLASH_DURATION_MS = 500
+MENU_LOGO_REPOSITORY_URL = "https://github.com/whatchamacallem/perf2html"
 MENU_PULLDOWN_KEY_NAMES: dict[str, str] = {
     "close": "Escape",
     "erase": "Backspace",
@@ -237,6 +241,7 @@ NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES = 999.99
 NUMBER_MULTIPLE_SUFFIX_TEXT = "x"
 
 PERF_TOOL_TIME_LABEL = "Time"
+PERF_TOOL_TIME_ROW_OPENING_PATTERN = r"(?:\S+\s+)?(\d+)\s+\S+,\s+"
 
 PROFILE_START_FUNCTION_UNRECORDED_CALLS = 1
 
@@ -247,7 +252,9 @@ README_PAGE_CONVERTER_EXTENSION_ARGUMENTS: tuple[str, ...] = ("-e", "table")
 README_PAGE_HEADING_ANCHOR_DROPPED_PATTERN = r"[^\w\- ]"
 README_PAGE_HEADING_PATTERN = r"(?s)<h([1-6])>(.*?)</h\1>"
 README_PAGE_HEADING_TEXT_DROPPED_PATTERN = r"<[^>]*>|&\w+;"
+README_PAGE_INPUTS_RECORD_SUFFIX = ".inputs"
 README_PAGE_ROOT_VALUES_MARKER = "__ROOT_VALUES__"
+README_PAGE_STAGED_FILE_SUFFIX = ".part"
 
 REGULAR_REPORT_VIEW_KEYS: list[str] = [
     CALL_GRAPH_VIEW_KEY,
@@ -489,7 +496,7 @@ THEME_TIME_UNIT_ENTRIES: tuple[tuple[str, float], ...] = (
 )
 
 TIMING_COLUMN_NAMES: tuple[str, ...] = (
-    "time_per_loop",
+    "duty_cycle",
     "instructions_per_cycle",
     "loads_per_instruction",
     "branch_miss_ratio",
@@ -500,6 +507,7 @@ TIMING_COUNTER_RATIOS: tuple[tuple[str, str, str], ...] = (
     ("loads_per_instruction", "L1-dcache-loads", "instructions"),
 )
 TIMING_DATA_INDENT_CHARS = 2
+TIMING_DUTY_CYCLE_NAME = "duty_cycle"
 # Each metric's last field is how many of perf's metric units make a ratio 1.
 TIMING_PERF_STAT_METRICS: tuple[tuple[str, str, str, int], ...] = (
     ("instructions_per_cycle", "instructions", "insn per cycle", 1),
@@ -517,7 +525,6 @@ TIMING_PERF_STAT_UNCOUNTED_VALUES: tuple[str, ...] = (
     "<not counted>",
     "<not supported>",
 )
-TIMING_TIME_PER_LOOP_NAME = "time_per_loop"
 
 TRACE_ADDR2LINE_COMMAND: tuple[str, ...] = ("addr2line", "-f", "-C", "-e")
 TRACE_ADDR2LINE_UNKNOWN_NAME = "??"
@@ -532,8 +539,6 @@ TRACE_LOAD_SEGMENT_COMMAND: tuple[str, ...] = ("readelf", "-lW")
 TRACE_LOAD_SEGMENT_KEYWORD = "LOAD"
 TRACE_MAPS_EXECUTABLE_FLAG = "x"
 TRACE_RECORD_WORDS = 2
-
-TREE_OPEN_LEAST_CUMULATIVE_PERCENT = 0.1
 
 WIDGET_KEY_NAMES: dict[str, str] = {
     "activate": "Enter",

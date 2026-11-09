@@ -344,16 +344,15 @@ class CallgrindToHeatmap:
     ) -> dict[str, callgrind.PathInfo]:
         info = dict(recorded_info)
         for row in function_diff["functions"]:
-            file_path = function_diff["files"][row.file_index]
-            place_info = self.path_info(
-                file_path,
-                function_diff["images"][row.image_index],
-                derive,
+            image_path = function_diff["images"][row.image_index]
+            file_key = callgrind.recorded_file_key(
+                function_diff["files"][row.file_index], image_path
             )
-            known = info.setdefault(file_path, place_info)
+            place_info = self.path_info(file_key, image_path, derive)
+            known = info.setdefault(file_key, place_info)
             if known != place_info:
                 sys.exit(
-                    f"error: the diff shows {file_path} as {known.display}"
+                    f"error: the diff shows {file_key} as {known.display}"
                     f" and as {place_info.display}"
                 )
         return info
@@ -366,7 +365,12 @@ class CallgrindToHeatmap:
     ) -> dict[str, callgrind.SourceLine]:
         return {
             row.function_name: callgrind.SourceLine(
-                info[function_diff["files"][row.file_index]].display,
+                info[
+                    callgrind.recorded_file_key(
+                        function_diff["files"][row.file_index],
+                        function_diff["images"][row.image_index],
+                    )
+                ].display,
                 row.line_number,
             )
             for row in function_diff["functions"]
@@ -453,7 +457,7 @@ class CallgrindToHeatmap:
             )
         return {name: entry.emit() for name, entry in accumulators.items()}
 
-    # Returns whether a function's self, calls or self at a line is nonzero.
+    # Returns whether a function's self or calls, or a line it costs, is shown.
     @staticmethod
     def function_counted(
         profile: callgrind.Profile, function: CallgrindToHeatmap.FunctionModel
@@ -463,9 +467,13 @@ class CallgrindToHeatmap:
             or function["calls"]
             or any(
                 any(costs)
-                for costs in profile.function_lines.get(
+                and (
+                    any(profile.line_self.get(line, ()))
+                    or any(profile.line_calls.get(line, ()))
+                )
+                for line, costs in profile.function_lines.get(
                     function["name"], {}
-                ).values()
+                ).items()
             )
         )
 

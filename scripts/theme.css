@@ -86,6 +86,7 @@ pre {
 /* The call graph table, as wide as its longest row, in its clear border. */
 #call-graph-table- {
   position: relative;
+  isolation: isolate;
   width: max-content;
   border: var(--call-graph-border-width-) solid transparent;
   border-collapse: separate;

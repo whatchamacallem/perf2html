@@ -436,6 +436,25 @@ window.try_catch_handler_(function () {
         : null;
       return running_total;
     })(root);
+    // Joins a folder holding one folder and no file with it, as one node.
+    (function chains_join(tree_node) {
+      const joined_directories = new Map();
+      for (let directory_node of tree_node.dirs.values()) {
+        while (
+          directory_node.files.length === 0 &&
+          directory_node.dirs.size === 1
+        ) {
+          const [only_directory] = directory_node.dirs.values();
+          directory_node = {
+            ...only_directory,
+            name: directory_node.name + "/" + only_directory.name,
+          };
+        }
+        chains_join(directory_node);
+        joined_directories.set(directory_node.name, directory_node);
+      }
+      tree_node.dirs = joined_directories;
+    })(root);
     return root;
   }
   const expanded_directories = new Set(),
@@ -787,14 +806,17 @@ window.try_catch_handler_(function () {
   }
   // Opens every folder above a file and the no samples group holding the file.
   function tree_reveal(file_path) {
-    const path_parts = file_path.split("/");
+    // Returns the file a node holds itself, none when a folder below holds it.
+    const held_file = (holding_node) =>
+      holding_node.files.find((file) => file.path === file_path);
     let tree_node = tree_root;
-    for (const segment of path_parts.slice(0, -1)) {
-      tree_node = tree_node.dirs.get(segment);
+    while (!held_file(tree_node)) {
+      tree_node = [...tree_node.dirs.values()].find((directory_node) =>
+        file_path.startsWith(directory_node.path + "/"),
+      );
       expanded_directories.add(tree_node.path);
     }
-    const file_node = tree_node.files.find((file) => file.path === file_path);
-    if (file_node.zero) expanded_cold_groups.add(tree_node.path);
+    if (held_file(tree_node).zero) expanded_cold_groups.add(tree_node.path);
   }
   // Scrolls the tree until the selected node sits inside the shown part.
   function tree_selected_show() {
@@ -1949,25 +1971,13 @@ window.try_catch_handler_(function () {
   let routed_hash = null;
   let is_routing = false;
   let load_render_log = null;
-  // Lists a tree node's children as the open set reads them.
-  function tree_open_edges(tree_node) {
-    return [...tree_node.dirs.values(), ...tree_node.files].map(
-      (child_node) => ({
-        child_node,
-        cumulative_cost: absolute(child_node.self),
-      }),
-    );
-  }
-  // Builds the tree by the ranking counter, opening its default folders.
+  // Builds the tree by the ranking counter, each top level node open.
   function ranking_tree_build() {
     tree_root = tree_build();
-    const open_set = report_preferences_.tree_open_set(
-      [...tree_root.dirs.values()],
-      tree_open_edges,
-      (tree_node) => tree_node.path,
-      ranking_counter.get(profile_model.heatMapTotals.totals),
-    );
-    for (const open_path of open_set) expanded_directories.add(open_path);
+    for (const directory_node of tree_root.dirs.values())
+      expanded_directories.add(directory_node.path);
+    if (tree_root.files.some((file) => file.zero))
+      expanded_cold_groups.add(tree_root.path);
   }
   // Renders again what relayed preferences change, the first relay routing.
   function preferences_apply() {
