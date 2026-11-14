@@ -770,6 +770,7 @@ class BrowserSession:
         self.browser_process = subprocess.Popen(
             [
                 browser,
+                "--headless",
                 "--disable-gpu",
                 "--no-sandbox",
                 "--incognito",
