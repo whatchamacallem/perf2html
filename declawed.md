@@ -56,9 +56,9 @@ scripts too."""
   data. The curl perf tool then runs directly `TIMING_PERF_STAT_RUNS` times,
   each run's command line in the timing page, so the parser sees the same
   runs either way; every value expected from perf reads 0 (each counter 0.0,
-  each metric absent) and the run goes on. A ratio over a 0 is 0, and the overview prints
-  every 0 and every absent metric as an empty cell, the data not being
-  available. Any other non-zero perf exit is a hard error.
+  each metric absent) and the run goes on. A ratio over a 0 is 0, and the
+  overview prints every 0 and every absent metric as an empty cell, the data
+  not being available. Any other non-zero perf exit is a hard error.
 - The overview's per test table shows the duty cycle, the median over the
   `TIMING_PERF_STAT_RUNS` runs of the curl perf tool's own `Time:` lines and
   rows such as `16 100 frames, 282 usecs`, each divided by its own count, then
@@ -68,14 +68,25 @@ scripts too."""
   (`of all branches`), L1D miss % (`of all L1-dcache accesses`); then the
   `TIMING_COUNTER_RATIOS` perf reports no metric for, derived from its
   counters: loads / instruction, printed at perf's own metric precision,
-  `TIMING_PERF_STAT_METRIC_FRACTION_DIGITS`. A value perf reports itself is never
-  derived again. The column titles are `ui_strings.js` text; the settings
+  `TIMING_PERF_STAT_METRIC_FRACTION_DIGITS`. A value perf reports itself is
+  never derived again. The column titles are `ui_strings.js` text; the settings
   hold only keyword identifiers (event names, metric units, the string id
   suffixes). No other linux perf metric is shown and no test case specific
-  stat; the curl perf tool's own output in the timing page speaks for the
-  rest.
+  stat; the curl perf tool's own output in the timing page speaks for the rest.
 - Any error is a hard error, reported immediately, first failure only - no
-  script collects failures, tallies of failures.
+  script collects failures, tallies of failures. The one exception is the
+  screenshot tool's timing limit: `test_screenshot.py` times the page loads
+  of its golden bookmarks and every click of its golden click sets, writes
+  each page file's slowest timings and every click to
+  `screenshots/timing.txt`, then fails naming the slowest one over its limit,
+  `TIMING_PAGE_LOAD_LIMIT_MS` for a page load and `TIMING_CLICK_LIMIT_MS`
+  for a click (test_settings.py), and pointing to that file.
+- No timer decides a failure: a check counts work or waits for an event, so
+  it gives the same answer on any machine. The screenshot tool's timers are
+  the only timers allowed; they leave untimed the shots flagged
+  `SHOOT_UNTIMED` (test_settings.py): the flame graph, speedscope being
+  another app, the heat map of a large source file, the heat map of a
+  large test and the settings debugging page.
 - When asked to update this document then further confirmation should not be
   required to fix all discrepancies observed, and remove all obsolete
   information even if unrelated to your work.
@@ -89,6 +100,10 @@ scripts too."""
   to compare against and so they require independent constants for that.
   Hardcoded settings in the test code are that golden reference: never report
   them.
+- Variable names are not settings: an environment variable or a page global
+  is named as it is in the code that uses it, such as `PERF2HTML_REPO_ROOT`,
+  `PERF_TRACE_OUT` or `window.report_heat_map_models_`, never through a
+  setting holding its name.
 - There must be no data loss in the logs from a hard exit because there is no
   buffering beyond a single external command.
 - `--regenerate` refuses (hard error, exit 2) rather than silently measuring
@@ -165,7 +180,9 @@ scripts too."""
 - Provide every diff as a link to an artifact when running in the cloud.
 - The perf2html_diff.sh script has to be able to run on a remote machine with
   only two `.txz` compressed reports as inputs. It has to work without access
-  to any source code or repository involved in the report.
+  to any source code or repository involved in the report. Like every script
+  it sources `utility.sh`, so it needs a dir named curl two levels above or
+  beside the project root, which it never reads.
 - A message to the maintainer is understood without opening another file.
   Every identifier it uses, such as a task, question or item number, a test,
   a class or a file, comes with plain words saying what it is and why it
@@ -321,6 +338,13 @@ The single function/check owning each concern - never bypass or duplicate:
   (utility.sh, artifacts.py).
 - `artifacts_verify` - whether a temporary artifacts dir holds every file the
   contract names, first miss exit 2 (utility.sh).
+- `PERF2HTML_REPO_ROOT` - the curl dir, which sourcing `utility.sh` exports
+  through `repo_root_export`: the dir two levels above the project root when
+  that dir is named `REPO_ROOT_DIR_NAME` (`curl`), else `curl` beside the
+  project root, neither exit 1 (utility.sh); every shell script and Python
+  tool reads it from the environment.
+- `project_root_check` - where a `scripts/*.sh` launcher runs: the project
+  root, any other invocation dir exit 2 (utility.sh).
 - `test_list.txt` - the one list of a run's tests, born from `TESTS_C` in
   `perf2html.sh`, read everywhere.
 - `counter_value()` - all counter lookups (callgrind.py).
@@ -346,10 +370,19 @@ The single function/check owning each concern - never bypass or duplicate:
   its callgrind entry line when that line carries no counter and the
   function's counters span more than one line, else the entry line
   (callgrind_to_heatmap.py).
+- `line_is_shown()` - whether the heat map shows a line, a line number of a
+  file with source, so that only such a line, or a function declared at
+  one, is linked or addressed, any other one's name plain text and its
+  typed address refused (heat_map.js); `function_shown()` the same rule
+  for `report_source_database_` (callgrind_to_heatmap.py), and
+  `linked_names()` for the database's function links and the call graph
+  heading's (build_report.py).
 - `report_source_database_` - the one list of the files the tests show
-  and the functions with a line, every test's union, and of each test's
-  files and functions with a nonzero counter, the menu's file and
-  function pulldowns, names alone (scripts/source_database.js).
+  and the functions with a line in a file with source, every test's
+  union, and of each test's files and functions with a nonzero counter,
+  the menu's file and function pulldowns, names alone, written by
+  `source_database_write()` (callgrind_to_heatmap.py) as each report's
+  scripts/source_database.js.
 - `text_clip()` - every cell text cut at its column's `clip`;
   `column_edge_drag()` every column width, a drag at the right edge grab of
   a body cell or title of a `TABLE_RESIZABLE_COLUMN_NAMES` column setting
@@ -377,12 +410,12 @@ The single function/check owning each concern - never bypass or duplicate:
   aligning the shares.
 - `self_share_of_test()` - every call graph share, a function's self CEst
   (`RANKING_COUNTER_NAME`) as a share of the test's total CEst, the call
-  graph model's `test_total`, through `share_of_test()`, a root none; `edge_multiple()` every calls
-  multiple, an
-  edge's calls per invocation of its caller, the caller's root calls and
-  incoming edge calls summed (call_graph.js); `call_graph_roots()` every
-  uncalled caller a root, a call graph with none or with a called function
-  none of them reaches refused (build_report.py).
+  graph model's `test_total`, through `share_of_test()`, a root none;
+  `edge_multiple()` every calls multiple, an edge's calls per invocation of its
+  caller, the caller's root calls and incoming edge calls summed
+  (call_graph.js); `call_graph_roots()` every uncalled caller a root, a call
+  graph with none or with a called function none of them reaches refused
+  (build_report.py).
 - `call_branches()` - every call graph branch and its cost, the inclusive
   CEst of the calls made along exactly that path from its root, summed from
   the recording's call contexts; every other view reads each context folded
@@ -391,42 +424,90 @@ The single function/check owning each concern - never bypass or duplicate:
   recording without chains or with a chain cut at
   `CALLGRIND_SEPARATE_CALLERS` fails (callgrind.py).
 - `call_graph_open_set()` - the one open set of a fresh call graph view,
-  at its first render and every `view_reset`: each function opens only at
-  its costliest branch over the whole graph, a tie the earliest by its
-  path's names, and there only when a shown child's branch cost from
-  `call_branches()`, never shown, is at least
-  `CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT` of the test's total CEst through
-  `share_of_test()`, every other node closed; a function whose costliest
-  branch lies under a closed node stays closed wherever it is shown; a call
-  a branch never made costs zero there; a shown child is a callee not
-  already on the node's path; the `cumulative first` sort still orders by a
-  caller and callee pair's inclusive CEst summed over every branch
-  (call_graph.js). The heat map tree shares none of it.
+  at its first render, every `view_reset` and every cutoff change: each
+  function opens only at its costliest branch over the whole graph, a tie
+  the earliest by its path's names, and there only when a shown child's
+  branch cost from `call_branches()`, never shown, is at least the cutoff
+  percent of the test's total CEst through `share_of_test()`, the cutoff
+  the square of the heading's cutoff slider's chosen stop root, one of
+  `CALL_GRAPH_CUTOFF_STOP_COUNT` roots evenly spaced from the root of the
+  smallest printed percent to that of `CALL_GRAPH_CUTOFF_LARGEST_PERCENT`,
+  the halfway stop the default (`call_graph_cutoff_stop_roots()`,
+  preferences.js), every other node closed; a function whose
+  costliest branch lies under a closed node stays closed wherever it is
+  shown; a call a branch never made costs zero there; a shown child is a
+  callee not already on the node's path; the `cumulative first` sort still
+  orders by a caller and callee pair's inclusive CEst summed over every
+  branch (call_graph.js). The heat map tree shares none of it.
 - `design_scale_stop_set()` - every scale change; `menu.js` then posts
-  `layout_reset`, which resets column widths, pane widths and heading row
-  counts.
+  `layout_reset`, which resets column widths and heading row counts.
 - `information_box_render(file_path, line_number)` - every file, function
-  and line info box, answering `{markup, copy_text}`, line 0 the file's,
-  which is part of the page: the first row of the source table, in the
-  source column, closed by no control (heat_map.js).
+  and line info box, answering `{markup, copy_text, heading_entries}`, line
+  0 the file's, which is part of the page: the first row of the source
+  table, closed by no control; a file with no source draws no source
+  table, only the tree's column, titled, and beside it, level with the
+  title, the file's box, a blank line and the box's notes, in no cell and
+  with no title of its own, light mode drawing the top and bottom lines
+  that part a box from the source code only for a box in a cell; a line
+  holding both its own costs and a
+  function declared on it shows the line's box while the address's
+  `functions` is `0` and the function's while it is `1`, a line holding
+  one of the two that one's; the heading is the title, then a line's box's
+  links to the functions of its line, a line in more than one function
+  titled by those links alone; every box's cell spans each column after
+  the tree; `information_box_place()` puts a box in its cell and draws its
+  controls strip at its top, its heading, its copy of `copy_text` and a
+  line's close (heat_map.js).
 - `tree_build()` - the heat map tree of a test's files, a folder holding
   one folder and no file joined with it into one node named by the joined
-  path, such as `tests/perf/`, opening and closing as one;
-  `ranking_tree_build()` the tree's fresh open set, each top level node open
-  and every other node closed, no cost read; `tree_reveal()` then opens the
-  folders above the file the address shows (heat_map.js).
-- `hash_for_location()` - every heat map link into a file at a line, a
-  function's line written as the function's hash (heat_map.js);
-  `report_ui_.address.function_hash(test_name, function_name)` every
-  function's hash, the menu's function pulldown, the heat map's function
-  links and the call graph heading's selected function link, the function
-  of the symbol button last pressed, none at first and after a
-  `view_reset`, shown after the heading's copy entry through
-  `report_ui_.page_heading_tail_set()` (theme.js).
+  path, such as `tests/perf/`, opening and closing as one; a folder's files
+  with no samples sit in a "no samples" group, except in a folder no file
+  below which has samples, which lists its files alone;
+  `ranking_tree_build()` and `tree_reveal()` the tree's fresh open set, in
+  three steps: 1 a node holding the file the address shows is open, 2
+  otherwise a node with no samples is closed, a "no samples" group too, 3
+  otherwise a top level node is open and every other node closed
+  (heat_map.js).
+- `hash_for_location()` - the address a press on a source line asks for,
+  and a hottest lines tape entry's while functions are shown, a function's
+  line written as the function's hash, each in the view mode shown; a box
+  table's line link and a tape entry while lines are shown write the
+  line's own address through `hash_for_line()`, `functions=0`
+  (heat_map.js);
+  `report_ui_.address.function_hash(test_name, function_name,
+  shows_functions)` every function's hash a page script writes, the
+  menu's function pulldown, the heat map's function links and the call
+  graph heading's selected function link, each `functions=1`, the
+  function of the symbol button last pressed, none at first and after a
+  `view_reset`, shown after the heading's copy entry and cutoff slider
+  through `report_ui_.page_heading_tail_set()` (theme.js);
+  `BuildReport.address()` every address a page builder writes, the
+  database page's function links `functions=1` (build_report.py).
+- `address_parts_check()` - every address's parts, among them the heat
+  map's view mode `functions`, which every heat map address names: `1`
+  shows the costs of the functions a line declares, `0` the line's own,
+  any other value or none refused (theme.js); the mode is the address's,
+  never a preference: a function link writes `1`, a line link `0`, a
+  source line or tree press and the menu's file pulldown the mode shown,
+  `0` from another view or with a typed line, and the menu's "lines" /
+  "functions" entry links the address shown in the other mode
+  (heat_map.js, menu.js).
+- `report_ui_.function_location_send()` - the file and line the menu's
+  status line shows before a heat map function: the heat map view sends
+  the test, function, file and line it drew, and the menu shows them only
+  while the address names that test and function, a function with no
+  samples in its test shown alone (theme.js, heat_map.js, frame.js,
+  menu.js).
 - `report_ui_.strip.render(strip_element, entries, status_entries)` - every
   strip cell: the menu and its status bar, an entry with an empty href a
   plain label there, the preference strip, the settings view's load log
-  strip, each table heading (theme.js).
+  strip, each table heading, each heat map info box's controls (theme.js);
+  `report_ui_.strip.copy_entry_make()` every copy pulldown, its lines as
+  text or as an SVG image; `report_ui_.strip.slider_text()` every
+  slider's cells, the menu's scale and the call graph's cutoff;
+  `strip_slider_drag()` every press and drag on a slider's cells, each
+  stop the pointer reaches the one whose cell edge lies nearest it, the
+  edges measured at the press, handed to the entry's `on_stop_choose`.
 - `report_ui_.resize_settle_register(callback)` - every window resize
   settle: the one animation frame per rendering update,
   runs `layout_refresh`, then each callback in registration order; a scale
@@ -454,13 +535,14 @@ The single function/check owning each concern - never bypass or duplicate:
   column title drop, which moves a counters list's line (theme.js).
 - `report_preferences_.now()` - every read of the per-page counters lists
   (`counter_lists`, each line calls, callers, callees or a counter, in
-  order, shown or not), the heat scale, the heat sort and the call graph
-  sort preferences;
-  `preference_choose()` on the top page the one writer, through
-  `counter_line_toggle()`, `counter_line_move()` (a view's title drop
-  posting the `counter_line_move` message up), the heat choices and the
-  call graph sort choice,
-  relayed down on every message, a view taking it through
+  order, shown or not), the heat scale, the heat sort, the call graph sort
+  and the call graph cutoff preferences; `preference_choose()` on the top
+  page the one writer, through `counter_line_toggle()`,
+  `counter_line_move()` (a view's title drop posting the
+  `counter_line_move` message up), the heat choices, the call graph sort
+  choice and `call_graph_cutoff_choose()` (the call graph's cutoff slider
+  posting the `call_graph_cutoff_choose` message up), relayed down on
+  every message, a view taking it through
   `report_preferences_.relay_handler()` (preferences.js).
 - `report_preferences_.counter_readers()` - every counter's reader for the
   database and the heat map, a recorded counter's value by its index, a
@@ -482,10 +564,12 @@ The single function/check owning each concern - never bypass or duplicate:
   `perf2html.sh --regenerate --verbose 2> tmp/perf2html\.md`
   from `tests/perf2html/`. Use `--keep-artifacts` to flush artifact cache and
   then keep the new ones.
-- The project root is `tests/perf2html/` in a curl checkout, on the maintainer's
-  machine `~/curl/tests/perf2html`, a link to `~/perf2html` holding the same
-  files. Every script runs from the project root, as the scripts find curl two
-  directories up, which from `~/perf2html` is not curl.
+- The project root is `tests/perf2html/` in a curl checkout, on the
+  maintainer's machine `~/perf2html`, the workspace root, linked into the
+  curl checkout `~/curl` as `~/curl/tests/perf2html`. Sourcing `utility.sh`
+  finds curl two directories above the project root or beside it
+  (`PERF2HTML_REPO_ROOT`), so a script runs through either path; every
+  `scripts/*.sh` launcher runs from the project root (`project_root_check`).
 - Mandated workflow: use `--keep-artifacts` and `--regenerate` whenever
   possible, every run of `perf2html_batch.sh` or
   `test_expected_behavior.sh` after the first measuring run, unless the
@@ -500,15 +584,15 @@ The single function/check owning each concern - never bypass or duplicate:
   dir and no log of its own; a failure's log tail still reaches stderr.
   Debug mode keeps the artifacts in `perf2html_temporary_artifacts/` for a
   later `--regenerate` and for debugging.
-- Copy `tests/perf2html/screenshots/` to `tests/perf2html/screenshots-gold/` once
-  its shots are right, then iterate with
+- Copy `tests/perf2html/screenshots/` to `tests/perf2html/screenshots-gold/`
+  once its shots are right, then iterate with
   `scripts/test_expected_behavior.sh --regenerate`. That rebuilds every page
   from the same recordings, so the recorded time, the raw data archive name,
-  the timings and the counters the shots show match the gold, and it
-  compares each shot with its gold twin, writing a `compare_` image of each
-  difference into `tests/perf2html/screenshots-diff/`; a difference is then
-  the edit's own. Only `--regenerate` compares: a measuring run changes what
-  the shots show, so after one copy its shots to `screenshots-gold/` again.
+  the timings and the counters the shots show match the gold, and it compares
+  each shot with its gold twin, writing a `compare_` image of each difference
+  into `tests/perf2html/screenshots-diff/`; a difference is then the edit's
+  own. Only `--regenerate` compares: a measuring run changes what the shots
+  show, so after one copy its shots to `screenshots-gold/` again.
 - A shot differing from its gold twin is not a failure of the test suite but
   an outcome the development process requires: a measuring run changes the
   values the shots show and an edit changes what its pages draw.
@@ -530,7 +614,8 @@ The single function/check owning each concern - never bypass or duplicate:
 - The full run is `test_all.sh` and only run that when asked to "test".
 - No testing of `--txz` is allowed outside `scripts/publish.sh`. `publish.sh`
   takes no such argument: it always passes `--txz` to the script that makes the
-  report it publishes, unconditionally, then compares the archive to the report.
+  report it publishes, unconditionally, then compares the archive to the
+  report.
 - `scripts/publish.sh` is not part of normal testing and runs only when the
   maintainer decides to use it. No other script calls it, no test and no agent
   runs it, and no source stage touches it, so that it holds up no run.
@@ -568,14 +653,13 @@ The single function/check owning each concern - never bypass or duplicate:
   relative invocation silently.
 - buffering command stdout and stderr with `mktemp` is banned. Use of `mktemp`
   is to be by request only. The two door policy as follows. Door one is
-  non-debug mode (Working agreement) with no `--artifacts`: each `perf2html.sh` and
-  `perf2html_diff.sh` makes its own "TMP" directory with `mktemp -d`, which
-  its `trap ... EXIT` deletes at every exit; the batch makes none. Door two
-  is the diff's `.txz` archive extraction, deleted by the same trap in either
-  mode. The design goal is that
-  perf2html users get /tmp used as normal and cleaned up after too. And
-  development work on perf2html uses a local artifact dir that can be
-  debugged.
+  non-debug mode (Working agreement) with no `--artifacts`: each `perf2html.sh`
+  and `perf2html_diff.sh` makes its own "TMP" directory with `mktemp -d`, which
+  its `trap ... EXIT` deletes at every exit; the batch makes none. Door two is
+  the diff's `.txz` archive extraction, deleted by the same trap in either
+  mode. The design goal is that perf2html users get /tmp used as normal and
+  cleaned up after too. And development work on perf2html uses a local artifact
+  dir that can be debugged.
 - No news is good news: nothing prints a success line unless `--verbose`, and
   when it does print, a success line goes to stdout and failures go to stderr -
   not the other way round.

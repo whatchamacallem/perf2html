@@ -6,10 +6,45 @@ from __future__ import annotations
 
 import html.entities, re
 
-# Holds an error report in the browser's log, its first line of text a group.
-BROWSER_LOG_ERROR_REPORT_PATTERN = re.compile(
-    r'"perf2html error\n\n(?:[a-z]+ +[^\n]*\n)+\n([^\n]*)'
+# Holds an error report's text, the first line of its message a group.
+ERROR_REPORT_PATTERN_TEXT = (
+    r"perf2html error\n\n(?:[a-z]+ +[^\n]*\n)+\n([^\n]*)"
 )
+
+# The page each tab opens on, which a frame shows before its own page.
+BLANK_PAGE_URL = "about:blank"
+
+# The descriptors the browser reads commands from and writes replies to.
+BROWSER_PIPE_COMMAND_FD = 3
+BROWSER_PIPE_MESSAGE_END = b"\0"
+BROWSER_PIPE_READ_BYTES = 1 << 20
+BROWSER_PIPE_REPLY_FD = 4
+# Lies above every descriptor a child holds while its pipe ends move.
+BROWSER_PIPE_SPARE_FD = 10
+
+# Returns a frame's left, top and width on the page inside its scaled border.
+CLICK_FRAME_BOX_FUNCTION = (
+    "function () { const box = this.getBoundingClientRect();"
+    " const scale = box.width / this.offsetWidth;"
+    " return [box.left + scale * this.clientLeft,"
+    " box.top + scale * this.clientTop, scale * this.clientWidth]; }"
+)
+CLICK_HASH_STATE = "location.hash"
+CLICK_MENU_FRAME_NAME = "menu"
+CLICK_PRESS_SHARE_MIDDLE = 0.5
+# Returns a press point a share across the element, the frame width, a hit.
+CLICK_POINT_FUNCTION = (
+    "function (press_share) { const box = this.getBoundingClientRect();"
+    " const x = box.left + press_share * box.width;"
+    " const y = box.top + box.height / 2;"
+    " return [x, y, innerWidth,"
+    " this.contains(document.elementFromPoint(x, y))]; }"
+)
+CLICK_REVEAL_FUNCTION = (
+    "function () {"
+    " this.scrollIntoView({block: 'center', inline: 'nearest'}); }"
+)
+CLICK_VIEW_FRAME_NAME = "view"
 
 COMMENT_BLOCK_MAX_LINES = 1
 COMMENT_FIRST_WORD_REPLACEMENTS = {"Answers": "Returns"}
@@ -26,6 +61,9 @@ COMPARE_LABEL_FONT_PX = 20
 COMPARE_LISTED_REGION_COUNT = 4
 COMPARE_PANELS_MAX_HEIGHT_SHARE = 2
 COMPARE_REGION_TILE_PX = 16
+
+# Holds an error report a page writes to its console, its first line a group.
+CONSOLE_ERROR_REPORT_PATTERN = re.compile(ERROR_REPORT_PATTERN_TEXT)
 
 DEBUG_SCRIPT_ASSET: tuple[str, ...] = ("scripts/debug.js",)
 
@@ -45,7 +83,10 @@ ESCAPE_NAMED_ENTITY_PATTERN = "|".join(
 )
 ESCAPE_PREFIX_PATTERN = r"(?<!\\)(?:\\\\)*"
 
-FAULT_TAIL_CHARS = 400
+# Returns whether a frame's element has a layout box, which a hidden one lacks.
+FRAME_LAID_OUT_FUNCTION = (
+    "function () { return this.getClientRects().length > 0; }"
+)
 
 HEAT_MAP_PAGE_TITLE = ""
 
@@ -81,6 +122,34 @@ MENU_LOGO_LINKS: dict[str, str] = {
     "?debug=1": 'href="#view=settings" tabindex="-1"',
 }
 
+# Pages checked for an error report load in this many tabs at once.
+PAGE_CHECK_TABS_AT_ONCE = 16
+# The binding a page calls once drawn, which DevTools reports.
+PAGE_DRAWN_BINDING_NAME = "screenshot_page_drawn"
+# Calls the binding after the load, the renders logged since a time, a paint.
+PAGE_DRAWN_FUNCTION = (
+    "async function (after_paint, binding_name, binding_payload,"
+    " since_milliseconds, render_count) {"
+    " const navigation_render_count = () =>"
+    " window.report_load_log_.newest_entries(Infinity).filter("
+    "(log_entry) => log_entry[0] === 'str_load_log_render_entry'"
+    " && log_entry[1] >= since_milliseconds"
+    " && log_entry[3].texts.cause === 'navigation').length;"
+    " while (document.readyState !== 'complete'"
+    " || document.title === 'speedscope'"
+    " || (window.report_load_log_ !== undefined && !window.is_framed_"
+    " && navigation_render_count() < render_count))"
+    " await after_paint();"
+    " await document.fonts.ready;"
+    " await after_paint();"
+    " window[binding_name](binding_payload); }"
+)
+# Resolves in a task after the paint of the next animation frame.
+PAINT_WAIT_FUNCTION = (
+    "() => new Promise((resolve) =>"
+    " requestAnimationFrame(() => setTimeout(resolve)))"
+)
+
 REPORT_CHECKSUM_COMMAND = (
     "find . -type f ! -name MANIFEST.txt -print"
     " | LC_ALL=C sort | LC_ALL=C tr '\\n' '\\0'"
@@ -93,32 +162,33 @@ SCREENSHOT_DIR_NAME = "screenshots"
 SCREENSHOT_LABEL_URL_PARAM = "screenshot"
 SCREENSHOT_LABEL_URL_VALUE = "1"
 SCREENSHOT_MENU_URL_PARAM = "screenshot-menu"
-SCREENSHOT_RENDER_BUDGET_MS = 8000
 SCREENSHOT_SCRATCH_DIR_PATH = "build/screenshots_scratch"
 SCREENSHOT_TOGGLE_DARK_URL_PARAM = "toggle-dark"
-# The default dark mode first, then that toggled to light.
+# The modes the views take in turn, the default dark mode first.
 SCREENSHOT_TOGGLE_DARK_VALUES: tuple[str, ...] = ("0", "1")
-SCREENSHOT_TRACE_FILE_PATH = "build/screenshots_trace.json"
-SCREENSHOT_VIEWPORTS: tuple[tuple[str, int, int], ...] = (
-    ("720p", 1280, 720),
-    ("4k", 3840, 2160),
-)
-SCREENSHOT_VIEW_CHECK_FILE_PATH = "build/screenshots_view_check.png"
+SCREENSHOT_VIEWPORTS: tuple[tuple[str, int, int], ...] = (("720p", 1280, 720),)
 
 SHOOT_DIFF_REPORT = 1 << 0
-# Shoots the index page of the finished run at 4k, once.
+# Shoots the index page of the finished run at the last resolution, once.
 SHOOT_INDEX_PAGE = 1 << 3
-# Shoots 720p dark, once.
+# Marks a view whose address makes light the default, so a toggle shows dark.
+SHOOT_LIGHT_DEFAULT = 1 << 6
+# Shoots 720p alone, not 4k too.
 SHOOT_ONE_VARIANT = 1 << 1
 SHOOT_REGULAR_REPORT = 1 << 2
+# Leaves untimed the flame graph, a large heat map file or test, settings.
+SHOOT_UNTIMED = 1 << 4
 # Lists the address parts of each view a test opens, by the report offering it.
 SHOOT_TEST_VIEW_PARTS: dict[int, tuple[str, ...]] = {
-    SHOOT_DIFF_REPORT: ("view=database", "view=heat-map&file={first_file}"),
+    SHOOT_DIFF_REPORT: (
+        "view=database",
+        "view=heat-map&file={first_file}&functions=0",
+    ),
     SHOOT_REGULAR_REPORT: (
         "view=call-graph",
         "view=database",
         "view=flame-graph&localProfilePath=profile",
-        "view=heat-map&file={first_file}",
+        "view=heat-map&file={first_file}&functions=0",
     ),
 }
 
@@ -199,6 +269,14 @@ SOURCE_SCAN_COMMENT_MARKUP = (
     "*",
 )
 
+# Resolves after a paint once the state read differs, its handlers then run.
+STATE_CHANGE_FUNCTION = (
+    "async function (after_paint, state_read, state_before) {"
+    " while (JSON.stringify(state_read()) === state_before)"
+    " await after_paint();"
+    " await after_paint(); }"
+)
+
 TEST_BELOW_MAIN_FUNCTION_NAME = "(below main)"
 
 TEST_CALL_GRAPH_BRANCH_FIELDS = 3
@@ -210,7 +288,8 @@ TEST_CALL_GRAPH_EDGE_CALLER_FIELD = 0
 TEST_CALL_GRAPH_EDGE_FIELDS = 5
 TEST_CALL_GRAPH_EDGE_FUNCTION_FIELDS = (0, 1)
 TEST_CALL_GRAPH_EDGE_INCLUSIVE_FIELD = 4
-TEST_CALL_GRAPH_FUNCTION_FIELDS = 2
+TEST_CALL_GRAPH_FUNCTION_FIELDS = 3
+TEST_CALL_GRAPH_FUNCTION_LINKED_FIELD = 2
 TEST_CALL_GRAPH_FUNCTION_NAME_FIELD = 0
 TEST_CALL_GRAPH_FUNCTION_SELF_FIELD = 1
 TEST_CALL_GRAPH_MODEL_KEYS = (
@@ -275,9 +354,9 @@ TEST_FUNCTION_DATA_DOCUMENT = {
     "counters": ["Ir", "Dr"],
     "images": ["/opt/data/libdata.so", "/opt/other/libother.so"],
     "functions": [
-        ["data_leaf", 0, 0, 19, [3, 0], [1, 2], []],
-        ["data_start", 0, 0, 9, [2, 1], [], [0, 2, 2, 1]],
-        ["other_leaf", 1, 1, 4, [2, 2], [1, 1], []],
+        ["data_leaf", 0, 0, 20, [3, 0], [1, 2], []],
+        ["data_start", 0, 0, 10, [2, 1], [], [0, 2, 2, 1]],
+        ["other_leaf", 1, 1, 5, [2, 2], [1, 1], []],
     ],
 }
 TEST_FUNCTION_DATA_DOCUMENT_KEYS = ("counters", "functions", "images")
@@ -501,11 +580,11 @@ TEST_FUNCTION_LINE_RECORDING = (
 TEST_FUNCTION_LINE_RECORDING_NAME = "function_line.callgrind.out"
 TEST_FUNCTION_LINES = {
     "blocked_function": ("lib/lines.c", 40),
-    "inlined_function": ("lib/lines.c", 49),
+    "inlined_function": ("lib/lines.c", 50),
     "line_one_function": ("lib/first.c", 1),
     "one_line_function": ("lib/lines.c", 39),
-    "start_function": ("lib/lines.c", 19),
-    "two_line_function": ("lib/lines.c", 29),
+    "start_function": ("lib/lines.c", 20),
+    "two_line_function": ("lib/lines.c", 30),
 }
 
 TEST_HEAT_MAP_CALL_ROW_COUNT_FIELD = 4
@@ -534,10 +613,11 @@ TEST_OVERVIEW_RATIO_LARGEST_ERROR = 0.00000050001
 TEST_OVERVIEW_RATIO_PATTERN = r"(?:\d+\.\d{6})?"
 TEST_OVERVIEW_RAW_DATA_MARKUP = '<div id="overview-raw-data-">'
 TEST_OVERVIEW_ROW_FIELD_COUNT = 6
-TEST_OVERVIEW_TESTS_HEADING_MARKUP = (
-    '<div id="overview-tests-heading-" class="page-heading-"></div>'
+TEST_OVERVIEW_HEADING_MARKUP = (
+    '<div id="overview-tests-heading-" class="page-heading-"'
+    ' data-download-file-name-="overview.svg"></div>'
 )
-TEST_OVERVIEW_TESTS_TABLE_DATA_ID = "overview-tests-table-"
+TEST_OVERVIEW_TABLE_DATA_ID = "overview-tests-table-"
 TEST_OVERVIEW_TIME_LARGEST_ERROR = 0.0050001
 TEST_OVERVIEW_TIME_UNIT_SECONDS = {
     "s": 1.0,
@@ -609,7 +689,7 @@ TEST_SOURCE_DATABASE_TEST_KEYS = {
 
 TEST_TIMER_ARTIFACTS_PREFIX = "timer-artifacts-"
 
-TEST_TIMING_DOCUMENT_NAME = "0_timing_data.json"
+TEST_TIMING_DOCUMENT_NAME = "0_test_data.json"
 TEST_TIMING_VALUE_NAMES = (
     "duty_cycle",
     "instructions_per_cycle",
@@ -620,18 +700,24 @@ TEST_TIMING_VALUE_NAMES = (
 
 TEST_UNKNOWN_IMAGE_NAMES = ("???", "(unknown image)")
 
+TIMING_CLICK_LIMIT_MS = 300
+TIMING_CLICK_PHASE_NAME = "click"
 TIMING_FILE_LINES_MAX = 3
+TIMING_FILE_NAME = "timing.txt"
+# A load counts from a commit to its load event or its last phase, the later.
 TIMING_LOAD_PHASE_NAME = "load"
 TIMING_MICROSECONDS_PER_MILLISECOND = 1000
+# Bounds a golden page load and its phases, clicks being bound apart.
+TIMING_PAGE_LOAD_LIMIT_MS = 200
 TIMING_SCRIPT_PHASE_NAME = "script"
 
 TRACE_BEGIN_TYPE = "B"
 TRACE_CATEGORIES = "devtools.timeline"
-# navigationStart is stamped in virtual time, so loads count from the commit.
+# Marks a page's commit, where its load is counted from.
 TRACE_COMMIT_NAME = "CommitLoad"
 TRACE_COMPLETE_TYPE = "X"
+TRACE_DISPATCH_NAME = "EventDispatch"
 TRACE_END_TYPE = "E"
-TRACE_FORMAT = "json"
 TRACE_FUNCTION_CALL_NAME = "FunctionCall"
 TRACE_LOAD_NAME = "MarkLoad"
 TRACE_MARK_NAMES: tuple[str, ...] = (TRACE_COMMIT_NAME, TRACE_LOAD_NAME)
@@ -645,6 +731,9 @@ TRACE_PHASES: dict[str, tuple[str, str]] = {
     "Paint": ("paint", "data"),
     "UpdateLayoutTree": ("style", "beginData"),
 }
+# The dispatches a press starts with, its click timed from the first.
+TRACE_PRESS_EVENT_TYPES: tuple[str, ...] = ("pointerdown", "mousedown")
+TRACE_READ_BYTES = 1 << 22
 TRACE_SLICE_TYPES: tuple[str, ...] = (
     TRACE_BEGIN_TYPE,
     TRACE_COMPLETE_TYPE,
@@ -654,3 +743,6 @@ TRACE_SLICE_TYPES: tuple[str, ...] = (
 VERBOSE_RAW_LEVEL = 2
 
 VIEW_CHECK_ERROR_HASH = "#view=database"
+
+# Names the tool's waiting scripts in a trace, which times no page by them.
+WAIT_SCRIPT_URL = "screenshot_wait.js"

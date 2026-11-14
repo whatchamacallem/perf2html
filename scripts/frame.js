@@ -8,6 +8,9 @@ window.try_catch_handler_(function () {
   const DARK_MODE_FRAME_QUERY_KEY_NAME = settings_(
     "DARK_MODE_FRAME_QUERY_KEY_NAME",
   );
+  const DARK_MODE_TOGGLE_QUERY_KEY_NAME = settings_(
+    "DARK_MODE_TOGGLE_QUERY_KEY_NAME",
+  );
   const REGULAR_REPORT_VIEW_KEYS = settings_("REGULAR_REPORT_VIEW_KEYS");
   const SCREENSHOT_MENU_KEY_NUMBER = settings_("SCREENSHOT_MENU_KEY_NUMBER");
   const SETTINGS_DEBUG_ENABLED = settings_("SETTINGS_DEBUG_ENABLED");
@@ -49,6 +52,7 @@ window.try_catch_handler_(function () {
 
   let current_address = null;
   let focused_path_entries = [];
+  let function_location = null;
   let load_log_shown_count = null;
   let loaded_view_href = "";
 
@@ -58,6 +62,10 @@ window.try_catch_handler_(function () {
   // Returns the focused path entries the call graph last sent, root first.
   function focused_path_now() {
     return focused_path_entries;
+  }
+  // Returns the function location the heat map last sent, null before one.
+  function function_location_now() {
+    return function_location;
   }
   // Returns whether this report holds a view's page, a diff holding fewer.
   function view_has_page(view_key) {
@@ -90,8 +98,16 @@ window.try_catch_handler_(function () {
         parsed_address.setting,
       );
   }
+  // Drops the dark mode toggle query, applied once at load, as a user moves.
+  function toggle_query_drop() {
+    const shown_url = new URL(location.href);
+    if (!shown_url.searchParams.has(DARK_MODE_TOGGLE_QUERY_KEY_NAME)) return;
+    shown_url.searchParams.delete(DARK_MODE_TOGGLE_QUERY_KEY_NAME);
+    history.replaceState(history.state, "", shown_url.href);
+  }
   // Loads the top page again under the debug query, off dropping the values.
   function settings_debug_load(debug_enabled) {
+    toggle_query_drop();
     const loaded_url = new URL(location.href);
     loaded_url.searchParams.set(
       SETTINGS_DEBUG_QUERY_KEY_NAME,
@@ -106,6 +122,7 @@ window.try_catch_handler_(function () {
   }
   // Clears any settings debug query and values, loading the top page again.
   function settings_debug_clear() {
+    toggle_query_drop();
     const cleared_url = new URL(location.href);
     if (
       !cleared_url.searchParams.has(SETTINGS_DEBUG_QUERY_KEY_NAME) &&
@@ -128,14 +145,19 @@ window.try_catch_handler_(function () {
         Boolean(window.report_ui_.dark_mode_enabled_now_()),
       ),
     });
-    view_frame.contentWindow.location.replace(
-      page_href + "?" + mode_query + location.hash,
-    );
+    const frame_page_href = page_href + "?" + mode_query;
+    view_frame.contentWindow.location.replace(frame_page_href + location.hash);
     loaded_view_href = view_href;
     focused_path_entries = [];
     // The new page claims the top page's sideways scroll at its first draw.
     window.report_ui_.page_scroll.claim_set("frame", false);
   }
+  // Shows the address a hash change brings, the toggle query dropped first.
+  function hash_change_show() {
+    toggle_query_drop();
+    view_show();
+  }
+  // Shows the address the page's hash holds.
   function view_show() {
     const shown_address = window.report_ui_.address.of_hash(location.hash);
     address_check(shown_address);
@@ -174,7 +196,9 @@ window.try_catch_handler_(function () {
     page_scroll_post();
     if (home_had_focus) view_frame.focus();
   }
+  // Shows a requested hash.
   function address_request(requested_hash) {
+    toggle_query_drop();
     if (requested_hash !== (location.hash || "#")) {
       location.hash = requested_hash;
       return;
@@ -257,12 +281,19 @@ window.try_catch_handler_(function () {
     focused_path_entries = path_entries;
     window.report_menu_.menu_render();
   }
+  // Holds the function location the view sent, then draws the menu with it.
+  function function_location_set(sent_location) {
+    function_location = sent_location;
+    window.report_menu_.menu_render();
+  }
   function view_message_handler(message_event) {
     const message_data = message_event.data;
     if (message_event.source !== view_frame.contentWindow || !message_data)
       return;
     const message_tag = message_data.report_ui;
     if (message_tag === "address_request") address_request(message_data.hash);
+    else if (message_tag === "call_graph_cutoff_choose")
+      window.report_menu_.call_graph_cutoff_choose(message_data.cutoff_root);
     else if (message_tag === "counter_line_move")
       window.report_menu_.counter_line_move(
         message_data.list_key,
@@ -273,6 +304,8 @@ window.try_catch_handler_(function () {
     else if (message_tag === "dark_mode_request") view_post("dark_mode_show");
     else if (message_tag === "focused_path_set")
       focused_path_set(message_data.path_entries);
+    else if (message_tag === "function_location_set")
+      function_location_set(message_data.function_location);
     else if (message_tag === "heat_sort_toggle")
       window.report_menu_.heat_sort_toggle();
     else if (message_tag === "load_log_history_set")
@@ -326,7 +359,7 @@ window.try_catch_handler_(function () {
     load_log_history();
     window.addEventListener(
       "hashchange",
-      window.try_catch_handler_(view_show),
+      window.try_catch_handler_(hash_change_show),
     );
     window.addEventListener(
       "message",
@@ -343,6 +376,7 @@ window.try_catch_handler_(function () {
     address_request,
     counter_names,
     focused_path_now,
+    function_location_now,
     load_log_history,
     menu_entry_number_now,
     settings_debug_clear,

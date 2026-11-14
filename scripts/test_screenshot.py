@@ -5,15 +5,41 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from types import TracebackType
 from typing import Any, NamedTuple
 
-import argparse, bisect, json, os, re, shutil, subprocess, sys, urllib.parse
+import argparse, base64, bisect, contextlib, fcntl, json, os, re, shutil
+import signal, subprocess, sys, urllib.parse
 
 import PIL.Image, PIL.ImageChops, PIL.ImageDraw, PIL.ImageEnhance
 import PIL.ImageFont
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_settings
+
+
+class ClickStep(NamedTuple):
+    # What the timing calls the click.
+    label: str
+    # The frame pressed in, the menu's top page or the view.
+    frame_name: str
+    # Selects the element pressed, the first match.
+    element_selector: str
+    # The frame the state expression runs in.
+    state_frame_name: str
+    # Evaluates to a value the click must change.
+    state_expression: str
+    # How far across the element the press lands, as a share of its width.
+    press_share: float = test_settings.CLICK_PRESS_SHARE_MIDDLE
+
+
+class ClickSet(NamedTuple):
+    shot_flags: int
+    # What the timings of the set's clicks call the set.
+    set_name: str
+    view_hash: str
+    click_steps: tuple[ClickStep, ...]
 
 
 class PageTiming(NamedTuple):
@@ -32,6 +58,8 @@ class ShotVariant(NamedTuple):
     width_px: int
     height_px: int
     toggle_dark_value: str
+    # The dark mode the shot shows, as its file name says it.
+    mode_name: str
 
 
 class ScreenshotSet(NamedTuple):
@@ -42,13 +70,51 @@ class ScreenshotSet(NamedTuple):
     view_name: str
     subview_name: str
     absent_files: tuple[str, ...]
+    # First line of the error report the page draws, empty for none.
+    error_message: str
 
-    def shot_variants(self) -> tuple[ShotVariant, ...]:
+    # Returns the view's shots in one dark mode, the views with one in turn.
+    def shot_variants(self, view_index: int) -> tuple[ShotVariant, ...]:
         if self.shot_flags & test_settings.SHOOT_INDEX_PAGE:
             return _SHOT_INDEX_PAGE
-        if self.shot_flags & test_settings.SHOOT_ONE_VARIANT:
-            return _SHOT_ONE_VARIANT
-        return _SHOT_REPORT_PERMUTATIONS
+        shown_index = 0
+        if self.takes_turn():
+            shown_index = sum(
+                earlier_view.takes_turn()
+                for earlier_view in _VIEWS[: view_index - 1]
+            ) % len(test_settings.SCREENSHOT_TOGGLE_DARK_VALUES)
+        toggle_dark_values = test_settings.SCREENSHOT_TOGGLE_DARK_VALUES
+        if self.shot_flags & test_settings.SHOOT_LIGHT_DEFAULT:
+            toggle_dark_values = toggle_dark_values[::-1]
+        viewports = (
+            test_settings.SCREENSHOT_VIEWPORTS[:1]
+            if self.shot_flags & test_settings.SHOOT_ONE_VARIANT
+            else test_settings.SCREENSHOT_VIEWPORTS
+        )
+        return tuple(
+            ShotVariant(
+                *viewport,
+                toggle_dark_values[shown_index],
+                test_settings.SHOT_MODE_NAME_PARTS[
+                    test_settings.SCREENSHOT_TOGGLE_DARK_VALUES[shown_index]
+                ],
+            )
+            for viewport in viewports
+        )
+
+    # Returns whether the view writes images, of error pages the first alone.
+    def is_pictured(self, view_index: int) -> bool:
+        return not self.error_message or not any(
+            earlier_view.error_message
+            for earlier_view in _VIEWS[: view_index - 1]
+        )
+
+    # Returns whether the view takes a turn, not being an error or index page.
+    def takes_turn(self) -> bool:
+        return not (
+            self.error_message
+            or self.shot_flags & test_settings.SHOOT_INDEX_PAGE
+        )
 
 
 # The texts of a kept timing, as the index table and the verbose line show.
@@ -57,6 +123,15 @@ class TimingRow(NamedTuple):
     page_file: str
     phase_label: str
     shot: str
+
+    # Returns the limit of the timing, a click's or a golden page load's.
+    def limit_ms(self) -> int:
+        if (
+            self.phase_label.split()[0]
+            == test_settings.TIMING_CLICK_PHASE_NAME
+        ):
+            return test_settings.TIMING_CLICK_LIMIT_MS
+        return test_settings.TIMING_PAGE_LOAD_LIMIT_MS
 
     # Returns the line the verbose output prints for the timing.
     def verbose_line(self) -> str:
@@ -69,39 +144,48 @@ class TimingRow(NamedTuple):
 _SHOOT_BOTH_REPORTS = (
     test_settings.SHOOT_DIFF_REPORT | test_settings.SHOOT_REGULAR_REPORT
 )
+# Shoots a page once, in the regular report at 720p.
+_SHOOT_REGULAR_ONCE = (
+    test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_ONE_VARIANT
+)
 
 _SHOT_INDEX_PAGE: tuple[ShotVariant, ...] = (
     ShotVariant(
-        *test_settings.SCREENSHOT_VIEWPORTS[1],
+        *test_settings.SCREENSHOT_VIEWPORTS[-1],
         test_settings.SCREENSHOT_TOGGLE_DARK_VALUES[0],
+        test_settings.SHOT_MODE_NAME_PARTS[
+            test_settings.SCREENSHOT_TOGGLE_DARK_VALUES[0]
+        ],
     ),
-)
-_SHOT_ONE_VARIANT: tuple[ShotVariant, ...] = (
-    ShotVariant(
-        *test_settings.SCREENSHOT_VIEWPORTS[0],
-        test_settings.SCREENSHOT_TOGGLE_DARK_VALUES[0],
-    ),
-)
-_SHOT_REPORT_PERMUTATIONS: tuple[ShotVariant, ...] = tuple(
-    ShotVariant(*viewport, toggle_dark_value)
-    for viewport in test_settings.SCREENSHOT_VIEWPORTS
-    for toggle_dark_value in test_settings.SCREENSHOT_TOGGLE_DARK_VALUES
 )
 
 _VIEWS: tuple[ScreenshotSet, ...] = (
     ScreenshotSet(
-        test_settings.SHOOT_REGULAR_REPORT,
+        test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_UNTIMED,
         "#test=urlparser&view=flame-graph&localProfilePath=profile",
         "",
         "flame_graph",
         "profile",
         (),
+        "",
     ),
     ScreenshotSet(
-        test_settings.SHOOT_DIFF_REPORT, "", "2", "overview", "home", ()
+        test_settings.SHOOT_DIFF_REPORT,
+        "",
+        "2",
+        "overview",
+        "home",
+        (),
+        "",
     ),
     ScreenshotSet(
-        test_settings.SHOOT_REGULAR_REPORT, "", "", "overview", "home", ()
+        _SHOOT_REGULAR_ONCE,
+        "",
+        "",
+        "overview",
+        "home",
+        (),
+        "",
     ),
     ScreenshotSet(
         test_settings.SHOOT_REGULAR_REPORT,
@@ -110,89 +194,55 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         "database",
         "urlparser",
         (),
-    ),
-    ScreenshotSet(
-        test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_ONE_VARIANT,
-        "#test=urlparser&view=heat-map",
         "",
-        "error",
-        "no_file_or_function_heat_map",
-        (),
     ),
     ScreenshotSet(
-        _SHOOT_BOTH_REPORTS,
-        "#test=urlparser&view=heat-map"
-        "&file=sysdeps/x86_64/multiarch/memchr-avx2.S",
+        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_UNTIMED,
+        "#test=wsrecv&view=heat-map&file=libcrypto.so.3/(unknown)&functions=0",
         "",
         "heat_map",
         "file",
         (),
+        "",
     ),
     ScreenshotSet(
         _SHOOT_BOTH_REPORTS,
         "#test=urlparser&view=heat-map"
-        "&file=sysdeps/x86_64/multiarch/memchr-avx2.S&line=82",
+        "&file=string/bits/string_fortified.h&line=59&functions=0",
         "",
         "heat_map",
         "line",
         (),
+        "",
     ),
     ScreenshotSet(
-        _SHOOT_BOTH_REPORTS,
-        "#test=urlparser&view=heat-map&function=parseurl_and_replace",
+        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_UNTIMED,
+        "#test=wsrecv&view=heat-map"
+        "&file=lib/curlx/timeval.c&line=52&functions=1",
+        "",
+        "heat_map",
+        "line_functions",
+        (),
+        "",
+    ),
+    ScreenshotSet(
+        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_UNTIMED,
+        "#test=urlparser&view=heat-map&function=formatf&functions=1",
         "",
         "heat_map",
         "function",
         (),
+        "",
     ),
     ScreenshotSet(
-        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_ONE_VARIANT,
-        "#view=settings",
+        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_UNTIMED,
+        "#test=wsrecv&view=heat-map&function=cf_socket_ctx_init.isra.0"
+        "&functions=1",
         "",
-        "settings",
-        "list",
+        "heat_map",
+        "function_all_parts",
         (),
-    ),
-    ScreenshotSet(
-        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_ONE_VARIANT,
-        "#view=settings&setting=DARK_MODE_ENABLED_DEFAULT"
-        "&setting-values=eyJEQVJLX01PREVfRU5BQkxFRF9ERUZBVUxUIjpmYWxzZX0%3D",
         "",
-        "settings",
-        "applied",
-        (),
-    ),
-    ScreenshotSet(
-        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_ONE_VARIANT,
-        "#test=urlparser&view=heat-map&function=no_such_function",
-        "",
-        "error",
-        "bad_function",
-        (),
-    ),
-    ScreenshotSet(
-        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_ONE_VARIANT,
-        "",
-        "",
-        "error",
-        "report_incomplete",
-        test_settings.DEBUG_SCRIPT_ASSET,
-    ),
-    ScreenshotSet(
-        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_ONE_VARIANT,
-        "",
-        "",
-        "error",
-        "stylesheet_missing",
-        test_settings.REPORT_THEME_STYLESHEET_ASSET,
-    ),
-    ScreenshotSet(
-        test_settings.SHOOT_DIFF_REPORT | test_settings.SHOOT_INDEX_PAGE,
-        "",
-        "",
-        "index",
-        "page",
-        (),
     ),
     ScreenshotSet(
         test_settings.SHOOT_REGULAR_REPORT,
@@ -203,41 +253,19 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         "database",
         "urlparser_counters_four",
         (),
-    ),
-    ScreenshotSet(
-        test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_ONE_VARIANT,
-        "#view=heat-map",
         "",
-        "error",
-        "no_test_heat_map",
-        (),
     ),
     ScreenshotSet(
         _SHOOT_BOTH_REPORTS,
         "#test=urlparser&view=heat-map"
-        "&file=sysdeps/x86_64/multiarch/memchr-avx2.S&line=82"
+        "&file=string/bits/string_fortified.h&line=59&functions=0"
         "&setting-values=eyJIRUFUX01BUF9DT1VOVEVSX0xJU1RfREVGQVVMVF9TSE9X"
         "Tl9OQU1FUyI6WyJjYWxscyIsIklyIiwiTDFtIiwiTExtIiwiQm0iXX0%3D",
         "",
         "heat_map",
         "line_counters_four",
         (),
-    ),
-    ScreenshotSet(
-        test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_ONE_VARIANT,
-        "#view=database",
         "",
-        "error",
-        "no_test_database",
-        (),
-    ),
-    ScreenshotSet(
-        test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_ONE_VARIANT,
-        "#view=flame-graph",
-        "",
-        "error",
-        "no_test_flame_graph",
-        (),
     ),
     ScreenshotSet(
         test_settings.SHOOT_REGULAR_REPORT,
@@ -246,61 +274,1279 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         "call_graph",
         "urlparser",
         (),
+        "",
     ),
     ScreenshotSet(
-        test_settings.SHOOT_REGULAR_REPORT | test_settings.SHOOT_ONE_VARIANT,
-        "#view=call-graph",
+        test_settings.SHOOT_DIFF_REPORT,
+        "#test=urlparser&view=database",
+        "",
+        "database",
+        "urlparser",
+        (),
+        "",
+    ),
+    ScreenshotSet(
+        test_settings.SHOOT_REGULAR_REPORT
+        | test_settings.SHOOT_ONE_VARIANT
+        | test_settings.SHOOT_UNTIMED
+        | test_settings.SHOOT_LIGHT_DEFAULT,
+        "#view=settings&setting=DARK_MODE_ENABLED_DEFAULT"
+        "&setting-values=eyJEQVJLX01PREVfRU5BQkxFRF9ERUZBVUxUIjpmYWxzZX0%3D",
+        "",
+        "settings",
+        "applied",
+        (),
+        "",
+    ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "#test=urlparser&view=heat-map&functions=0",
         "",
         "error",
-        "no_test_call_graph",
+        "no_file_or_function_heat_map",
         (),
+        "Error: heat map requires test and file or function",
+    ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "#test=urlparser&view=heat-map&function=no_such_function&functions=1",
+        "",
+        "error",
+        "bad_function",
+        (),
+        "Error: url encodes a function address this report never recorded:"
+        " no_such_function",
+    ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "",
+        "",
+        "error",
+        "debug_script_missing",
+        test_settings.DEBUG_SCRIPT_ASSET,
+        "Error: resource failed: scripts/debug.js",
+    ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "",
+        "",
+        "error",
+        "stylesheet_missing",
+        test_settings.REPORT_THEME_STYLESHEET_ASSET,
+        "Error: resource failed: scripts/theme.css",
+    ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "#view=database",
+        "",
+        "error",
+        "no_test_database",
+        (),
+        "Error: No test selected.",
+    ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "#test=no_such_test&view=database",
+        "",
+        "error",
+        "bad_test",
+        (),
+        "Error: url encodes a test this report does not have: no_such_test",
+    ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "#test=urlparser&view=no-such-view",
+        "",
+        "error",
+        "bad_view",
+        (),
+        "Error: url encodes a view this report does not have: no-such-view",
+    ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "#test=urlparser&view=database&no-such-part=1",
+        "",
+        "error",
+        "bad_part",
+        (),
+        "Error: url part unrecognized: no-such-part=1",
+    ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "#test=urlparser&view=heat-map&file=lib/no_such_file.c&functions=0",
+        "",
+        "error",
+        "bad_file",
+        (),
+        "Error: url encodes a file this report never profiled:"
+        " lib/no_such_file.c",
+    ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "#test=urlparser&view=heat-map"
+        "&file=sysdeps/x86_64/multiarch/memchr-avx2.S&line=100000"
+        "&functions=0",
+        "",
+        "error",
+        "bad_line",
+        (),
+        "Error: url encodes a line sysdeps/x86_64/multiarch/memchr-avx2.S"
+        " does not have: 100000",
+    ),
+    ScreenshotSet(
+        test_settings.SHOOT_DIFF_REPORT | test_settings.SHOOT_ONE_VARIANT,
+        "#test=urlparser&view=call-graph",
+        "",
+        "error",
+        "call_graph",
+        (),
+        "Error: url encodes a view this diff report has no page for:"
+        " call-graph",
+    ),
+    ScreenshotSet(
+        test_settings.SHOOT_DIFF_REPORT | test_settings.SHOOT_INDEX_PAGE,
+        "",
+        "",
+        "index",
+        "page",
+        (),
+        "",
+    ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "#test=urlparser&view=heat-map"
+        "&file=string/bits/string_fortified.h&line=59",
+        "",
+        "error",
+        "no_functions_heat_map",
+        (),
+        "Error: heat map requires functions=0 or functions=1",
     ),
 )
+
+_MENU = test_settings.CLICK_MENU_FRAME_NAME
+_VIEW = test_settings.CLICK_VIEW_FRAME_NAME
+_HASH_STATE = test_settings.CLICK_HASH_STATE
+_CALL_GRAPH_SYMBOL_SELECTOR = (
+    "#call-graph-table- > tbody > tr:not(.table-sizer-row-) .menu-button-"
+)
+_CALL_GRAPH_ROWS_STATE = (
+    "document.querySelectorAll("
+    '"#call-graph-table- > tbody > tr:not(.table-sizer-row-)").length'
+)
+_DATABASE_ROWS_STATE = (
+    'document.querySelectorAll("tbody > tr:not(.table-sizer-row-)").length'
+)
+_DATABASE_TITLES_STATE = 'document.querySelectorAll("thead th").length'
+_HEAT_MAP_TITLES_STATE = (
+    'document.querySelectorAll("table.heat-map-source-table- > thead th")'
+    ".length"
+)
+
+
+# Returns the expression of whether a strip entry's pulldown is open.
+def _expanded_state(entry_name: str) -> str:
+    return (
+        f"document.querySelector('[data-entry-name-=\"{entry_name}\"]')"
+        '.getAttribute("aria-expanded")'
+    )
+
+
+# Returns the expression of a strip entry's text.
+def _entry_text_state(entry_selector: str) -> str:
+    return f"document.querySelector('{entry_selector}').textContent"
+
+
+# Returns the steps opening a pulldown, then pressing its option.
+def _pulldown_steps(
+    frame_name: str,
+    label: str,
+    entry_name: str,
+    option_selector: str,
+    state_frame_name: str,
+    state_expression: str,
+) -> tuple[ClickStep, ...]:
+    entry_selector = f'[data-entry-name-="{entry_name}"]'
+    return (
+        ClickStep(
+            f"{label} pulldown",
+            frame_name,
+            entry_selector,
+            frame_name,
+            _expanded_state(entry_name),
+        ),
+        ClickStep(
+            label,
+            frame_name,
+            f"{entry_selector} {option_selector}",
+            state_frame_name,
+            state_expression,
+        ),
+    )
+
+
+_SCALE_WIDGET_SELECTOR = (
+    '[data-entry-name-="str_menu_scale"] .menu-button-widget-'
+)
+_CLICKS: tuple[ClickSet, ...] = (
+    ClickSet(
+        test_settings.SHOOT_REGULAR_REPORT,
+        "clicks_overview",
+        "",
+        (
+            ClickStep(
+                "overview test",
+                _MENU,
+                'a[href="#test=cookierecv&view=database"]',
+                _MENU,
+                _HASH_STATE,
+            ),
+            ClickStep(
+                "menu call graph",
+                _MENU,
+                '[data-entry-name-="str_view_call_graph"]',
+                _MENU,
+                _HASH_STATE,
+            ),
+            ClickStep(
+                "menu database",
+                _MENU,
+                '[data-entry-name-="str_view_database"]',
+                _MENU,
+                _HASH_STATE,
+            ),
+            ClickStep(
+                "menu overview",
+                _MENU,
+                '[data-entry-name-="str_view_overview"]',
+                _MENU,
+                _HASH_STATE,
+            ),
+        ),
+    ),
+    ClickSet(
+        _SHOOT_BOTH_REPORTS,
+        "clicks_database",
+        "#test=cookierecv&view=database",
+        (
+            ClickStep(
+                "database sort",
+                _VIEW,
+                "thead th:nth-child(4)",
+                _VIEW,
+                "document.querySelector("
+                '"tbody > tr:not(.table-sizer-row-)").textContent',
+            ),
+            *_pulldown_steps(
+                _VIEW,
+                "database count",
+                "count",
+                '[data-entry-value-="1000"]',
+                _VIEW,
+                _DATABASE_ROWS_STATE,
+            ),
+            *_pulldown_steps(
+                _MENU,
+                "counters",
+                "counters",
+                '[data-entry-value-="Ir"]',
+                _VIEW,
+                _DATABASE_TITLES_STATE,
+            ),
+            ClickStep(
+                "database function",
+                _VIEW,
+                'a[href="#test=cookierecv&view=heat-map'
+                '&function=Curl_headers_push&functions=1"]',
+                _MENU,
+                _HASH_STATE,
+            ),
+        ),
+    ),
+    ClickSet(
+        _SHOOT_BOTH_REPORTS,
+        "clicks_heat_map",
+        "#test=cookierecv&view=heat-map&file=lib/progress.c&functions=0",
+        (
+            ClickStep(
+                "heat map hottest line",
+                _VIEW,
+                ".heat-map-source-ticker-tape-entry-",
+                _MENU,
+                _HASH_STATE,
+            ),
+            ClickStep(
+                "heat map line box close",
+                _VIEW,
+                "tr.heat-map-source-line-detail-row-"
+                ' [data-entry-name-="close"]',
+                _VIEW,
+                "document.querySelectorAll("
+                '"tr.heat-map-source-line-detail-row-").length',
+            ),
+            ClickStep(
+                "heat map line",
+                _VIEW,
+                'tr[data-line-number-="660"]'
+                " > td.heat-map-source-table-line-number-cell-",
+                _MENU,
+                _HASH_STATE,
+            ),
+            ClickStep(
+                "heat map function line",
+                _VIEW,
+                'tr.function-entry-[data-line-number-="172"]'
+                " > td.heat-map-source-table-line-number-cell-",
+                _MENU,
+                _HASH_STATE,
+            ),
+            ClickStep(
+                "heat map minimap",
+                _VIEW,
+                "#heat-map-minimap-",
+                _VIEW,
+                'document.getElementById("heat-map-main-").scrollTop',
+            ),
+            ClickStep(
+                "heat map tree folder",
+                _VIEW,
+                '[data-dir-="lib/vtls"]',
+                _VIEW,
+                "document.querySelector('[data-dir-=\"lib/vtls\"]')"
+                '.getAttribute("aria-expanded")',
+            ),
+            ClickStep(
+                "heat map tree file",
+                _VIEW,
+                '[data-file-="lib/vtls/vtls_config.c"]',
+                _MENU,
+                _HASH_STATE,
+            ),
+            ClickStep(
+                "heat scale",
+                _MENU,
+                '[data-entry-name-="heat_scale"]',
+                _MENU,
+                _entry_text_state('[data-entry-name-="heat_scale"]'),
+            ),
+            ClickStep(
+                "heat sort",
+                _MENU,
+                '[data-entry-name-="heat_sort"]',
+                _MENU,
+                _entry_text_state('[data-entry-name-="heat_sort"]'),
+            ),
+            ClickStep(
+                "heat counter source",
+                _MENU,
+                '[data-entry-name-="heat_counter_source"]',
+                _MENU,
+                _HASH_STATE,
+            ),
+            *_pulldown_steps(
+                _MENU,
+                "counters",
+                "counters",
+                '[data-entry-value-="Ir"]',
+                _VIEW,
+                _HEAT_MAP_TITLES_STATE,
+            ),
+            *_pulldown_steps(
+                _MENU,
+                "file",
+                "str_menu_file",
+                '[href="#test=cookierecv&view=heat-map&file=lib/transfer.c'
+                '&functions=1"]',
+                _MENU,
+                _HASH_STATE,
+            ),
+            *_pulldown_steps(
+                _MENU,
+                "function",
+                "str_menu_function",
+                '[href="#test=cookierecv&view=heat-map'
+                '&function=Curl_headers_push&functions=1"]',
+                _MENU,
+                _HASH_STATE,
+            ),
+            ClickStep(
+                "dark mode",
+                _MENU,
+                '[data-entry-name-="str_menu_dark_mode_enabled"]',
+                _MENU,
+                "Boolean(document.querySelector("
+                "'[data-entry-name-=\"str_menu_dark_mode_enabled\"]'))",
+            ),
+            ClickStep(
+                "scale",
+                _MENU,
+                f"{_SCALE_WIDGET_SELECTOR} > :first-child",
+                _MENU,
+                _entry_text_state(_SCALE_WIDGET_SELECTOR),
+                0.25,
+            ),
+            ClickStep(
+                "reset",
+                _MENU,
+                '[data-entry-name-="str_menu_reset"]',
+                _MENU,
+                _entry_text_state(_SCALE_WIDGET_SELECTOR),
+            ),
+            *_pulldown_steps(
+                _MENU,
+                "test",
+                "str_menu_test",
+                '[href="#test=respheaders&view=heat-map'
+                '&function=Curl_headers_push&functions=1"]',
+                _MENU,
+                _HASH_STATE,
+            ),
+        ),
+    ),
+    ClickSet(
+        test_settings.SHOOT_REGULAR_REPORT,
+        "clicks_call_graph",
+        "#test=cookierecv&view=call-graph",
+        (
+            ClickStep(
+                "call graph cutoff lowest",
+                _VIEW,
+                '[data-entry-name-="cutoff"] .menu-button-widget-'
+                " > :first-child",
+                _VIEW,
+                _CALL_GRAPH_ROWS_STATE,
+                0.25,
+            ),
+            ClickStep(
+                "call graph node close",
+                _VIEW,
+                _CALL_GRAPH_SYMBOL_SELECTOR,
+                _VIEW,
+                _CALL_GRAPH_ROWS_STATE,
+            ),
+            ClickStep(
+                "call graph node open",
+                _VIEW,
+                _CALL_GRAPH_SYMBOL_SELECTOR,
+                _VIEW,
+                _CALL_GRAPH_ROWS_STATE,
+            ),
+            *_pulldown_steps(
+                _MENU,
+                "call graph sort",
+                "call_graph_sort",
+                '[data-entry-value-="name"]',
+                _VIEW,
+                "[...document.querySelectorAll("
+                f'"{_CALL_GRAPH_SYMBOL_SELECTOR}")]'
+                ".map((symbol) => symbol.textContent).join()",
+            ),
+        ),
+    ),
+)
+
+
+# Drives one browser over its DevTools pipe, each tab in a fresh profile.
+class BrowserSession:
+    def __init__(self, browser: str) -> None:
+        command_read_fd, command_write_fd = os.pipe()
+        self.reply_read_fd, reply_write_fd = os.pipe()
+
+        # Moves the browser's pipe ends to the descriptors it reads and writes.
+        def pipe_ends_place() -> None:
+            command_spare_fd = fcntl.fcntl(
+                command_read_fd,
+                fcntl.F_DUPFD,
+                test_settings.BROWSER_PIPE_SPARE_FD,
+            )
+            reply_spare_fd = fcntl.fcntl(
+                reply_write_fd,
+                fcntl.F_DUPFD,
+                test_settings.BROWSER_PIPE_SPARE_FD,
+            )
+            os.dup2(command_spare_fd, test_settings.BROWSER_PIPE_COMMAND_FD)
+            os.dup2(reply_spare_fd, test_settings.BROWSER_PIPE_REPLY_FD)
+
+        self.browser_process = subprocess.Popen(
+            [
+                browser,
+                "--disable-gpu",
+                "--no-sandbox",
+                "--incognito",
+                "--hide-scrollbars",
+                # Draws a frame only after the page's own work for it.
+                "--run-all-compositor-stages-before-draw",
+                "--remote-debugging-pipe",
+                test_settings.BLANK_PAGE_URL,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            pass_fds=(
+                test_settings.BROWSER_PIPE_COMMAND_FD,
+                test_settings.BROWSER_PIPE_REPLY_FD,
+            ),
+            preexec_fn=pipe_ends_place,
+            start_new_session=True,
+        )
+        os.close(command_read_fd)
+        os.close(reply_write_fd)
+        self.command_file = os.fdopen(command_write_fd, "wb")
+        self.command_count = 0
+        # The open tabs, by the session their commands and events go through.
+        self.page_tabs: dict[str, PageTab] = {}
+        self.unread_bytes = b""
+
+    def __enter__(self) -> BrowserSession:
+        return self
+
+    def __exit__(
+        self,
+        error_type: type[BaseException] | None,
+        error: BaseException | None,
+        error_traceback: TracebackType | None,
+    ) -> None:
+        if error_type is None:
+            self.command("Browser.close")
+            self.browser_process.wait()
+        else:
+            # Kills a browser still running with every process of its group.
+            if self.browser_process.poll() is None:
+                os.killpg(self.browser_process.pid, signal.SIGKILL)
+            self.browser_process.wait()
+        self.command_file.close()
+        os.close(self.reply_read_fd)
+
+    # Sends a command, to a tab's session if named, returning its result.
+    def command(
+        self,
+        method: str,
+        parameters: dict[str, Any] | None = None,
+        session_id: str = "",
+    ) -> dict[str, Any]:
+        self.command_count += 1
+        command_message: dict[str, Any] = {
+            "id": self.command_count,
+            "method": method,
+            "params": parameters or {},
+        }
+        if session_id:
+            command_message["sessionId"] = session_id
+        self.command_file.write(
+            json.dumps(command_message).encode()
+            + test_settings.BROWSER_PIPE_MESSAGE_END
+        )
+        self.command_file.flush()
+        while True:
+            reply_message = self.message_read()
+            if reply_message.get("id") != self.command_count:
+                continue
+            if "error" in reply_message:
+                raise RuntimeError(f"{method}: {reply_message['error']}")
+            return reply_message["result"]
+
+    # Reads the next message, handing an open tab's event to that tab.
+    def message_read(self) -> dict[str, Any]:
+        while test_settings.BROWSER_PIPE_MESSAGE_END not in self.unread_bytes:
+            read_bytes = os.read(
+                self.reply_read_fd, test_settings.BROWSER_PIPE_READ_BYTES
+            )
+            if not read_bytes:
+                raise RuntimeError(
+                    "the browser closed its pipe, exit"
+                    f" {self.browser_process.wait()}"
+                )
+            self.unread_bytes += read_bytes
+        message_bytes, self.unread_bytes = self.unread_bytes.split(
+            test_settings.BROWSER_PIPE_MESSAGE_END, 1
+        )
+        message = json.loads(message_bytes)
+        page_tab = self.page_tabs.get(message.get("sessionId", ""))
+        # A closed tab's late event and a browser event belong to no page.
+        if "method" in message and page_tab:
+            page_tab.event_take(message)
+        return message
+
+    # Returns the first line of each page's error report, tabs loading at once.
+    def pages_error_messages(self, page_urls: list[str]) -> list[str]:
+        _, width_px, height_px = test_settings.SCREENSHOT_VIEWPORTS[0]
+        error_messages = [""] * len(page_urls)
+        loading_tabs: dict[PageTab, int] = {}
+
+        # Keeps the error message of the first tab to settle, closing it.
+        def settled_tab_close() -> None:
+            settled_tab = self.settled_tab_wait(list(loading_tabs))
+            error_messages[loading_tabs.pop(settled_tab)] = (
+                settled_tab.error_message()
+            )
+            settled_tab.close()
+
+        for url_index, page_url in enumerate(page_urls):
+            if len(loading_tabs) == test_settings.PAGE_CHECK_TABS_AT_ONCE:
+                settled_tab_close()
+            page_tab = self.tab_open(width_px, height_px)
+            page_tab.page_navigate(page_url)
+            loading_tabs[page_tab] = url_index
+        while loading_tabs:
+            settled_tab_close()
+        return error_messages
+
+    # Returns the first tab whose page settled, reading while none has news.
+    def settled_tab_wait(self, page_tabs: list[PageTab]) -> PageTab:
+        while True:
+            for page_tab in page_tabs:
+                if page_tab.has_news and page_tab.settle_step():
+                    return page_tab
+            # A check's own commands may have kept events, read only after.
+            if not any(page_tab.has_news for page_tab in page_tabs):
+                self.message_read()
+
+    # Opens a blank tab of a size in a fresh profile, closing it after.
+    @contextlib.contextmanager
+    def tab(self, width_px: int, height_px: int) -> Iterator[PageTab]:
+        page_tab = self.tab_open(width_px, height_px)
+        yield page_tab
+        page_tab.close()
+
+    # Opens a blank tab of a size in a fresh profile.
+    def tab_open(self, width_px: int, height_px: int) -> PageTab:
+        browser_context_id = self.command("Target.createBrowserContext")[
+            "browserContextId"
+        ]
+        target_id = self.command(
+            "Target.createTarget",
+            {
+                "url": test_settings.BLANK_PAGE_URL,
+                "browserContextId": browser_context_id,
+                "width": width_px,
+                "height": height_px,
+            },
+        )["targetId"]
+        session_id = self.command(
+            "Target.attachToTarget", {"targetId": target_id, "flatten": True}
+        )["sessionId"]
+        page_tab = PageTab(
+            self, session_id, browser_context_id, (width_px, height_px)
+        )
+        self.page_tabs[session_id] = page_tab
+        page_tab.command("Page.enable")
+        page_tab.command("Runtime.enable")
+        page_tab.command(
+            "Runtime.addBinding",
+            {"name": test_settings.PAGE_DRAWN_BINDING_NAME},
+        )
+        return page_tab
+
+
+# Holds one tab's page: its frames, their script contexts and error reports.
+class PageTab:
+    def __init__(
+        self,
+        browser_session: BrowserSession,
+        session_id: str,
+        browser_context_id: str,
+        tab_size: tuple[int, int],
+    ) -> None:
+        self.browser_session = browser_session
+        self.session_id = session_id
+        self.browser_context_id = browser_context_id
+        self.tab_size = tab_size
+        # The contexts whose drawn check this settle started.
+        self.checked_contexts: set[int] = set()
+        # The contexts the page left, read before any failed reply.
+        self.destroyed_contexts: set[int] = set()
+        # The frames the page removed, read before any failed reply.
+        self.detached_frames: set[str] = set()
+        # The contexts whose drawn check of this settle passed.
+        self.drawn_contexts: set[int] = set()
+        # The contexts from before this settle, whose load renders are logged.
+        self.earlier_contexts: set[int] = set()
+        # The first line of each error report, by the context drawing it.
+        self.error_reports: dict[int, str] = {}
+        self.frame_contexts: dict[str, int] = {}
+        # Whether an event came since the last settle step.
+        self.has_news = False
+        # The frames out of view, which no shot shows.
+        self.hidden_frames: set[str] = set()
+        # The top page's time of the input this settle follows, 0 for a load.
+        self.input_milliseconds = 0.0
+        # Whether the frame a navigation opens started loading, after an input.
+        self.is_started = False
+        self.loading_frames: set[str] = set()
+        self.navigation_frame_id = ""
+        self.pending_events: list[dict[str, Any]] = []
+        # Numbers the settles, so a drawn check reports to its own alone.
+        self.settle_count = 0
+        self.thrown_texts: list[str] = []
+
+    # Closes the tab with its profile, any late event of it unread.
+    def close(self) -> None:
+        del self.browser_session.page_tabs[self.session_id]
+        self.browser_session.command(
+            "Target.disposeBrowserContext",
+            {"browserContextId": self.browser_context_id},
+        )
+
+    # Sends a command to the tab, returning its result once its reply comes.
+    def command(
+        self, method: str, parameters: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        return self.browser_session.command(
+            method, parameters, self.session_id
+        )
+
+    # Returns the top page point a press at a share across an element hits.
+    def element_point(
+        self, frame_name: str, element_selector: str, press_share: float
+    ) -> tuple[float, float]:
+        element_object = self.command(
+            "Runtime.evaluate",
+            {
+                "expression": "document.querySelector("
+                f"{json.dumps(element_selector)})",
+                "contextId": self.frame_context(frame_name),
+            },
+        )["result"]
+        if "objectId" not in element_object:
+            raise RuntimeError(f"{frame_name}: no {element_selector}")
+        frame_x, frame_y, frame_width, is_hit = self.object_call(
+            element_object["objectId"],
+            test_settings.CLICK_POINT_FUNCTION,
+            press_share,
+        )
+        # An element out of view or covered is centred in view, once.
+        if not is_hit:
+            self.object_call(
+                element_object["objectId"],
+                test_settings.CLICK_REVEAL_FUNCTION,
+            )
+            frame_x, frame_y, frame_width, is_hit = self.object_call(
+                element_object["objectId"],
+                test_settings.CLICK_POINT_FUNCTION,
+                press_share,
+            )
+        if not is_hit:
+            raise RuntimeError(f"{frame_name}: {element_selector} is covered")
+        if frame_name == test_settings.CLICK_MENU_FRAME_NAME:
+            return frame_x, frame_y
+        owner_object = self.command(
+            "DOM.resolveNode",
+            {
+                "backendNodeId": self.command(
+                    "DOM.getFrameOwner", {"frameId": self.frame_id(frame_name)}
+                )["backendNodeId"],
+                "executionContextId": self.frame_context(
+                    test_settings.CLICK_MENU_FRAME_NAME
+                ),
+            },
+        )["object"]
+        owner_left, owner_top, owner_width = self.object_call(
+            owner_object["objectId"], test_settings.CLICK_FRAME_BOX_FUNCTION
+        )
+        frame_zoom = owner_width / frame_width
+        return (
+            owner_left + frame_zoom * frame_x,
+            owner_top + frame_zoom * frame_y,
+        )
+
+    # Returns the first line of the page's first error report, if any.
+    def error_message(self) -> str:
+        return next(iter(self.error_reports.values()), "")
+
+    # Refuses an error report or an uncaught exception of the page.
+    def errors_refuse(self, fault_label: str) -> None:
+        if self.error_reports:
+            raise RuntimeError(f"{fault_label}: {self.error_message()}")
+        if self.thrown_texts:
+            raise RuntimeError(f"{fault_label}: {self.thrown_texts[0]}")
+
+    # Keeps an event of the tab, its error reports and script contexts.
+    def event_take(self, message: dict[str, Any]) -> None:
+        self.has_news = True
+        method = message["method"]
+        event_parameters = message["params"]
+        if method == "Runtime.exceptionThrown":
+            exception_details = event_parameters["exceptionDetails"]
+            self.thrown_texts.append(
+                exception_details.get("exception", {}).get(
+                    "description", exception_details["text"]
+                )
+            )
+        elif method == "Runtime.consoleAPICalled":
+            console_text = " ".join(
+                str(console_argument.get("value", ""))
+                for console_argument in event_parameters["args"]
+            )
+            error_match = test_settings.CONSOLE_ERROR_REPORT_PATTERN.search(
+                console_text
+            )
+            if error_match:
+                self.error_reports.setdefault(
+                    event_parameters["executionContextId"],
+                    error_match.group(1),
+                )
+        elif method == "Runtime.executionContextCreated":
+            context = event_parameters["context"]
+            if context["auxData"]["isDefault"]:
+                self.frame_contexts[context["auxData"]["frameId"]] = context[
+                    "id"
+                ]
+        elif method == "Runtime.executionContextDestroyed":
+            self.destroyed_contexts.add(event_parameters["executionContextId"])
+            self.frame_contexts = {
+                frame_id: context_id
+                for frame_id, context_id in self.frame_contexts.items()
+                if context_id != event_parameters["executionContextId"]
+            }
+        elif method == "Runtime.executionContextsCleared":
+            self.destroyed_contexts.update(self.frame_contexts.values())
+            self.frame_contexts = {}
+        else:
+            if method == "Page.frameDetached":
+                self.detached_frames.add(event_parameters["frameId"])
+            self.pending_events.append(message)
+
+    # Returns the next event of a method, reading messages until one comes.
+    def event_wait(self, method: str) -> dict[str, Any]:
+        while True:
+            for event_index, pending_event in enumerate(self.pending_events):
+                if pending_event["method"] == method:
+                    return self.pending_events.pop(event_index)["params"]
+            self.browser_session.message_read()
+
+    # Returns the value an expression evaluates to in a frame.
+    def frame_evaluate(self, frame_name: str, expression: str) -> Any:
+        evaluation = self.command(
+            "Runtime.evaluate",
+            {
+                "expression": expression,
+                "contextId": self.frame_context(frame_name),
+                "returnByValue": True,
+            },
+        )
+        if "exceptionDetails" in evaluation:
+            raise RuntimeError(
+                f"{frame_name}: {expression}:"
+                f" {evaluation['exceptionDetails']['text']}"
+            )
+        return evaluation["result"].get("value")
+
+    def frame_context(self, frame_name: str) -> int:
+        frame_id = self.frame_id(frame_name)
+        if frame_id not in self.frame_contexts:
+            raise RuntimeError(f"{frame_name}: no script context")
+        return self.frame_contexts[frame_id]
+
+    # Returns the frame of the menu's top page or of its one view.
+    def frame_id(self, frame_name: str) -> str:
+        frame_tree = self.command("Page.getFrameTree")["frameTree"]
+        if frame_name == test_settings.CLICK_MENU_FRAME_NAME:
+            return frame_tree["frame"]["id"]
+        child_frames = frame_tree.get("childFrames", [])
+        if len(child_frames) != 1:
+            raise RuntimeError(f"the page holds {len(child_frames)} views")
+        return child_frames[0]["frame"]["id"]
+
+    # Returns whether a child frame's element shows in the tab's view.
+    def frame_shown(self, frame: dict[str, Any]) -> bool:
+        try:
+            owner_node_id = self.command(
+                "DOM.getFrameOwner", {"frameId": frame["id"]}
+            )["backendNodeId"]
+            owner_object = self.command(
+                "DOM.resolveNode",
+                {
+                    "backendNodeId": owner_node_id,
+                    "executionContextId": self.frame_contexts[
+                        frame["parentId"]
+                    ],
+                },
+            )["object"]
+            if not self.object_call(
+                owner_object["objectId"],
+                test_settings.FRAME_LAID_OUT_FUNCTION,
+            ):
+                return False
+            frame_quads = self.command(
+                "DOM.getContentQuads", {"backendNodeId": owner_node_id}
+            )["quads"]
+        except RuntimeError:
+            # A frame its page removed meanwhile is out of view.
+            if frame["id"] in self.detached_frames:
+                return False
+            raise
+        width_px, height_px = self.tab_size
+        return any(
+            max(quad[0::2]) > 0
+            and max(quad[1::2]) > 0
+            and min(quad[0::2]) < width_px
+            and min(quad[1::2]) < height_px
+            for quad in frame_quads
+        )
+
+    # Returns whether each shown frame drew or erred, a child after its parent.
+    def frames_drawn(self, frame_tree: dict[str, Any]) -> bool:
+        if frame_tree["frame"]["id"] in self.hidden_frames:
+            return True
+        context_id = self.frame_contexts.get(frame_tree["frame"]["id"])
+        if context_id is None:
+            return False
+        # The error handler's page replaces the frame's own and its frames.
+        if context_id in self.error_reports:
+            return True
+        child_trees = frame_tree.get("childFrames", [])
+        is_new = context_id not in self.earlier_contexts
+        if context_id not in self.checked_contexts:
+            self.checked_contexts.add(context_id)
+            # A frame out of view never paints, so no shot shows it drawn.
+            for child_tree in child_trees:
+                if not self.frame_shown(child_tree["frame"]):
+                    self.hidden_frames.add(child_tree["frame"]["id"])
+            # A page logs its own load render and each new child page's.
+            render_count = int(is_new) + sum(
+                child_tree["frame"]["url"] != test_settings.BLANK_PAGE_URL
+                and child_tree["frame"]["id"] not in self.hidden_frames
+                and self.frame_contexts.get(child_tree["frame"]["id"])
+                not in self.earlier_contexts
+                for child_tree in child_trees
+            )
+            try:
+                self.command(
+                    "Runtime.evaluate",
+                    {
+                        "expression": self.wait_expression(
+                            test_settings.PAGE_DRAWN_FUNCTION,
+                            json.dumps(test_settings.PAGE_DRAWN_BINDING_NAME),
+                            json.dumps(str(self.settle_count)),
+                            json.dumps(
+                                0 if is_new else self.input_milliseconds
+                            ),
+                            str(render_count),
+                        ),
+                        "contextId": context_id,
+                    },
+                )
+            except RuntimeError:
+                # A page left meanwhile is checked in its next context.
+                if context_id not in self.destroyed_contexts:
+                    raise
+        # A new page lays its frames out as it draws, an earlier page did.
+        if is_new and context_id not in self.drawn_contexts:
+            return False
+        # Every child is checked, so their drawn checks all start at once.
+        child_states = [
+            self.frames_drawn(child_tree) for child_tree in child_trees
+        ]
+        return context_id in self.drawn_contexts and all(child_states)
+
+    # Moves the pointer onto a point, returning once each frame drew after.
+    def hover(self, hover_point: tuple[float, float]) -> None:
+        self.input_settle_begin()
+        self.mouse_send("mouseMoved", hover_point)
+        self.browser_session.settled_tab_wait([self])
+
+    # Writes the page as drawn to an image file.
+    def image_write(self, image_path: str) -> None:
+        # The fast encoding writes the same pixels to a larger file.
+        image_data = self.command(
+            "Page.captureScreenshot", {"optimizeForSpeed": True}
+        )["data"]
+        with open(image_path, "wb") as image_file:
+            image_file.write(base64.b64decode(image_data))
+
+    # Begins a settle after an input, load renders counted from its time.
+    def input_settle_begin(self) -> None:
+        self.settle_begin()
+        self.input_milliseconds = self.frame_evaluate(
+            test_settings.CLICK_MENU_FRAME_NAME, "performance.now()"
+        )
+
+    def mouse_send(
+        self, event_type: str, press_point: tuple[float, float]
+    ) -> None:
+        is_moved = event_type == "mouseMoved"
+        self.command(
+            "Input.dispatchMouseEvent",
+            {
+                "type": event_type,
+                "x": press_point[0],
+                "y": press_point[1],
+                "button": "none" if is_moved else "left",
+                "buttons": int(event_type == "mousePressed"),
+                "clickCount": int(not is_moved),
+            },
+        )
+
+    # Returns what a function returns called on an object with arguments.
+    def object_call(
+        self, object_id: str, function_text: str, *call_arguments: Any
+    ) -> Any:
+        return self.command(
+            "Runtime.callFunctionOn",
+            {
+                "objectId": object_id,
+                "functionDeclaration": function_text,
+                "arguments": [
+                    {"value": call_argument}
+                    for call_argument in call_arguments
+                ],
+                "returnByValue": True,
+            },
+        )["result"].get("value")
+
+    # Starts opening a page, which a settle then waits on.
+    def page_navigate(self, page_url: str) -> None:
+        self.settle_begin()
+        navigation = self.command("Page.navigate", {"url": page_url})
+        if "errorText" in navigation:
+            raise RuntimeError(f"{page_url}: {navigation['errorText']}")
+        self.navigation_frame_id = navigation["frameId"]
+        self.is_started = False
+
+    # Opens a page, returning once its frames stopped loading and each drew.
+    def page_open(self, page_url: str) -> None:
+        self.page_navigate(page_url)
+        self.browser_session.settled_tab_wait([self])
+
+    # Presses at a point, returning once the state changed and each frame drew.
+    def press(
+        self,
+        press_point: tuple[float, float],
+        state_frame_name: str,
+        state_expression: str,
+        state_before: str,
+    ) -> None:
+        state_context = self.frame_context(state_frame_name)
+        self.input_settle_begin()
+        self.mouse_send("mousePressed", press_point)
+        self.mouse_send("mouseReleased", press_point)
+        try:
+            state_change = self.command(
+                "Runtime.evaluate",
+                {
+                    "expression": self.wait_expression(
+                        test_settings.STATE_CHANGE_FUNCTION,
+                        f"() => ({state_expression})",
+                        json.dumps(state_before),
+                    ),
+                    "contextId": state_context,
+                    "awaitPromise": True,
+                },
+            )
+        except RuntimeError:
+            # A state frame the press reloads is read again once it drew.
+            if state_context not in self.destroyed_contexts:
+                raise
+        else:
+            if "exceptionDetails" in state_change:
+                raise RuntimeError(
+                    f"{state_frame_name}: {state_expression}:"
+                    f" {state_change['exceptionDetails']['text']}"
+                )
+        self.browser_session.settled_tab_wait([self])
+
+    # Forgets the drawn checks, so each frame draws again after what follows.
+    def settle_begin(self) -> None:
+        self.checked_contexts = set()
+        self.destroyed_contexts = set()
+        self.detached_frames = set()
+        self.drawn_contexts = set()
+        self.earlier_contexts = set(self.frame_contexts.values())
+        self.has_news = True
+        self.hidden_frames = set()
+        self.input_milliseconds = 0.0
+        self.is_started = True
+        self.loading_frames = set()
+        self.pending_events = []
+        self.settle_count += 1
+
+    # Returns whether, after its events, the frames stopped loading and drew.
+    def settle_step(self) -> bool:
+        self.has_news = False
+        while self.pending_events:
+            event = self.pending_events.pop(0)
+            event_parameters = event["params"]
+            if event["method"] == "Page.frameStartedLoading":
+                self.loading_frames.add(event_parameters["frameId"])
+                self.is_started |= (
+                    event_parameters["frameId"] == self.navigation_frame_id
+                )
+            # A frame removed while loading never stops loading.
+            elif event["method"] in (
+                "Page.frameDetached",
+                "Page.frameStoppedLoading",
+            ):
+                self.loading_frames.discard(event_parameters["frameId"])
+            elif event["method"] == "Runtime.bindingCalled":
+                # A check begun before this settle reports nothing about it.
+                if event_parameters["payload"] == str(self.settle_count):
+                    self.drawn_contexts.add(
+                        event_parameters["executionContextId"]
+                    )
+        return (
+            self.is_started
+            and not self.loading_frames
+            and self.frames_drawn(
+                self.command("Page.getFrameTree")["frameTree"]
+            )
+        )
+
+    def trace_begin(self) -> None:
+        self.command(
+            "Tracing.start",
+            {
+                "traceConfig": {
+                    "includedCategories": [test_settings.TRACE_CATEGORIES]
+                },
+                "transferMode": "ReturnAsStream",
+            },
+        )
+
+    # Ends the trace, returning its events.
+    def trace_end(self) -> list[Any]:
+        self.command("Tracing.end")
+        trace_stream = self.event_wait("Tracing.tracingComplete")["stream"]
+        trace_chunks: list[bytes] = []
+        while True:
+            stream_read = self.command(
+                "IO.read",
+                {
+                    "handle": trace_stream,
+                    "size": test_settings.TRACE_READ_BYTES,
+                },
+            )
+            trace_chunks.append(
+                base64.b64decode(stream_read["data"])
+                if stream_read.get("base64Encoded")
+                else stream_read["data"].encode()
+            )
+            if stream_read["eof"]:
+                break
+        self.command("IO.close", {"handle": trace_stream})
+        return json.loads(b"".join(trace_chunks))["traceEvents"]
+
+    # Returns an expression calling a waiting function, named in a trace.
+    def wait_expression(self, function_text: str, *argument_texts: str) -> str:
+        return (
+            f"({function_text})({test_settings.PAINT_WAIT_FUNCTION},"
+            f" {', '.join(argument_texts)})\n"
+            f"//# sourceURL={test_settings.WAIT_SCRIPT_URL}"
+        )
 
 
 class Screenshots:
     def __init__(
         self,
-        browser: str,
+        browser_session: BrowserSession | None,
         report: str,
         report_flag: int,
         out_dir: str,
         compare_dir: str,
         scratch_dir: str,
-        trace_path: str,
-        view_check_path: str,
     ) -> None:
-        self.browser = browser
+        self.browser_session = browser_session
         self.report = report
         self.report_flag = report_flag
         self.out_dir = out_dir
         self.compare_dir = compare_dir
         self.scratch_dir = scratch_dir
-        self.trace_path = trace_path
-        self.view_check_path = view_check_path
         self.report_views = self.report_views_select()
+        self.click_timings: list[PageTiming] = []
         self.page_timings: list[PageTiming] = []
 
-    # Returns the browser's output and log for a page, once the page finishes.
-    def browser_output(
-        self, browser_flags: list[str], page_address: str
-    ) -> tuple[str, str]:
-        assert self.browser, "a compare only run opens no page"
-        browser_run = subprocess.run(
-            [
-                self.browser,
-                "--disable-gpu",
-                "--no-sandbox",
-                "--incognito",
-                "--virtual-time-budget="
-                f"{test_settings.SCREENSHOT_RENDER_BUDGET_MS}",
-                *browser_flags,
-                page_address,
-            ],
-            capture_output=True,
-            text=True,
+    # Presses a step's element, returning the time the press took to settle.
+    def click_time(
+        self,
+        page_tab: PageTab,
+        set_name: str,
+        click_step: ClickStep,
+    ) -> PageTiming:
+        press_point = page_tab.element_point(
+            click_step.frame_name,
+            click_step.element_selector,
+            click_step.press_share,
         )
-        return browser_run.stdout, browser_run.stderr
+        page_tab.hover(press_point)
+        page_tab.errors_refuse(f"{set_name}: {click_step.label}")
+        page_file = self.relative_file_of(
+            page_tab.frame_evaluate(click_step.frame_name, "location.href"),
+            self.file_url(self.report),
+        )
+        if not page_file:
+            raise RuntimeError(
+                f"{set_name}: {click_step.label} presses outside {self.report}"
+            )
+        # The page writes the state as the press wait compares it.
+        state_text_expression = (
+            f"JSON.stringify({click_step.state_expression})"
+        )
+        state_before = page_tab.frame_evaluate(
+            click_step.state_frame_name, state_text_expression
+        )
+        hash_before = page_tab.frame_evaluate(
+            test_settings.CLICK_MENU_FRAME_NAME, test_settings.CLICK_HASH_STATE
+        )
+        page_tab.trace_begin()
+        page_tab.press(
+            press_point,
+            click_step.state_frame_name,
+            click_step.state_expression,
+            state_before,
+        )
+        trace_events = page_tab.trace_end()
+        page_tab.errors_refuse(f"{set_name}: {click_step.label}")
+        state_after = page_tab.frame_evaluate(
+            click_step.state_frame_name, state_text_expression
+        )
+        if state_after == state_before:
+            raise RuntimeError(
+                f"{set_name}: {click_step.label} left"
+                f" {click_step.state_expression} at {state_before}"
+            )
+        # A click changing other state than the address stays at its address.
+        hash_after = page_tab.frame_evaluate(
+            test_settings.CLICK_MENU_FRAME_NAME, test_settings.CLICK_HASH_STATE
+        )
+        if (
+            click_step.state_expression != test_settings.CLICK_HASH_STATE
+            and hash_after != hash_before
+        ):
+            raise RuntimeError(
+                f"{set_name}: {click_step.label} moved to {hash_after}"
+            )
+        phase_name = (
+            f"{test_settings.TIMING_CLICK_PHASE_NAME} {click_step.label}"
+        )
+        return PageTiming(
+            page_file,
+            phase_name,
+            phase_name,
+            self.trace_press_span(
+                trace_events, f"{set_name}: {click_step.label}"
+            ),
+            set_name,
+        )
+
+    # Times every click of each click set this report runs.
+    def clicks_time(self) -> None:
+        _, width_px, height_px = test_settings.SCREENSHOT_VIEWPORTS[0]
+        entry_url = self.file_url(
+            os.path.join(self.report, test_settings.ENTRY_PAGE)
+        )
+        browser_session = self.session()
+        for click_set in _CLICKS:
+            if not click_set.shot_flags & self.report_flag:
+                continue
+            with browser_session.tab(width_px, height_px) as page_tab:
+                # The golden bookmarks time page loads, so this one is not.
+                page_tab.page_open(entry_url + click_set.view_hash)
+                page_tab.errors_refuse(click_set.set_name)
+                for click_step in click_set.click_steps:
+                    self.click_timings.append(
+                        self.click_time(
+                            page_tab, click_set.set_name, click_step
+                        )
+                    )
 
     def copy_shoot(
         self,
@@ -494,7 +1740,9 @@ class Screenshots:
                 )
                 + f"#test={test_name}&view=call-graph"
             )
-            error_report = self.page_error_report(page_address)
+            (error_report,) = self.session().pages_error_messages(
+                [page_address]
+            )
             if (
                 not error_report
                 or test_settings.DRAW_LIMIT_ERROR_TEXT not in error_report
@@ -516,6 +1764,16 @@ class Screenshots:
                 os.path.realpath(os.path.dirname(index_path)),
             )
         )
+
+    # Refuses a shot drawing an error message other than the one listed.
+    def error_page_check(
+        self, shot: str, view: ScreenshotSet, drawn_message: str
+    ) -> None:
+        if drawn_message != view.error_message:
+            raise RuntimeError(
+                f"{shot}: the error handler drew {drawn_message!r},"
+                f" the list expects {view.error_message!r}"
+            )
 
     # Returns the address the browser opens a file or directory at.
     def file_url(self, path: str) -> str:
@@ -621,44 +1879,14 @@ class Screenshots:
         )
         return False
 
-    # Writes the image of a page once the page finishes, returning its log.
-    def image_write(
-        self,
-        image_path: str,
-        fault_label: str,
-        width_px: int,
-        height_px: int,
-        browser_flags: list[str],
-        page_address: str,
-    ) -> str:
-        if os.path.exists(image_path):
-            os.remove(image_path)
-        browser_log = self.browser_output(
-            [
-                "--hide-scrollbars",
-                # Draws a frame only after the page's own work for it.
-                "--run-all-compositor-stages-before-draw",
-                f"--window-size={width_px},{height_px}",
-                f"--screenshot={image_path}",
-                *browser_flags,
-            ],
-            page_address,
-        )[1]
-        if os.path.exists(image_path) and os.path.getsize(image_path):
-            return browser_log
-        raise RuntimeError(
-            f"{fault_label} wrote no image:"
-            f" {browser_log.strip()[-test_settings.FAULT_TAIL_CHARS :]}"
-        )
-
-    # Merges this report's pages and timings into the index, keeping others'.
+    # Merges this report's pages and timings into the index, returning all.
     def index_write(
         self,
         prefix: str,
         index_path: str,
         template: str,
         timing_rows: list[TimingRow],
-    ) -> None:
+    ) -> list[dict[str, str]]:
         assert template.count(test_settings.INDEX_MARKER) == 1, (
             test_settings.INDEX_MARKER
         )
@@ -718,16 +1946,17 @@ class Screenshots:
                 or view.shot_flags & test_settings.SHOOT_INDEX_PAGE
             ):
                 continue
-            for toggle_dark_value in dict.fromkeys(
-                variant.toggle_dark_value for variant in view.shot_variants()
-            ):
-                pages[
-                    self.shot_name(
-                        view_index, "", prefix, view, toggle_dark_value
-                    )
-                ] = report_href + self.page_address(
-                    view.view_hash, view.menu_entry_number, toggle_dark_value
-                )
+            variant = view.shot_variants(view_index)[0]
+            pages[
+                self.shot_name(view_index, "", prefix, view, variant.mode_name)
+            ] = report_href + self.page_address(
+                view.view_hash,
+                view.menu_entry_number,
+                variant.toggle_dark_value,
+            )
+        report_timings = sorted(
+            page_timings, key=lambda page_timing: page_timing["report"]
+        )
         data = {
             "width": width_px,
             "height": height_px,
@@ -746,9 +1975,7 @@ class Screenshots:
                 for name in sorted(pages)
             ],
             "reports": index_reports,
-            "page_timings": sorted(
-                page_timings, key=lambda page_timing: page_timing["report"]
-            ),
+            "page_timings": report_timings,
         }
         data_script = (
             '<script id="shot-list-" type="application/json">'
@@ -759,26 +1986,33 @@ class Screenshots:
             index_file.write(
                 template.replace(test_settings.INDEX_MARKER, data_script)
             )
+        return report_timings
 
     # Refuses a logo link other than each debug query value's golden one.
     def logo_links_check(self) -> None:
+        _, width_px, height_px = test_settings.SCREENSHOT_VIEWPORTS[0]
         entry_url = self.file_url(
             os.path.join(self.report, test_settings.ENTRY_PAGE)
         )
+        browser_session = self.session()
         for query_text, link_text in test_settings.MENU_LOGO_LINKS.items():
-            browser_text, browser_errors = self.browser_output(
-                ["--dump-dom"], entry_url + query_text
-            )
+            with browser_session.tab(width_px, height_px) as page_tab:
+                page_tab.page_open(entry_url + query_text)
+                page_markup = page_tab.frame_evaluate(
+                    test_settings.CLICK_MENU_FRAME_NAME,
+                    "document.documentElement.outerHTML",
+                )
+                error_message = page_tab.error_message()
             link_match = test_settings.MENU_LOGO_LINK_PATTERN.search(
-                browser_text
+                page_markup
             )
             found_text = link_match.group(1) if link_match else None
             if found_text == link_text:
                 continue
             raise RuntimeError(
                 f"{entry_url + query_text}: the logo link holds"
-                f" {found_text!r}, expected {link_text!r}:"
-                f" {browser_errors.strip()[-test_settings.FAULT_TAIL_CHARS :]}"
+                f" {found_text!r}, expected {link_text!r}, the error handler"
+                f" drawing {error_message!r}"
             )
 
     # Returns the query and hash a page is shot at.
@@ -796,21 +2030,6 @@ class Screenshots:
                 menu_entry_number
             )
         return "?" + urllib.parse.urlencode(query_values) + view_hash
-
-    # Returns the error report a page writes to the browser's log, if any.
-    def page_error_report(self, page_address: str) -> str | None:
-        _, width_px, height_px = test_settings.SCREENSHOT_VIEWPORTS[0]
-        error_match = test_settings.BROWSER_LOG_ERROR_REPORT_PATTERN.search(
-            self.image_write(
-                self.view_check_path,
-                page_address,
-                width_px,
-                height_px,
-                ["--enable-logging=stderr"],
-                page_address,
-            )
-        )
-        return error_match.group(1) if error_match else None
 
     # Keeps the longer of the timings of one page file and phase.
     def page_timing_keep(
@@ -932,6 +2151,11 @@ class Screenshots:
             if view.shot_flags & self.report_flag
         ]
 
+    # Returns the browser session, which a compare only run lacks.
+    def session(self) -> BrowserSession:
+        assert self.browser_session, "a compare only run opens no page"
+        return self.browser_session
+
     def shoot_all(self, prefix: str) -> int:
         written = 0
         for view_index, view in self.report_views:
@@ -960,43 +2184,6 @@ class Screenshots:
                 )
         return written
 
-    # Shoots a page, writing its trace too when a trace path is given.
-    def shoot_one(
-        self,
-        shot: str,
-        page_dir: str,
-        view_hash: str,
-        menu_entry_number: str,
-        toggle_dark_value: str,
-        width_px: int,
-        height_px: int,
-        trace_path: str,
-    ) -> None:
-        out_path = os.path.join(
-            self.out_dir, shot + test_settings.IMAGE_SUFFIX
-        )
-        trace_flags: list[str] = []
-        if trace_path:
-            if os.path.exists(trace_path):
-                os.remove(trace_path)
-            trace_flags = [
-                f"--trace-startup={test_settings.TRACE_CATEGORIES}",
-                f"--trace-startup-file={trace_path}",
-                f"--trace-startup-format={test_settings.TRACE_FORMAT}",
-                # Zero traces until the browser exits after the shot.
-                "--trace-startup-duration=0",
-            ]
-        self.image_write(
-            out_path,
-            f"{shot}: {view_hash or '(entry page)'}",
-            width_px,
-            height_px,
-            trace_flags,
-            self.page_url(
-                page_dir, view_hash, menu_entry_number, toggle_dark_value
-            ),
-        )
-
     # Names a shot, leaving out the resolution when the size is empty.
     def shot_name(
         self,
@@ -1004,7 +2191,7 @@ class Screenshots:
         size_name: str,
         prefix: str,
         view: ScreenshotSet,
-        toggle_dark_value: str,
+        mode_name: str,
     ) -> str:
         return test_settings.SHOT_NAME_SEPARATOR.join(
             name_part
@@ -1014,7 +2201,7 @@ class Screenshots:
                 view.view_name,
                 view.subview_name,
                 prefix.rstrip("_"),
-                test_settings.SHOT_MODE_NAME_PARTS[toggle_dark_value],
+                mode_name,
             )
             if name_part
         )
@@ -1027,10 +2214,11 @@ class Screenshots:
                 variant.size_name,
                 prefix,
                 view,
-                variant.toggle_dark_value,
+                variant.mode_name,
             )
             for view_index, view in self.report_views
-            for variant in view.shot_variants()
+            if view.is_pictured(view_index)
+            for variant in view.shot_variants(view_index)
         ]
 
     # Refuses an error report from any view of any test the report holds.
@@ -1046,30 +2234,87 @@ class Screenshots:
         if not database_match:
             raise RuntimeError(f"{database_path}: holds no source database")
         test_files = json.loads(database_match.group(1))["filesWithCounters"]
-        for test_name, file_names in test_files.items():
+        page_addresses = [
+            self.file_url(entry_path)
+            + f"#test={test_name}&"
+            + view_part.format(first_file=urllib.parse.quote(file_names[0]))
+            for test_name, file_names in test_files.items()
             for view_part in test_settings.SHOOT_TEST_VIEW_PARTS[
                 self.report_flag
-            ]:
-                page_address = self.file_url(entry_path) + (
-                    f"#test={test_name}&"
-                    + view_part.format(
-                        first_file=urllib.parse.quote(file_names[0])
-                    )
-                )
-                error_report = self.page_error_report(page_address)
-                if error_report:
-                    raise RuntimeError(f"{page_address}: {error_report}")
-        # A page holding an error proves that this browser's log shows reports.
+            ]
+        ]
+        # A page holding an error proves that DevTools shows the reports.
         error_address = (
             self.file_url(entry_path) + test_settings.VIEW_CHECK_ERROR_HASH
         )
-        if not self.page_error_report(error_address):
+        error_reports = self.session().pages_error_messages(
+            [*page_addresses, error_address]
+        )
+        for page_address, error_report in zip(
+            page_addresses, error_reports[:-1], strict=True
+        ):
+            if error_report:
+                raise RuntimeError(f"{page_address}: {error_report}")
+        if not error_reports[-1]:
             raise RuntimeError(f"{error_address}: wrote no error report")
         if self.report_flag == test_settings.SHOOT_REGULAR_REPORT:
             self.draw_limit_check(next(iter(test_files)))
-        os.remove(self.view_check_path)
 
-    # Returns each page file's slowest load, then its largest phases.
+    # Writes every report's timings, slowest first, then refuses one too slow.
+    def timing_file_write(
+        self,
+        timing_path: str,
+        report_timings: list[dict[str, str]],
+        timing_rows: list[TimingRow],
+    ) -> int:
+        file_columns = ("duration_ms", "report", "page_file", "phase_label")
+        file_rows = [
+            ("ms", "report", "page", "phase", "shot"),
+            *(
+                tuple(report_timing[column] for column in file_columns)
+                + (report_timing["shot"],)
+                for report_timing in sorted(
+                    report_timings,
+                    key=lambda report_timing: (
+                        -float(report_timing["duration_ms"])
+                    ),
+                )
+            ),
+        ]
+        column_widths = [
+            max(len(file_row[column_index]) for file_row in file_rows)
+            for column_index in range(len(file_columns))
+        ]
+        with open(timing_path, "w") as timing_file:
+            for file_row in file_rows:
+                timing_file.write(
+                    "  ".join(
+                        row_text.ljust(column_width)
+                        for row_text, column_width in zip(
+                            file_row[:-1], column_widths, strict=True
+                        )
+                    )
+                    + f"  {file_row[-1]}\n"
+                )
+        slow_rows = [
+            timing_row
+            for timing_row in timing_rows
+            if float(timing_row.duration_ms) > timing_row.limit_ms()
+        ]
+        if not slow_rows:
+            return 0
+        slowest_row = max(
+            slow_rows, key=lambda timing_row: float(timing_row.duration_ms)
+        )
+        print(
+            f"error: {slowest_row.page_file}: {slowest_row.phase_label} took"
+            f" {slowest_row.duration_ms} ms in {slowest_row.shot}, over"
+            f" {slowest_row.limit_ms()} ms, listed in {timing_path}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Returns each page file's slowest load and largest phases, then clicks.
     def timing_rows(self) -> list[TimingRow]:
         largest_timings: dict[tuple[str, str], PageTiming] = {}
         for page_timing in self.page_timings:
@@ -1085,61 +2330,46 @@ class Screenshots:
             file_timings.setdefault(page_timing.page_file, []).append(
                 page_timing
             )
-        kept_rows: list[TimingRow] = []
-        for page_file, page_file_timings in sorted(
-            file_timings.items(),
-            key=lambda file_entry: -file_entry[1][0].duration_us,
+        kept_timings: list[PageTiming] = []
+        for page_file_timings in sorted(
+            file_timings.values(),
+            key=lambda file_entry: -file_entry[0].duration_us,
         ):
-            for page_timing in page_file_timings[
+            kept_timings += page_file_timings[
                 : test_settings.TIMING_FILE_LINES_MAX
-            ]:
-                duration_ms = (
-                    page_timing.duration_us
-                    / test_settings.TIMING_MICROSECONDS_PER_MILLISECOND
+            ]
+        kept_rows: list[TimingRow] = []
+        for kept_timing in kept_timings + self.click_timings:
+            duration_ms = (
+                kept_timing.duration_us
+                / test_settings.TIMING_MICROSECONDS_PER_MILLISECOND
+            )
+            kept_rows.append(
+                TimingRow(
+                    f"{duration_ms:.1f}",
+                    kept_timing.page_file,
+                    kept_timing.phase_label,
+                    kept_timing.shot,
                 )
-                kept_rows.append(
-                    TimingRow(
-                        f"{duration_ms:.1f}",
-                        page_file,
-                        page_timing.phase_label,
-                        page_timing.shot,
-                    )
-                )
+            )
         return kept_rows
 
     # Returns the longest load and phase slice of each page file a trace shows.
     def trace_page_timings(
         self, trace_events: list[Any], root_url: str, shot: str
     ) -> list[PageTiming]:
-        timed_events = [
+        mark_events = [
             trace_event
             for trace_event in trace_events
-            if trace_event["ph"] in test_settings.TRACE_SLICE_TYPES
-            or trace_event["name"] in test_settings.TRACE_MARK_NAMES
+            if trace_event["name"] in test_settings.TRACE_MARK_NAMES
+            and trace_event["ph"] != test_settings.TRACE_END_TYPE
         ]
-        timed_events.sort(key=lambda trace_event: trace_event["ts"])
+        mark_events.sort(key=lambda trace_event: trace_event["ts"])
         commit_times: dict[str, list[float]] = {}
         commit_files: dict[str, list[str]] = {}
         load_marks: list[tuple[str, float]] = []
-        phase_slices: list[tuple[Any, float]] = []
-        begun_slices: dict[tuple[int, int], list[Any]] = {}
-        for trace_event in timed_events:
-            event_type = trace_event["ph"]
-            thread = (trace_event["pid"], trace_event["tid"])
-            if event_type == test_settings.TRACE_END_TYPE:
-                begun_event = begun_slices[thread].pop()
-                if begun_event["name"] in test_settings.TRACE_PHASES:
-                    phase_slices.append(
-                        (begun_event, trace_event["ts"] - begun_event["ts"])
-                    )
-                continue
-            if event_type == test_settings.TRACE_BEGIN_TYPE:
-                begun_slices.setdefault(thread, []).append(trace_event)
-            elif (
-                event_type == test_settings.TRACE_COMPLETE_TYPE
-                and trace_event["name"] in test_settings.TRACE_PHASES
-            ):
-                phase_slices.append((trace_event, trace_event["dur"]))
+        phase_slices = self.trace_page_slices(trace_events)
+        for trace_event in mark_events:
             if trace_event["name"] == test_settings.TRACE_COMMIT_NAME:
                 commit_data = trace_event["args"]["data"]
                 commit_times.setdefault(commit_data["frame"], []).append(
@@ -1152,6 +2382,19 @@ class Screenshots:
                 load_marks.append(
                     (trace_event["args"]["data"]["frame"], trace_event["ts"])
                 )
+        commit_phase_ends: dict[tuple[str, int], float] = {}
+        for begun_event, duration_us in phase_slices:
+            frame = begun_event["args"][
+                test_settings.TRACE_PHASES[begun_event["name"]][1]
+            ]["frame"]
+            commit_key = (
+                frame,
+                self.commit_index_at(commit_times, frame, begun_event["ts"]),
+            )
+            commit_phase_ends[commit_key] = max(
+                commit_phase_ends.get(commit_key, 0),
+                begun_event["ts"] + duration_us,
+            )
         page_timings: dict[tuple[str, str], PageTiming] = {}
         loaded_commits: set[tuple[str, int]] = set()
         for frame, load_time in load_marks:
@@ -1167,7 +2410,11 @@ class Screenshots:
                     commit_files[frame][commit_index],
                     test_settings.TIMING_LOAD_PHASE_NAME,
                     test_settings.TIMING_LOAD_PHASE_NAME,
-                    load_time - commit_times[frame][commit_index],
+                    max(
+                        load_time,
+                        commit_phase_ends.get((frame, commit_index), 0),
+                    )
+                    - commit_times[frame][commit_index],
                     shot,
                 ),
             )
@@ -1181,11 +2428,6 @@ class Screenshots:
                 commit_times, frame, begun_event["ts"]
             )
             if commit_index < 0 or not commit_files[frame][commit_index]:
-                continue
-            if (
-                begun_event["name"] == test_settings.TRACE_FUNCTION_CALL_NAME
-                and slice_data["scriptId"] == test_settings.TRACE_NO_SCRIPT_ID
-            ):
                 continue
             phase_label = phase_name
             if phase_name == test_settings.TIMING_SCRIPT_PHASE_NAME:
@@ -1210,35 +2452,101 @@ class Screenshots:
             )
         return list(page_timings.values())
 
+    # Returns the time from a trace's first press to the end of its last phase.
+    def trace_press_span(
+        self, trace_events: list[Any], trace_name: str
+    ) -> float:
+        press_starts = [
+            begun_event["ts"]
+            for begun_event, _ in self.trace_slices(trace_events)
+            if begun_event["name"] == test_settings.TRACE_DISPATCH_NAME
+            and begun_event["args"]["data"]["type"]
+            in test_settings.TRACE_PRESS_EVENT_TYPES
+        ]
+        phase_ends = [
+            begun_event["ts"] + duration_us
+            for begun_event, duration_us in self.trace_page_slices(
+                trace_events
+            )
+        ]
+        if not press_starts:
+            raise RuntimeError(
+                f"{trace_name}: the trace holds no"
+                f" {test_settings.TRACE_PRESS_EVENT_TYPES[0]}"
+            )
+        return max(phase_ends) - min(press_starts)
+
+    # Returns each phase slice of page code, the tool's waits left out.
+    def trace_page_slices(
+        self, trace_events: list[Any]
+    ) -> list[tuple[Any, float]]:
+        page_slices: list[tuple[Any, float]] = []
+        for begun_event, duration_us in self.trace_slices(trace_events):
+            if begun_event["name"] not in test_settings.TRACE_PHASES:
+                continue
+            slice_data = begun_event["args"][
+                test_settings.TRACE_PHASES[begun_event["name"]][1]
+            ]
+            # A wait's own call or a call into no script runs no page code.
+            if slice_data.get("url") == test_settings.WAIT_SCRIPT_URL or (
+                begun_event["name"] == test_settings.TRACE_FUNCTION_CALL_NAME
+                and slice_data["scriptId"] == test_settings.TRACE_NO_SCRIPT_ID
+            ):
+                continue
+            page_slices.append((begun_event, duration_us))
+        return page_slices
+
+    # Returns each slice a trace holds, its first event and its duration.
+    def trace_slices(self, trace_events: list[Any]) -> list[tuple[Any, float]]:
+        slice_events = [
+            trace_event
+            for trace_event in trace_events
+            if trace_event["ph"] in test_settings.TRACE_SLICE_TYPES
+        ]
+        slice_events.sort(key=lambda trace_event: trace_event["ts"])
+        trace_slices: list[tuple[Any, float]] = []
+        begun_slices: dict[tuple[int, int], list[Any]] = {}
+        for trace_event in slice_events:
+            event_type = trace_event["ph"]
+            thread = (trace_event["pid"], trace_event["tid"])
+            if event_type == test_settings.TRACE_BEGIN_TYPE:
+                begun_slices.setdefault(thread, []).append(trace_event)
+            elif event_type == test_settings.TRACE_END_TYPE:
+                begun_event = begun_slices[thread].pop()
+                trace_slices.append(
+                    (begun_event, trace_event["ts"] - begun_event["ts"])
+                )
+            else:
+                trace_slices.append((trace_event, trace_event["dur"]))
+        return trace_slices
+
     # Returns each report page's load and largest phase slices in a trace.
     def trace_timings(
-        self, trace_path: str, page_dir: str, shot: str
+        self,
+        trace_events: list[Any],
+        trace_name: str,
+        page_dir: str,
+        shot: str,
     ) -> list[PageTiming]:
-        if not os.path.isfile(trace_path):
-            raise RuntimeError(f"{shot}: the browser wrote no {trace_path}")
-        with open(trace_path) as trace_file:
-            trace_text = trace_file.read()
         try:
             page_timings = self.trace_page_timings(
-                json.loads(trace_text)["traceEvents"],
-                self.file_url(page_dir),
-                shot,
+                trace_events, self.file_url(page_dir), shot
             )
         except (IndexError, KeyError, TypeError, ValueError) as error:
-            raise RuntimeError(f"{trace_path}: {error!r}") from error
+            raise RuntimeError(f"{trace_name}: {error!r}") from error
         if not any(
             page_timing.page_file == test_settings.ENTRY_PAGE
             and page_timing.phase_name == test_settings.TIMING_LOAD_PHASE_NAME
             for page_timing in page_timings
         ):
             raise RuntimeError(
-                f"{trace_path}: no {test_settings.TRACE_LOAD_NAME} of"
+                f"{trace_name}: no {test_settings.TRACE_LOAD_NAME} of"
                 f" {test_settings.ENTRY_PAGE} after"
                 f" its {test_settings.TRACE_COMMIT_NAME}"
             )
-        os.remove(trace_path)
         return page_timings
 
+    # Loads each shot of a view, checking its error, writing a pictured one.
     def view_shoot(
         self,
         page_dir: str,
@@ -1246,12 +2554,12 @@ class Screenshots:
         prefix: str,
         view: ScreenshotSet,
     ) -> int:
-        shot_variants = view.shot_variants()
+        browser_session = self.session()
+        is_pictured = view.is_pictured(view_index)
+        shot_variants = view.shot_variants(view_index)
         # The index page frames report pages, so only the report shots trace.
-        trace_path = (
-            ""
-            if view.shot_flags & test_settings.SHOOT_INDEX_PAGE
-            else self.trace_path
+        is_traced = not view.shot_flags & (
+            test_settings.SHOOT_INDEX_PAGE | test_settings.SHOOT_UNTIMED
         )
         for variant in shot_variants:
             shot = self.shot_name(
@@ -1259,25 +2567,37 @@ class Screenshots:
                 variant.size_name,
                 prefix,
                 view,
-                variant.toggle_dark_value,
+                variant.mode_name,
             )
-            self.shoot_one(
-                shot,
-                page_dir,
-                view.view_hash,
-                view.menu_entry_number,
-                variant.toggle_dark_value,
-                variant.width_px,
-                variant.height_px,
-                trace_path,
-            )
-            if trace_path:
-                self.page_timings += self.trace_timings(
-                    trace_path, page_dir, shot
+            with browser_session.tab(
+                variant.width_px, variant.height_px
+            ) as page_tab:
+                if is_traced:
+                    page_tab.trace_begin()
+                page_tab.page_open(
+                    self.page_url(
+                        page_dir,
+                        view.view_hash,
+                        view.menu_entry_number,
+                        variant.toggle_dark_value,
+                    )
                 )
-            # Only the first shot traces, as a trace holds the browser open.
-            trace_path = ""
-        return len(shot_variants)
+                if is_traced:
+                    self.page_timings += self.trace_timings(
+                        page_tab.trace_end(), shot, page_dir, shot
+                    )
+                # The index page frames error pages, so it draws reports.
+                if not view.shot_flags & test_settings.SHOOT_INDEX_PAGE:
+                    self.error_page_check(shot, view, page_tab.error_message())
+                if is_pictured:
+                    page_tab.image_write(
+                        os.path.join(
+                            self.out_dir, shot + test_settings.IMAGE_SUFFIX
+                        )
+                    )
+            # Only the first shot traces, so a page's timing is its 720p load.
+            is_traced = False
+        return len(shot_variants) if is_pictured else 0
 
 
 def main() -> int:
@@ -1383,16 +2703,6 @@ def main() -> int:
             namespace.build_root, test_settings.SCREENSHOT_SCRATCH_DIR_PATH
         )
     )
-    trace_path = os.path.abspath(
-        os.path.join(
-            namespace.build_root, test_settings.SCREENSHOT_TRACE_FILE_PATH
-        )
-    )
-    view_check_path = os.path.abspath(
-        os.path.join(
-            namespace.build_root, test_settings.SCREENSHOT_VIEW_CHECK_FILE_PATH
-        )
-    )
 
     report_flag = (
         test_settings.SHOOT_DIFF_REPORT
@@ -1400,48 +2710,49 @@ def main() -> int:
         else test_settings.SHOOT_REGULAR_REPORT
     )
     compare_dir = os.path.abspath(namespace.compare_out or out_dir)
-    shooter = Screenshots(
-        namespace.browser,
-        report,
-        report_flag,
-        out_dir,
-        compare_dir,
-        scratch_dir,
-        trace_path,
-        view_check_path,
-    )
     if namespace.compare_only:
-        shooter.gold_compare(gold_dir, namespace.prefix, namespace.verbose)
+        Screenshots(
+            None, report, report_flag, out_dir, compare_dir, scratch_dir
+        ).gold_compare(gold_dir, namespace.prefix, namespace.verbose)
         return 0
 
     os.makedirs(out_dir, exist_ok=True)
-    os.makedirs(os.path.dirname(trace_path), exist_ok=True)
     if namespace.verbose:
         verbose_print(
             namespace.verbose, [f"{os.path.basename(report)} -> {out_dir}"]
         )
-    shooter.test_views_check()
-    written = shooter.shoot_all(namespace.prefix)
-    shooter.logo_links_check()
-    timing_rows = shooter.timing_rows()
-
-    with open(
-        os.path.join(
-            perf2html_dir, "scripts", test_settings.INDEX_TEMPLATE_NAME
+    with BrowserSession(namespace.browser) as browser_session:
+        shooter = Screenshots(
+            browser_session,
+            report,
+            report_flag,
+            out_dir,
+            compare_dir,
+            scratch_dir,
         )
-    ) as template_file:
-        index_template = template_file.read()
-    shooter.index_write(
-        namespace.prefix,
-        os.path.join(perf2html_dir, test_settings.INDEX_PAGE_NAME),
-        index_template,
-        timing_rows,
-    )
-    written += shooter.index_shoot(
-        namespace.prefix,
-        os.path.join(perf2html_dir, test_settings.INDEX_PAGE_NAME),
-        namespace.index_hash,
-    )
+        shooter.test_views_check()
+        written = shooter.shoot_all(namespace.prefix)
+        shooter.clicks_time()
+        shooter.logo_links_check()
+        timing_rows = shooter.timing_rows()
+
+        with open(
+            os.path.join(
+                perf2html_dir, "scripts", test_settings.INDEX_TEMPLATE_NAME
+            )
+        ) as template_file:
+            index_template = template_file.read()
+        report_timings = shooter.index_write(
+            namespace.prefix,
+            os.path.join(perf2html_dir, test_settings.INDEX_PAGE_NAME),
+            index_template,
+            timing_rows,
+        )
+        written += shooter.index_shoot(
+            namespace.prefix,
+            os.path.join(perf2html_dir, test_settings.INDEX_PAGE_NAME),
+            namespace.index_hash,
+        )
     if namespace.verbose:
         verbose_print(namespace.verbose, [f"{written} screenshot(s)"])
     if namespace.compare_gold:
@@ -1451,7 +2762,11 @@ def main() -> int:
             namespace.verbose,
             [timing_row.verbose_line() for timing_row in timing_rows],
         )
-    return 0
+    return shooter.timing_file_write(
+        os.path.join(out_dir, test_settings.TIMING_FILE_NAME),
+        report_timings,
+        timing_rows,
+    )
 
 
 # Prints success lines, below the raw level as one Markdown text block.

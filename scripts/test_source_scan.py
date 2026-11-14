@@ -9,7 +9,7 @@ import argparse, os, re, sys
 from typing import NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import callgrind, test_settings
+import test_settings
 
 
 class SourceScan:
@@ -132,7 +132,7 @@ class SourceScan:
                 )
             return 0
         for fault in sorted(self.faults):
-            relative = os.path.relpath(fault.path, callgrind.REPO_ROOT)
+            relative = os.path.relpath(fault.path)
             print(
                 f"{relative}:{fault.line_number}: {fault.message}",
                 file=sys.stderr,

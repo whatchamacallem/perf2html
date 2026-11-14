@@ -26,27 +26,27 @@ EOF
 set -euo pipefail
 
 INVOKED_FROM="$PWD"
-cd -- "$(dirname -- "$0")"
-_SCRIPT_DIR="$PWD"
-_SCRIPT="$PWD/${0##*/}"
 
-_DIR_PERF2HTML=..
+. "$(dirname -- "$0")/settings.sh"
+. "$(dirname -- "$0")/utility.sh"
+. "$(dirname -- "$0")/test_utility.sh"
+
+project_root_check
+PERF2HTML_DIR_="$INVOKED_FROM"
+_SCRIPT_DIR="$PERF2HTML_DIR_/scripts"
+_SCRIPT="$_SCRIPT_DIR/${0##*/}"
 
 _COLUMNS_MAX=79
-_CLANG_FORMAT_CONFIG=../src/.clang-format
-_PRETTIER_CONFIG=.prettierrc.json
-_PYRIGHT_CONFIG=pyrightconfig.json
+_CLANG_FORMAT_CONFIG="$PERF2HTML_DIR_/src/.clang-format"
+_PRETTIER_CONFIG="$_SCRIPT_DIR/.prettierrc.json"
+_PYRIGHT_CONFIG="$_SCRIPT_DIR/pyrightconfig.json"
 
 _PYRIGHT_ALL_CLEAR_LINE='0 errors, 0 warnings, 0 informations'
 
 _SHELL_INDENT=2
-_RUFF_CONFIG=ruff.toml
+_RUFF_CONFIG="$_SCRIPT_DIR/ruff.toml"
 
-_WHITELIST_FILE=test_whitelist.txt
-
-. ./settings.sh
-. ./utility.sh
-. ./test_utility.sh
+_WHITELIST_FILE="$_SCRIPT_DIR/test_whitelist.txt"
 
 _BATCH_SCRIPT_NAME=perf2html_batch.sh
 _BUILD_LOCATION_EXECUTABLE_PATH=tests/perf/perf
@@ -63,16 +63,16 @@ _SCREENSHOT_BROWSER_URL=https://storage.googleapis.com
 _SCREENSHOT_BROWSER_URL+=/chrome-for-testing-public/156.0.8078.47/linux64
 _SCREENSHOT_BROWSER_URL+=/chrome-headless-shell-linux64.zip
 _SCREENSHOT_BROWSER_ZIP=/tmp/chrome-headless-shell-linux64.zip
-_SCREENSHOT_DIFF_DIR="$_DIR_PERF2HTML/screenshots-diff"
-_SCREENSHOT_GOLD_DIR="$_DIR_PERF2HTML/screenshots-gold"
+_SCREENSHOT_DIFF_DIR="$PERF2HTML_DIR_/screenshots-diff"
+_SCREENSHOT_GOLD_DIR="$PERF2HTML_DIR_/screenshots-gold"
 _SCREENSHOT_SCRIPT_NAME=test_screenshot.py
 _TEST_LIST_FILE_NAME=test_list.txt
 _TIMING_FILE_SUFFIX=.perf-stat.json
 
 _DEFAULT_REPORTS=(
-  "$_DIR_PERF2HTML/$REPORT_BASELINE_DIR_NAME"
-  "$_DIR_PERF2HTML/$REPORT_MODIFIED_DIR_NAME"
-  "$_DIR_PERF2HTML/$REPORT_DIFF_DIR_NAME"
+  "$PERF2HTML_DIR_/$REPORT_BASELINE_DIR_NAME"
+  "$PERF2HTML_DIR_/$REPORT_MODIFIED_DIR_NAME"
+  "$PERF2HTML_DIR_/$REPORT_DIFF_DIR_NAME"
 )
 
 tools_resolve() {
@@ -118,7 +118,7 @@ whitelist_expand() {
       error_exit 1 "error: $_WHITELIST_FILE:$_line: not one glob: '$_glob'"
     fi
 
-    mapfile -t _matches < <(compgen -G "$_DIR_PERF2HTML/$_glob")
+    mapfile -t _matches < <(compgen -G "$PERF2HTML_DIR_/$_glob")
     for _match in "${_matches[@]}"; do
       if [ ! -f "$_match" ]; then
         error_exit 1 \
@@ -288,18 +288,18 @@ report_version() {
 }
 
 test_expected_report_check_run() {
-  local _path _args _flags=("${VERBOSE_FLAGS[@]}" --readme-html)
+  local _path _args _flags=("${VERBOSE_FLAGS[@]}")
 
   heading_print test_report.py
   for _path in "${_DEFAULT_REPORTS[@]}"; do
     manifest_verify "$_path" "$(basename "$_path")" \
       "$REPORT_MANIFEST_VERSION_FULL" "$REPORT_MANIFEST_VERSION_DIFF"
 
-    _args=("$(cd "$_path" && pwd)")
+    _args=("$_path")
     if [ "$(report_version "$_path")" = "$REPORT_MANIFEST_VERSION_DIFF" ]; then
       _args+=(--diff
-        "--baseline=$_DIR_PERF2HTML/$REPORT_BASELINE_DIR_NAME"
-        "--modified=$_DIR_PERF2HTML/$REPORT_MODIFIED_DIR_NAME")
+        "--baseline=$PERF2HTML_DIR_/$REPORT_BASELINE_DIR_NAME"
+        "--modified=$PERF2HTML_DIR_/$REPORT_MODIFIED_DIR_NAME")
     fi
 
     subprocess_run python3 "$_SCRIPT_DIR/test_report.py" "${_flags[@]}" \
@@ -326,7 +326,7 @@ test_expected_build_location_check() {
   _scratch="$_build_directory/$_BUILD_LOCATION_SCRATCH_NAME"
 
   for _name in "$REPORT_BASELINE_DIR_NAME" "$REPORT_MODIFIED_DIR_NAME"; do
-    _path="$_DIR_PERF2HTML/$_name"
+    _path="$PERF2HTML_DIR_/$_name"
     _manifest="$_path/MANIFEST.txt"
     _executable="$(header_row "$_manifest" executable)"
     case "$_executable" in
@@ -366,19 +366,18 @@ test_source_scan_run() {
 }
 
 batch_run() {
-  local _flags=("${VERBOSE_FLAGS[@]}") _target _shown _exit_code=0
-  _target="$(cd "$_DIR_PERF2HTML" && pwd)"
+  local _flags=("${VERBOSE_FLAGS[@]}") _shown _exit_code=0
 
   if [ "$_REGENERATE" = 1 ]; then _flags+=(--regenerate); fi
 
   if [ "$_KEEP_ARTIFACTS" = 1 ]; then _flags+=(--keep-artifacts); fi
 
-  _shown="$_BATCH_SCRIPT_NAME ${_flags[*]} --target-dir=$_target"
+  _shown="$_BATCH_SCRIPT_NAME ${_flags[*]} --target-dir=$PERF2HTML_DIR_"
 
   log_verbose "$_shown"
 
-  "$_DIR_PERF2HTML/$_BATCH_SCRIPT_NAME" "${_flags[@]}" \
-    "--target-dir=$_target" || _exit_code=$?
+  "$PERF2HTML_DIR_/$_BATCH_SCRIPT_NAME" "${_flags[@]}" \
+    "--target-dir=$PERF2HTML_DIR_" || _exit_code=$?
   [ "$_exit_code" = 0 ] \
     || error_exit "$_exit_code" "error: exit $_exit_code from: $_shown"
 }
@@ -387,7 +386,7 @@ batch_run() {
 screenshot_command_set() {
   local _name="$1" _path _prefix _args
   shift
-  _path="$_DIR_PERF2HTML/$_name"
+  _path="$PERF2HTML_DIR_/$_name"
 
   _prefix="${_name#perf2html_}"
   _prefix="${_prefix%_report}_"
@@ -452,7 +451,7 @@ header_row() {
 regenerate_check() {
   [ "$_REGENERATE" = 1 ] || return 0
 
-  local _artifacts="$_DIR_PERF2HTML/$ARTIFACTS_NAME"
+  local _artifacts="$PERF2HTML_DIR_/$ARTIFACTS_NAME"
   if [ ! -d "$_artifacts" ]; then
     regenerate_refuse "no recordings at $_artifacts"
   fi

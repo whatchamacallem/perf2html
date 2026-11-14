@@ -17,22 +17,19 @@ window.try_catch_handler_(function () {
   const CALL_GRAPH_CLOSED_TEXT = settings_("CALL_GRAPH_CLOSED_TEXT");
   const CALL_GRAPH_LINE_TEXT = settings_("CALL_GRAPH_LINE_TEXT");
   const CALL_GRAPH_MOST_DRAWN_NODES = settings_("CALL_GRAPH_MOST_DRAWN_NODES");
-  const CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT = settings_(
-    "CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT",
-  );
   const CALL_GRAPH_PAD_TEXT = settings_("CALL_GRAPH_PAD_TEXT");
-  const CALL_GRAPH_REVEAL_CLEARANCE_CHARS = settings_(
-    "CALL_GRAPH_REVEAL_CLEARANCE_CHARS",
-  );
-  const CALL_GRAPH_REVEAL_CLEARANCE_LINES = settings_(
-    "CALL_GRAPH_REVEAL_CLEARANCE_LINES",
-  );
   const NUMBER_FRACTION_DIGITS = settings_("NUMBER_FRACTION_DIGITS");
   const NUMBER_MULTIPLE_SUFFIX_TEXT = settings_("NUMBER_MULTIPLE_SUFFIX_TEXT");
+  const STYLE_TABLE_CHUNK_ROWS_PROPERTY = settings_(
+    "STYLE_TABLE_CHUNK_ROWS_PROPERTY",
+  );
+  const TABLE_CHUNK_ROW_COUNT = settings_("TABLE_CHUNK_ROW_COUNT");
 
   const render_character_cells = window.render_character_cells_;
   const render_element = window.render_element_;
   const render_html_escape = window.render_html_escape_;
+  const CALL_GRAPH_CUTOFF_STOP_ROOTS =
+    window.report_preferences_.call_graph_cutoff_stop_roots;
   // Holds the width of a multiple at full precision, zero's.
   const MULTIPLE_WIDTH_CHARS = window.report_ui_.fixed_text(
     0,
@@ -68,18 +65,25 @@ window.try_catch_handler_(function () {
   ).test;
   const graph_table = document.getElementById("call-graph-table-");
   const call_graph_model = JSON.parse(graph_table.getAttribute("data-model-"));
-  const graph_body = window.render_element_of_(
-    render_element("tbody", {}, ""),
-  );
   const graph_head = window.render_element_of_(
     render_element("thead", {}, ""),
   );
+  // Holds the chunks of rows, each laid out only while it nears the view.
+  const graph_bodies = [];
+  // Writes a sizer row, its cells each column's widest, so chunks line up.
+  const sizer_row_markup = (sizer_cells_markup) =>
+    render_element(
+      "tr",
+      { class: "table-sizer-row-", "aria-hidden": "true" },
+      sizer_cells_markup,
+    );
 
   // Reads one function's row, its calls summed below.
   function function_record_read(function_row) {
     return {
       name: function_row[0],
       self_cost: function_row[1],
+      is_linked: function_row[2],
       invocation_count: 0,
       callee_edges: [],
     };
@@ -203,14 +207,18 @@ window.try_catch_handler_(function () {
   function branch_cost(node_path) {
     return branch_costs.get(path_key(node_path)) ?? 0;
   }
-  // Returns whether a branch has a shown child of enough cost to open it.
+  // Returns the cutoff percent, the chosen stop's root squared.
+  function cutoff_percent() {
+    return cutoff_root * cutoff_root;
+  }
+  // Returns whether a shown child costs the cutoff percent of the test.
   function branch_opens(node_path) {
     return shown_callee_edges(node_path).some(
       (call_edge) =>
         window.report_ui_.share_of_test(
           branch_cost([...node_path, call_edge.callee_index]),
           test_total,
-        ) >= CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT,
+        ) >= cutoff_percent(),
     );
   }
   // Returns a fresh open set, each function open only at its costliest branch.
@@ -234,12 +242,13 @@ window.try_catch_handler_(function () {
   }
   let button_graph_nodes = new WeakMap(),
     cell_symbol_buttons = new WeakMap(),
+    cutoff_root = null,
     drawn_rows = new Map(),
     heat_curve_name = null,
-    node_places = new Map(),
-    open_path_keys = call_graph_open_set(),
+    open_path_keys = null,
+    path_symbol_buttons = new Map(),
     rendered_preferences_text = null,
-    selected_function_name = null,
+    selected_function = null,
     sort_mode = null;
 
   // Lists a path's shown children by the chosen sort, each with its branch.
@@ -499,42 +508,106 @@ window.try_catch_handler_(function () {
   function head_draw(group_count) {
     const column_count = group_count * GROUP_COLUMNS.length;
     if (graph_head.rows[0]?.cells.length === column_count) return;
-    graph_head.innerHTML = render_element(
-      "tr",
-      {},
-      GROUP_COLUMNS.map((group_column) =>
-        render_element("td", group_column, ""),
-      )
-        .join("")
-        .repeat(group_count),
-    );
+    graph_head.innerHTML =
+      render_element(
+        "tr",
+        {},
+        GROUP_COLUMNS.map((group_column) =>
+          render_element("td", group_column, ""),
+        )
+          .join("")
+          .repeat(group_count),
+      ) + sizer_row_markup("");
   }
-  // Puts the rows in the body in order, moving only a row out of place.
+  // Ranks a cell's width: its characters, then a button's edge lines.
+  const cell_width_rank = (graph_cell) =>
+    2 * graph_cell.textContent.length +
+    (graph_cell.querySelector(".menu-button-") ? 1 : 0);
+  // Writes each column's widest one column cell, an empty cell for none.
+  function sizer_cells_markup(widest_cells, group_count) {
+    let cells_markup = "";
+    for (
+      let column_index = 0;
+      column_index < group_count * GROUP_COLUMNS.length;
+      column_index++
+    )
+      cells_markup += widest_cells[column_index]
+        ? widest_cells[column_index].outerHTML
+        : render_element(
+            "td",
+            GROUP_COLUMNS[column_index % GROUP_COLUMNS.length],
+            "",
+          );
+    return cells_markup;
+  }
+  // Writes every sizer row whose cells differ from the widest cells now.
+  function sizer_rows_draw(cells_markup) {
+    for (const sizer_row of graph_table.querySelectorAll(
+      ":scope > :is(thead, tbody) > tr.table-sizer-row-",
+    ))
+      if (sizer_row.innerHTML !== cells_markup)
+        sizer_row.innerHTML = cells_markup;
+  }
+  // Puts the rows in their chunks in order, moving only a row out of place.
   function rows_place(graph_rows) {
-    let next_row = graph_body.firstElementChild;
-    for (const graph_row of graph_rows) {
-      if (graph_row === next_row) next_row = next_row.nextElementSibling;
-      else graph_body.insertBefore(graph_row, next_row);
+    const chunk_count = Math.max(
+      1,
+      Math.ceil(graph_rows.length / TABLE_CHUNK_ROW_COUNT),
+    );
+    while (graph_bodies.length < chunk_count) {
+      const graph_body = window.render_element_of_(
+        render_element("tbody", {}, sizer_row_markup("")),
+      );
+      graph_table.append(graph_body);
+      graph_bodies.push(graph_body);
     }
+    while (graph_bodies.length > chunk_count) graph_bodies.pop().remove();
+    graph_bodies.forEach((graph_body, chunk_index) => {
+      const chunk_start = chunk_index * TABLE_CHUNK_ROW_COUNT;
+      const chunk_rows = graph_rows.slice(
+        chunk_start,
+        chunk_start + TABLE_CHUNK_ROW_COUNT,
+      );
+      // A row a later chunk holds moves on when that chunk takes it.
+      let next_row = graph_body.rows[0].nextElementSibling;
+      for (const graph_row of chunk_rows) {
+        if (graph_row === next_row) next_row = next_row.nextElementSibling;
+        else graph_body.insertBefore(graph_row, next_row);
+      }
+      graph_body.style.setProperty(
+        STYLE_TABLE_CHUNK_ROWS_PROPERTY,
+        String(chunk_rows.length),
+      );
+    });
   }
   // Draws every layout row, making only a row whose markup changed.
   function graph_render() {
     button_graph_nodes = new WeakMap();
     cell_symbol_buttons = new WeakMap();
-    node_places = new Map();
+    path_symbol_buttons = new Map();
     const layout_rows = graph_layout();
     const symbol_widths = symbol_column_widths(layout_rows);
     const stale_rows = drawn_rows;
     drawn_rows = new Map();
-    const graph_rows = layout_rows.map((layout_row) => {
-      const row_markup = render_element(
-        "tr",
-        {},
-        layout_row_markup(layout_row, symbol_widths),
-      );
-      const graph_row =
-        stale_rows.get(row_markup)?.shift() ??
-        window.render_element_of_(row_markup);
+    const widest_cells = [];
+    const row_markups = layout_rows.map((layout_row) =>
+      render_element("tr", {}, layout_row_markup(layout_row, symbol_widths)),
+    );
+    const kept_rows = row_markups.map((row_markup) =>
+      stale_rows.get(row_markup)?.shift(),
+    );
+    // The rows no draw kept are made together, from one parse.
+    const made_template = document.createElement("template");
+    made_template.innerHTML = row_markups
+      .filter((row_markup, row_index) => !kept_rows[row_index])
+      .join("");
+    const made_rows = [...made_template.content.children];
+    if (made_rows.length !== kept_rows.filter((kept_row) => !kept_row).length)
+      window.throw_exception_("str_error_internal");
+    let made_count = 0;
+    const graph_rows = layout_rows.map((layout_row, row_index) => {
+      const row_markup = row_markups[row_index];
+      const graph_row = kept_rows[row_index] ?? made_rows[made_count++];
       if (!drawn_rows.has(row_markup)) drawn_rows.set(row_markup, []);
       drawn_rows.get(row_markup).push(graph_row);
       const column_cells = row_column_cells(graph_row);
@@ -549,11 +622,11 @@ window.try_catch_handler_(function () {
         const symbol_button = node_cells
           .map((node_cell) => node_cell.querySelector(".menu-button-"))
           .find((found_button) => found_button);
-        node_places.set(path_key(layout_place.node_path), {
-          node_cells,
-          symbol_button,
-        });
         if (!symbol_button) return;
+        path_symbol_buttons.set(
+          path_key(layout_place.node_path),
+          symbol_button,
+        );
         button_graph_nodes.set(symbol_button, layout_place);
         // Each of a symbol's cells takes the click its button takes.
         for (const node_cell of node_cells) {
@@ -561,97 +634,93 @@ window.try_catch_handler_(function () {
           cell_symbol_buttons.set(node_cell, symbol_button);
         }
       });
+      column_cells.forEach((column_cell, column_index) => {
+        const widest_cell = widest_cells[column_index];
+        if (
+          column_cell.colSpan === 1 &&
+          (!widest_cell ||
+            cell_width_rank(column_cell) > cell_width_rank(widest_cell))
+        )
+          widest_cells[column_index] = column_cell;
+      });
       return graph_row;
     });
     for (const stale_row of [...stale_rows.values()].flat())
       stale_row.remove();
+    const group_count = layout_rows[0].length;
+    head_draw(group_count);
     rows_place(graph_rows);
-    head_draw(layout_rows[0].length);
+    sizer_rows_draw(sizer_cells_markup(widest_cells, group_count));
     window.report_ui_.layout_activate();
   }
 
-  // Returns the least scroll showing a span with clearance, its start first.
-  function reveal_travel(span_start, span_end, window_size, clearance_size) {
-    const start_travel = span_start - clearance_size;
-    if (start_travel < 0) return start_travel;
-    return Math.min(
-      start_travel,
-      Math.max(0, span_end + clearance_size - window_size),
+  // Asks the top page for the cutoff of the stop the slider reaches.
+  function cutoff_stop_choose(cutoff_stop) {
+    window.report_ui_.call_graph_cutoff_choose_send(
+      CALL_GRAPH_CUTOFF_STOP_ROOTS[cutoff_stop],
     );
   }
-  // Scrolls the page the least that shows the cells, with the clearance.
-  function cells_reveal(span_cells) {
-    const design_px = window.report_ui_.design_px;
-    const box_rect = page_scroll_box.getBoundingClientRect();
-    const table_style = getComputedStyle(graph_table);
-    const cell_rects = span_cells.map((span_cell) =>
-      span_cell.getBoundingClientRect(),
-    );
-    const span_edge = (pick_edge, edge_name) =>
-      pick_edge(...cell_rects.map((cell_rect) => cell_rect[edge_name]));
-    page_scroll_box.scrollTop += reveal_travel(
-      design_px(span_edge(Math.min, "top") - box_rect.top),
-      design_px(span_edge(Math.max, "bottom") - box_rect.top),
-      page_scroll_box.clientHeight,
-      parseFloat(table_style.scrollMarginTop),
-    );
-    page_scroll_box.scrollLeft += reveal_travel(
-      design_px(span_edge(Math.min, "left") - box_rect.left),
-      design_px(span_edge(Math.max, "right") - box_rect.left),
-      page_scroll_box.clientWidth,
-      parseFloat(table_style.scrollMarginLeft),
-    );
-  }
-  // Shows the selected function after the heading's copy.
+  // Shows the cutoff slider, then the selected function, after the copy.
   function heading_tail_show() {
+    const cutoff_entry = window.report_ui_.strip.entry_make(
+      "cutoff",
+      "action",
+      window.ui_strings_.text("str_call_graph_cutoff"),
+      {
+        is_widget: true,
+        widget_text: window.report_ui_.strip.slider_text(
+          CALL_GRAPH_CUTOFF_STOP_ROOTS.indexOf(cutoff_root),
+          CALL_GRAPH_CUTOFF_STOP_ROOTS.length - 1,
+        ),
+        on_stop_choose: cutoff_stop_choose,
+      },
+    );
+    // A function the heat map cannot show, having no line, is no link.
     const selected_entries =
-      selected_function_name === null
+      selected_function === null
         ? []
         : [
             window.report_ui_.strip.entry_make(
               "selected_function",
-              "link",
-              selected_function_name,
-              {
-                href: window.report_ui_.address.function_hash(
-                  shown_test_name,
-                  selected_function_name,
-                ),
-              },
+              selected_function.is_linked ? "link" : "label",
+              selected_function.name,
+              selected_function.is_linked
+                ? {
+                    href: window.report_ui_.address.function_hash(
+                      shown_test_name,
+                      selected_function.name,
+                      true,
+                    ),
+                  }
+                : {},
             ),
           ];
-    window.report_ui_.page_heading_tail_set(page_heading, selected_entries);
+    window.report_ui_.page_heading_tail_set(page_heading, [
+      cutoff_entry,
+      ...selected_entries,
+    ]);
   }
-  // Opens or closes a symbol's node, draws again, shows it, selects it.
+  // Opens or closes a symbol's node, draws again and selects it.
   function node_toggle(symbol_button) {
     const graph_node = button_graph_nodes.get(symbol_button);
-    selected_function_name = path_function(graph_node.node_path).name;
+    selected_function = path_function(graph_node.node_path);
     heading_tail_show();
     const node_key = path_key(graph_node.node_path);
-    const is_opening = !open_path_keys.has(node_key);
-    if (is_opening) open_path_keys.add(node_key);
-    else open_path_keys.delete(node_key);
+    if (open_path_keys.has(node_key)) open_path_keys.delete(node_key);
+    else open_path_keys.add(node_key);
     const had_focus = document.activeElement === symbol_button;
     graph_render();
-    const toggled_place = node_places.get(node_key);
     // The redraw replaced the button, so its new one takes the focus.
-    if (had_focus) toggled_place.symbol_button.focus({ preventScroll: true });
-    cells_reveal(
-      is_opening
-        ? path_children(graph_node.node_path).flatMap(
-            (child_node) =>
-              node_places.get(path_key(child_node.node_path)).node_cells,
-          )
-        : toggled_place.node_cells,
-    );
-    window.report_ui_.focused_path_send([selected_function_name]);
+    if (had_focus)
+      path_symbol_buttons.get(node_key).focus({ preventScroll: true });
+    window.report_ui_.focused_path_send([selected_function.name]);
   }
   // Returns the symbol button of the cell an input reached, if any.
   function symbol_button_of(browser_event) {
     return cell_symbol_buttons.get(browser_event.target.closest("td"));
   }
 
-  // Takes the relayed preferences: the heat curve and the sort.
+  // Takes the relayed preferences: the heat curve, the sort and the cutoff.
   function preferences_handler() {
     const view_preferences = window.report_preferences_.now();
     const scale_choice = window.report_preferences_
@@ -663,11 +732,28 @@ window.try_catch_handler_(function () {
     if (!scale_choice) window.throw_exception_("str_error_internal");
     heat_curve_name = scale_choice.curve;
     sort_mode = view_preferences.call_graph_sort_mode;
+    const taken_cutoff_root = cutoff_root;
+    cutoff_root = view_preferences.call_graph_cutoff_root;
+    // Logs each cutoff the view takes, the first at page load included.
+    if (cutoff_root !== taken_cutoff_root)
+      console.log(
+        window.ui_strings_.text_fill("str_call_graph_cutoff_log", {
+          percent: window.report_ui_.percent_text(cutoff_percent()),
+        }),
+      );
   }
   // Draws the graph and its heading's tail when the preferences change it.
   function preferences_apply() {
+    const opened_cutoff_root = cutoff_root;
     preferences_handler();
-    const preferences_text = JSON.stringify([heat_curve_name, sort_mode]);
+    // A new cutoff, the page's first included, opens a fresh open set.
+    if (cutoff_root !== opened_cutoff_root)
+      open_path_keys = call_graph_open_set();
+    const preferences_text = JSON.stringify([
+      heat_curve_name,
+      sort_mode,
+      cutoff_root,
+    ]);
     if (preferences_text === rendered_preferences_text) return;
     rendered_preferences_text = preferences_text;
     graph_render();
@@ -675,8 +761,9 @@ window.try_catch_handler_(function () {
   }
   // Opens a fresh open set, draws every row and clears the selection.
   function view_reset() {
+    preferences_handler();
     open_path_keys = call_graph_open_set();
-    selected_function_name = null;
+    selected_function = null;
     // Forgets the drawn preferences, so the graph draws again.
     rendered_preferences_text = null;
     preferences_apply();
@@ -693,11 +780,8 @@ window.try_catch_handler_(function () {
     page_scroll_box.scrollTo(0, 0);
   }
 
-  // Keeps the reveal clearance as the table's scroll margin, in page units.
-  graph_table.style.scrollMarginTop = CALL_GRAPH_REVEAL_CLEARANCE_LINES + "lh";
-  graph_table.style.scrollMarginLeft =
-    CALL_GRAPH_REVEAL_CLEARANCE_CHARS + "ch";
-  graph_table.append(graph_head, graph_body);
+  graph_table.classList.add("table-chunked-");
+  graph_table.append(graph_head);
   graph_table.addEventListener(
     "click",
     window.try_catch_handler_((click_event) => {

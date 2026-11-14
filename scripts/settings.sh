@@ -52,7 +52,7 @@ declare -A ARTIFACT_RUN_FILE_FORMATS=(
   ["profile-log"]='%s/perf2html.log'
   ["profile-regenerate-log"]='%s/perf2html.regenerate.log'
   ["test-list"]='%s/test_list.txt'
-  ["timing-data"]='%s/0_timing_data.json'
+  ["timing-data"]='%s/0_test_data.json'
 )
 
 declare -A ARTIFACT_TEST_FILE_FORMATS=(
@@ -164,6 +164,8 @@ REPORT_SCRIPTS_DIR_NAME=scripts
 
 REPORT_SOURCES_DIR_NAME=sources
 
+REPO_ROOT_DIR_NAME=curl
+
 SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE=3
 
 TEST_LOOPS=100
@@ -183,10 +185,7 @@ declare -A TOOL_INSTALL_COMMANDS=(
 
 TRACE_BUILD_DIR=build-instr
 
-TRACE_OUT_VARIABLE=PERF_TRACE_OUT
-
 TRACE_SKIP_ALL=9223372036854775808
-TRACE_SKIP_VARIABLE=PERF_TRACE_SKIP
 
 VERBOSE=0
 

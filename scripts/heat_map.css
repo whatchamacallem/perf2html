@@ -48,17 +48,13 @@
 .heat-map-source-information-box- {
   position: relative;
 }
-.heat-map-source-information-box-close-symbol- {
-  position: absolute;
-  top: 0;
-  right: 0;
+/* A box's body is as wide as what it shows, the span its image draws. */
+.heat-map-source-information-box-body- {
+  width: fit-content;
 }
-.heat-map-source-information-box-heading- {
-  white-space: pre;
-}
-/* A box's table titles stay on their tables. */
+/* A box's table titles stay on their tables, each holding its own lines. */
 .heat-map-source-information-box- th {
-  position: static;
+  position: relative;
 }
 :is(
     tr.heat-map-source-line-detail-row-,
@@ -68,37 +64,30 @@
   white-space: normal;
   padding: 0;
 }
-/* A box's table and first control take the source line as left. */
-:is(
-    tr.heat-map-source-line-detail-row-,
-    tr.heat-map-source-file-information-row-
-  )
-  .table-,
-:is(
-    tr.heat-map-source-line-detail-row-,
-    tr.heat-map-source-file-information-row-
-  )
-  .table-
-  :is(th, td):first-child,
-:is(
-    tr.heat-map-source-line-detail-row-,
-    tr.heat-map-source-file-information-row-
-  )
-  .heat-map-source-information-box-
-  > div
-  > .menu-button-:first-child {
+/* A file with no source has its box beside the tree, level with its title. */
+.heat-map-source-box-alone- {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: start;
+  align-items: start;
+}
+/* A box's tables take the source line as left. */
+.heat-map-source-information-box- .table-,
+.heat-map-source-information-box- .table- :is(th, td):first-child {
   border-left: 0;
 }
 td.heat-map-source-table-line-number-cell- {
   user-select: none;
 }
-tr.has-callee- td.heat-map-source-table-line-number-cell-::before {
-  content: var(--heat-map-source-table-line-number-cell-callee-marker-text-);
-  display: inline-block;
-  width: var(--heat-map-source-table-line-number-cell-callee-marker-width-);
-}
 tr.clickable- {
   cursor: pointer;
+}
+/* A box wider than the titles widens the source column of every chunk. */
+.heat-map-source-table-
+  > :is(thead, tbody)
+  > tr.table-sizer-row-
+  > td.heat-map-source-table-code-cell- {
+  min-width: var(--heat-map-source-box-room-);
 }
 /* A hovered source line's tree cell ends where the line's frame starts. */
 tr[data-line-number-]:hover > td:first-child {
@@ -108,9 +97,11 @@ tr[data-line-number-]:hover > td:first-child {
 #heat-map-ticker-tape-box- {
   min-height: 1lh;
 }
+/* The tape's first entry follows one gap, as each entry after it does. */
 .heat-map-source-ticker-tape- {
   display: flex;
   gap: var(--heat-map-source-ticker-tape-gap-);
+  padding-left: var(--heat-map-source-ticker-tape-gap-);
   flex-wrap: nowrap;
   overflow: hidden;
 }
@@ -124,6 +115,7 @@ tr[data-line-number-]:hover > td:first-child {
   width: var(--heat-map-minimap-width-);
   overflow: hidden;
   cursor: pointer;
+  isolation: isolate;
 }
 #heat-map-minimap-.empty- {
   display: none;
@@ -133,14 +125,16 @@ tr[data-line-number-]:hover > td:first-child {
   top: 0;
   left: 0;
 }
-#heat-map-minimap-box- table {
-  border-collapse: collapse;
-  table-layout: fixed;
+/* A heat colored line's band spans the minimap's width behind its text. */
+.heat-map-minimap-band- {
+  display: inline-block;
   width: 100%;
+  vertical-align: top;
 }
-#heat-map-minimap-box- td {
-  padding: 0;
-  white-space: pre;
+/* An open box's gap, its line as tall as the box at the minimap's scale. */
+.heat-map-minimap-box-gap- {
+  display: inline-block;
+  vertical-align: top;
 }
 #heat-map-minimap-viewport- {
   position: absolute;
@@ -151,4 +145,11 @@ tr[data-line-number-]:hover > td:first-child {
 }
 #heat-map-minimap-viewport-.drag- {
   cursor: grabbing;
+}
+/* The shown part's backing, under the minimap's text, over its own fill. */
+#heat-map-minimap-viewport-::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
 }

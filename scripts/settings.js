@@ -51,10 +51,6 @@ window.try_catch_handler_(function () {
       settings_("STYLE_DESIGN_FONT_SIZE_PX") + "px";
     root_values[settings_("STYLE_DESIGN_VIEWPORT_HEIGHT_PROPERTY")] =
       settings_("STYLE_DESIGN_VIEWPORT_HEIGHT_START_PERCENT") + "vh";
-    root_values[
-      settings_("STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_PROPERTY")
-    ] =
-      settings_("STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_CHARS") + "ch";
     root_values[settings_("STYLE_PAGE_FONT_FAMILY_PROPERTY")] = settings_(
       "STYLE_PAGE_FONT_FAMILY",
     );

@@ -14,9 +14,6 @@ window.try_catch_handler_(function () {
   const FLAME_GRAPH_PROFILE_DIR_NAME = settings_(
     "FLAME_GRAPH_PROFILE_DIR_NAME",
   );
-  const FLAME_GRAPH_PROFILE_GLOBAL_NAME = settings_(
-    "FLAME_GRAPH_PROFILE_GLOBAL_NAME",
-  );
   const FLAME_GRAPH_STARTUP_POLL_DELAY_MS = settings_(
     "FLAME_GRAPH_STARTUP_POLL_DELAY_MS",
   );
@@ -29,7 +26,7 @@ window.try_catch_handler_(function () {
   const _profile_script = document.createElement("script");
 
   function profile_hand_over() {
-    const filed_profiles = window[FLAME_GRAPH_PROFILE_GLOBAL_NAME];
+    const filed_profiles = window.report_flame_graph_profiles_;
     if (!filed_profiles || !filed_profiles[_FORWARDED_ADDRESS.test])
       window.throw_exception_("str_error_internal");
     const test_profile = filed_profiles[_FORWARDED_ADDRESS.test];

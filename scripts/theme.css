@@ -83,18 +83,40 @@ pre {
   grid-row: sideways-bar-;
 }
 
+/* The call graph page sizes its heading by the width it shows. */
+#call-graph-page- {
+  container-type: inline-size;
+}
+/* The page is as wide as the graph, so the heading sticks on both axes. */
+#call-graph-page- > .page- {
+  min-width: max-content;
+}
+/* The heading and the table's clear top border, now its own, stay in view. */
+#call-graph-page- .page-heading- {
+  position: sticky;
+  top: 0;
+  left: var(--page-inset-inline-);
+  z-index: var(--call-graph-heading-z-index-);
+  width: calc(100cqw - 2 * var(--page-inset-inline-));
+  border-bottom: var(--call-graph-border-width-) solid transparent;
+}
 /* The call graph table, as wide as its longest row, in its clear border. */
 #call-graph-table- {
   position: relative;
   isolation: isolate;
   width: max-content;
   border: var(--call-graph-border-width-) solid transparent;
+  border-top: 0;
   border-collapse: separate;
   border-spacing: 0;
   white-space: pre;
 }
 #call-graph-table- td {
   padding: 0;
+}
+/* The head row's columns color the whole table, so the head stays unpinned. */
+#call-graph-table- > thead {
+  position: static;
 }
 /* A share or multiple sits right, so each lines up with those above it. */
 #call-graph-table- :is(.call-graph-share-, .call-graph-multiple-) {
@@ -118,31 +140,44 @@ pre {
   min-width: max-content;
 }
 
-/* The heat map: its hottest lines over the panes. */
+/* Hottest lines over the main column, both rows as wide as the page. */
 #heat-map- {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
 }
-/* The panes: the main column, then the minimap and the main box's bar. */
-#heat-map-panes- {
-  display: flex;
-  min-height: 0;
-}
-/* The main column fills the row until its edge narrows it, sizing the tree. */
+/* The main column: the main box under its edge, over its sideways bar. */
 #heat-map-main-column- {
-  flex: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
 }
-/* The main box, over its sideways bar, sizes the tree that hangs in it. */
+/* The main box sizes the tree that hangs in it. */
 #heat-map-main- {
+  grid-area: 1 / 1;
   container-type: size;
   overflow-x: hidden;
   overflow-y: auto;
 }
+/* The minimap against the main box's bar, both over the box's right edge. */
+#heat-map-main-edge- {
+  grid-area: 1 / 1;
+  justify-self: end;
+  z-index: var(--heat-map-main-edge-z-index-);
+  display: flex;
+}
+/* A source under a shown minimap ends past it, so a scroll shows its end. */
+#heat-map-main-column-:has(#heat-map-minimap-:not(.empty-)) .heat-map-source- {
+  width: fit-content;
+  padding-inline-end: calc(
+    var(--heat-map-minimap-width-) +
+      var(--page-text-scrollbar-vertical-width-) *
+      var(--page-text-scrollbar-vertical-font-multiple-)
+  );
+}
 /* The tree's title is as wide as the tree, which hangs below it in view. */
-.heat-map-source-table- > thead > tr > th:first-child {
+.heat-map-source-table- > :is(thead, tbody) > tr > th:first-child {
   min-width: var(--heat-map-tree-width-);
 }
 /* The tree beside its bar, down to the main box bottom while titles stick. */
@@ -227,6 +262,8 @@ pre {
   vertical-align: top;
   height: inherit;
   overflow: clip;
+  user-select: none;
+  touch-action: none;
 }
 .menu-status-bar- {
   margin-left: var(--menu-status-bar-padding-left-);
@@ -287,6 +324,12 @@ table.table- {
   position: relative;
   border-collapse: collapse;
 }
+/* Its side lines keep their room in either mode, so no mode moves a column. */
+table.table-,
+.table- th,
+.table- td {
+  border-inline: var(--page-line-width-) solid transparent;
+}
 .table- th,
 .table- td {
   padding: 0 var(--page-table-cell-padding-inline-);
@@ -299,17 +342,44 @@ table.table- {
   top: 0;
   z-index: var(--page-table-title-z-index-);
 }
+/* A chunked table's titles and each chunk lay out as tables of their own. */
+table.table-chunked- {
+  display: block;
+  width: max-content;
+  /* Its side cells draw its sides, as a plain table's do. */
+  border-inline: 0;
+}
+table.table-chunked- > thead {
+  display: table;
+  position: sticky;
+  top: 0;
+  z-index: var(--page-table-title-z-index-);
+}
+/* A chunk out of view is skipped, its rows' lines its height until drawn. */
+table.table-chunked- > tbody {
+  display: block;
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto calc(var(--table-chunk-rows-) * 1lh);
+  /* A line's glyphs and frame lines cross its edge, as in a plain table. */
+  overflow-clip-margin: 1lh;
+}
+/* A hovered row's frame draws over the chunks it crosses. */
+table.table-chunked-::before {
+  z-index: var(--page-table-hover-row-z-index-);
+}
+/* A sizer row widens each column as wide as every chunk's, drawn nowhere. */
+tr.table-sizer-row- {
+  visibility: collapse;
+}
 .table- .numeric- {
   text-align: right;
 }
 tr.row-link- {
   cursor: pointer;
 }
-/* A cell or pane whose right edge the pointer may drag shows the cursor. */
+/* A cell whose right edge the pointer may drag shows the cursor. */
 .table- :is(th, td).column-edge-grab-,
-.table- :is(th, td).column-edge-grab- *,
-#heat-map-main-column-.column-edge-grab-,
-#heat-map-main-column-.column-edge-grab- * {
+.table- :is(th, td).column-edge-grab- * {
   cursor: col-resize;
 }
 /* A title's tool tip hangs under it, flipped to stay in the window. */
@@ -325,14 +395,20 @@ tr.row-link- {
   z-index: var(--page-table-title-tool-tip-z-index-);
   pointer-events: none;
 }
-/* A hovered link row, source line or call graph row anchors its frame. */
+/* A hovered link, source, box or call graph row anchors its frame. */
 .table- > tbody > :is(tr.row-link-, tr[data-line-number-]):hover,
+.heat-map-source-information-box-
+  .table-
+  > tbody
+  > tr:not(.table-title-row-):hover,
 #call-graph-table- > tbody > tr:hover {
   anchor-name: --table-hover-row-;
 }
 table.table-:has(
     > tbody > :is(tr.row-link-, tr[data-line-number-]):hover
   )::before,
+.heat-map-source-information-box-
+  table.table-:has(> tbody > tr:not(.table-title-row-):hover)::before,
 #call-graph-table-:has(> tbody > tr:hover)::before {
   content: "";
   position: absolute;

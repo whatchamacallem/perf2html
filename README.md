@@ -11,6 +11,7 @@ The latest version and an example report can be found here:
 ## Table Of Contents
 
 - [Using A Report](#using-a-report)
+- [Buttons](#buttons)
 - [Running The Generator Scripts](#running-the-generator-scripts)
 - [Callgrind Counters](#callgrind-counters)
 - [Reading A Diff Report](#reading-a-diff-report)
@@ -34,21 +35,68 @@ are immutable (so bookmarks work) and the module URLs used by JavaScript on the
 back end are also immutable (so no server is needed and perfect caching is
 possible).
 
+## Menu
+
+Some of the settings are stored in the browser and may be reset with the reset
+button. Pull-down buttons often support searching by typing or pasting text.
+
+### First Row Menu
+
+The first row of buttons will have the same number on on every page. The number
+can be used to select them, and some of them support searching within their
+pull-downs by typing or pasting test.
+
+- `perf2html`: Opens the perf2html repository in a new tab, or the settings
+  page in debug mode.
+- `overview`: Shows the overview page.
+- `test`: A pulldown of the report's tests. It will transition from the
+  overview to the database page automatically.
+- `file`: A pulldown of the files the current test recorded samples in. Typing
+  `name:line` opens the file at that line.
+- `function`: A pulldown of the functions the test recorded samples in.
+- `database`: Shows the test's table of functions.
+- `flame graph`: Shows the test's flame graph.
+- `call graph`: Shows the test's call graph.
+- `reset`: Returns every preference except dark mode.
+- `help`: Opens this README in a new tab.
+- `scale`: A slider scaling the whole report. Use `+`, `=` and `-` too.
+- `dark` / `light`: Toggles the dark mode.
+
+### Status Row Menu
+
+These settings may be unique to a given page or shared.
+
+- `lines` / `functions`, on the heat map: Toggles the counter data view mode.
+- `counters`, on the heat map and the database: A pulldown of every counter and
+  of `calls`, `callers` and `callees`, the shown ones marked `◼`. Choosing one
+  shows or hides its column, and dragging one moves its column. Each of the two
+  pages keeps its own list.
+- `log scale` / `linear scale`, on the heat map, the database and the call
+  graph: This is the color curve the heat colors use.
+- `hottest first` / `alphabetical`, on the heat map: Toggles the sort order of
+  the files tree.
+- `cumulative first` / `hottest first` / `alphabetical`, on the call graph: A
+  pulldown ordering each function's callees by the cost of the calls, by each
+  callee's own cost, or by name.
+
 ## Running The Generator Scripts
 
 These are the scripts for using `perf2html`. While the scripts directory does
 contain a few more interesting files, none of them should be needed to use the
 generators.
 
-Run the scripts from `tests/perf2html/` in a curl checkout, which is the
-project root, as the scripts find curl two directories up.
+The project root is `tests/perf2html/` in a curl checkout, or a perf2html
+checkout beside a directory named `curl`. The scripts find curl two directories
+above the project root when that directory is named `curl`, else beside the
+project root, and stop with an error when neither exists. The scripts in
+`scripts/` run from the project root.
 
-- `perf2html.sh` : Capture timing data and generate a report.
-- `perf2html_diff.sh` : Generate a report about the difference between two
+- `perf2html.sh`: Capture timing data and generate a report.
+- `perf2html_diff.sh`: Generate a report about the difference between two
   `perf2html.sh` reports.
-- `perf2html_batch.sh` : Generate 3 reports, a baseline version, a modified
+- `perf2html_batch.sh`: Generate 3 reports, a baseline version, a modified
   version, and a diff.
-- `clean.sh` : Delete every generated file under `tests/perf2html/` and the
+- `clean.sh`: Delete every generated file under `tests/perf2html/` and the
   ccache entries the builds made.
 
 Each script's `--help` prints the following.

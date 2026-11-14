@@ -24,26 +24,29 @@ set -euo pipefail
 [ $# = 0 ] || { [[ $* =~ ^(-h|--help)$ ]] && usage_show && exit 0; } \
   || { echo "error: unknown option: $*" && usage_show && exit 2; } >&2
 
-_SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+INVOKED_FROM="$PWD"
+
+. "$(dirname -- "$0")/settings.sh"
+. "$(dirname -- "$0")/utility.sh"
+. "$(dirname -- "$0")/test_utility.sh"
+
+project_root_check
+PERF2HTML_DIR_="$INVOKED_FROM"
+_SCRIPT_DIR="$PERF2HTML_DIR_/scripts"
 _SCRIPT="$_SCRIPT_DIR/${0##*/}"
-_DIR_PERF2HTML="$(cd -- "$_SCRIPT_DIR/.." && pwd)"
-_REPO="$(cd -- "$_DIR_PERF2HTML/../.." && pwd)"
 _TEST_EXPECTED_BEHAVIOR="$_SCRIPT_DIR/test_expected_behavior.sh"
 
-. "$_SCRIPT_DIR/utility.sh"
-. "$_SCRIPT_DIR/test_utility.sh"
-
-_TEST_VERBOSE_DOCUMENT="$_DIR_PERF2HTML/test_verbose.md"
+_TEST_VERBOSE_DOCUMENT="$PERF2HTML_DIR_/test_verbose.md"
 
 _TEST_ERROR_MARKDOWN_FORMATTER=prettier
 _PRETTIER_CONFIG="$_SCRIPT_DIR/.prettierrc.json"
 _TEST_ERROR_MARKDOWN_FORMATTER_INSTALL="npm install -g prettier"
 
-_TEST_ERROR_BASELINE_REPORT="$_DIR_PERF2HTML/perf2html_baseline_report"
-_TEST_ERROR_MODIFIED_REPORT="$_DIR_PERF2HTML/perf2html_modified_report"
-_TEST_ERROR_DIFF_REPORT="$_DIR_PERF2HTML/perf2html_diff_report"
+_TEST_ERROR_BASELINE_REPORT="$PERF2HTML_DIR_/perf2html_baseline_report"
+_TEST_ERROR_MODIFIED_REPORT="$PERF2HTML_DIR_/perf2html_modified_report"
+_TEST_ERROR_DIFF_REPORT="$PERF2HTML_DIR_/perf2html_diff_report"
 
-_TEST_ERROR_ARTIFACTS="$_DIR_PERF2HTML/perf2html_temporary_artifacts"
+_TEST_ERROR_ARTIFACTS="$PERF2HTML_DIR_/perf2html_temporary_artifacts"
 
 _TEST_ERROR_ARCHIVE_SUFFIX=.txz
 _TEST_ERROR_HEAT_MAP_DIR_NAME=heat-map
@@ -70,15 +73,9 @@ _TEST_ERROR_MANIFEST_VERSION_DIFF='curl/perf2html_diff.sh v0'
 _TEST_ERROR_BUILD_OUTPUT_DIR="$PWD/build"
 _TEST_ERROR_SCRATCH="$_TEST_ERROR_BUILD_OUTPUT_DIR/test_error_handling_scratch"
 
-_TEST_ERROR_SCREENSHOT_DIFF_DIR="$_DIR_PERF2HTML/screenshots-diff"
+_TEST_ERROR_SCREENSHOT_DIFF_DIR="$PERF2HTML_DIR_/screenshots-diff"
 _TEST_ERROR_SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE=3
-_TEST_ERROR_SCREENSHOT_GOLD_DIR="$_DIR_PERF2HTML/screenshots-gold"
-
-_TEST_ERROR_TIMING_DATA_FILE_NAME=0_timing_data.json
-_TEST_ERROR_TIMING_LOOP_COUNT=100
-_TEST_ERROR_TIMING_PAGE_FILE_SUFFIX=.perf-stat.txt
-_TEST_ERROR_TIMING_STAT_FILE_SUFFIX=.perf-stat.json
-_TEST_ERROR_TIMING_TEST_NAME=timing_test
+_TEST_ERROR_SCREENSHOT_GOLD_DIR="$PERF2HTML_DIR_/screenshots-gold"
 
 test_error_path_without_tool() {
   local _tool="$1" _bin="$_TEST_ERROR_SCRATCH/bin_without_$1" _dirs=() _dir
@@ -215,7 +212,7 @@ test_error_expected_behavior_run() {
 }
 
 test_error_makefile_test_names() {
-  sed -n '/^TESTS_C *=/,/^$/p' "$_REPO/tests/perf/Makefile.inc" \
+  sed -n '/^TESTS_C *=/,/^$/p' "$PERF2HTML_REPO_ROOT/tests/perf/Makefile.inc" \
     | grep -o '[A-Za-z0-9_]*\.c' | sed 's/\.c$//' | LC_ALL=C sort || true
 }
 
@@ -223,7 +220,7 @@ test_error_cache_populated_check() {
   local _tests=() _kept_tests=() _report _kept _rows _test_list _test _suffix
   mapfile -t _tests < <(test_error_makefile_test_names)
   [ "${#_tests[@]}" -gt 0 ] || test_fail cache_populated \
-    "no TESTS_C entry in $_REPO/tests/perf/Makefile.inc"
+    "no TESTS_C entry in $PERF2HTML_REPO_ROOT/tests/perf/Makefile.inc"
   for _report in "$_TEST_ERROR_BASELINE_REPORT" \
     "$_TEST_ERROR_MODIFIED_REPORT"; do
     _kept="$_TEST_ERROR_ARTIFACTS/$(basename "$_report")"
@@ -254,8 +251,8 @@ test_error_cache_snapshot() {
 test_error_regenerate_cache_check() {
   local _before="$1" _after _gone _new _line _path _name _suffix
   local _start=$SECONDS _code=0
-  "$_DIR_PERF2HTML/perf2html_batch.sh" --regenerate \
-    "--target-dir=$_DIR_PERF2HTML" </dev/null || _code=$?
+  "$PERF2HTML_DIR_/perf2html_batch.sh" --regenerate \
+    "--target-dir=$PERF2HTML_DIR_" </dev/null || _code=$?
   [ "$_code" = 0 ] || test_fail regenerate_from_cache \
     "perf2html_batch.sh --regenerate exited $_code"
   printf 'perf2html_batch.sh --regenerate: %ss\n' "$((SECONDS - _start))"
@@ -288,14 +285,14 @@ test_error_unknown_option_tests() {
   test_failure_expect test_error_handling_unknown_option 2 -- \
     "$_SCRIPT" --bogus-option
 
-  grep -q 'unknown option' "$_DIR_PERF2HTML/clean.sh" \
+  grep -q 'unknown option' "$PERF2HTML_DIR_/clean.sh" \
     || test_fail clean_unknown_option \
       "clean.sh holds no 'unknown option'"
   test_failure_expect clean_unknown_option 2 -- \
-    "$_DIR_PERF2HTML/clean.sh" --bogus-option
+    "$PERF2HTML_DIR_/clean.sh" --bogus-option
 
   test_failure_expect diff_unknown_option 2 -- \
-    "$_DIR_PERF2HTML/perf2html_diff.sh" \
+    "$PERF2HTML_DIR_/perf2html_diff.sh" \
     "--artifacts=$_TEST_ERROR_SCRATCH/artifacts_unknown" --bogus-option
 }
 
@@ -304,7 +301,7 @@ test_error_diff_uncached_test() {
   local _archive _diff_report="$_TEST_ERROR_SCRATCH/out_uncached"
   local _checksum_label="$_TEST_ERROR_MANIFEST_CHECKSUM_LABEL"
   test_failure_expect diff_uncached 0 -- \
-    "$_DIR_PERF2HTML/perf2html_diff.sh" \
+    "$PERF2HTML_DIR_/perf2html_diff.sh" \
     "--artifacts=$_TEST_ERROR_SCRATCH/artifacts_uncached" \
     "$_baseline" "$_modified" "$_diff_report"
   _manifest_fault="$(REPORT_MANIFEST_CHECKSUM_LABEL="$_checksum_label" \
@@ -326,9 +323,9 @@ test_error_diff_uncached_test() {
 test_error_diff_remote_test() {
   local _baseline="$1" _modified="$2" _report _part _archives=()
   local _remote="$_TEST_ERROR_SCRATCH/remote"
-  local _tool_dir="$_remote/tests/perf2html"
+  local _tool_dir="$_remote/curl/tests/perf2html"
   mkdir -p "$_tool_dir" "$_remote/home"
-  cp -a "$_DIR_PERF2HTML/perf2html_diff.sh" "$_DIR_PERF2HTML/README.md" \
+  cp -a "$PERF2HTML_DIR_/perf2html_diff.sh" "$PERF2HTML_DIR_/README.md" \
     "$_SCRIPT_DIR" "$_tool_dir/"
   for _report in "$_baseline" "$_modified"; do
     _archives+=("$_remote/$(basename "$_report")$_TEST_ERROR_ARCHIVE_SUFFIX")
@@ -352,7 +349,7 @@ test_error_diff_tests() {
   local _baseline="$1" _modified="$2" _diff="$3" _copy _archive _kept
   local _test_list _first_test _model_path _model_text _source
   local _source_pattern='"source":"([^"]+)"'
-  local _tool="$_DIR_PERF2HTML/perf2html_diff.sh"
+  local _tool="$PERF2HTML_DIR_/perf2html_diff.sh"
   local _scratch="$_TEST_ERROR_SCRATCH"
 
   test_failure_expect diff_of_a_diff 2 -- \
@@ -472,7 +469,7 @@ test_error_diff_tests() {
 
 test_error_txz_tests() {
   local _baseline="$1" _wrong _whole _truncated
-  local _tool="$_DIR_PERF2HTML/perf2html_diff.sh"
+  local _tool="$PERF2HTML_DIR_/perf2html_diff.sh"
   local _scratch="$_TEST_ERROR_SCRATCH"
 
   test_failure_expect txz_input_missing 2 -- \
@@ -518,7 +515,7 @@ test_error_txz_tests() {
 
 test_error_batch_tests() {
   test_failure_expect batch_regenerate_no_recordings 2 -- \
-    "$_DIR_PERF2HTML/perf2html_batch.sh" --regenerate "--target-dir=$1" \
+    "$PERF2HTML_DIR_/perf2html_batch.sh" --regenerate "--target-dir=$1" \
     "--artifacts=$_TEST_ERROR_SCRATCH/artifacts_batch_none"
 }
 
@@ -526,13 +523,13 @@ test_error_toolchain_tests() {
   local _bin
   _bin="$(test_error_path_without_tool valgrind)"
   test_failure_expect toolchain_missing_tool 127 -- \
-    env PATH="$_bin" "$_DIR_PERF2HTML/perf2html.sh" \
+    env PATH="$_bin" "$PERF2HTML_DIR_/perf2html.sh" \
     "--report=$_TEST_ERROR_SCRATCH/report_no_valgrind" \
     "--artifacts=$_TEST_ERROR_SCRATCH/artifacts_no_valgrind"
 }
 
 test_error_report_dir_tests() {
-  local _baseline="$1" _tool="$_DIR_PERF2HTML/perf2html.sh" _populated _file
+  local _baseline="$1" _tool="$PERF2HTML_DIR_/perf2html.sh" _populated _file
   local _scratch="$_TEST_ERROR_SCRATCH" _empty _kept _first_test _missing
   local _line
 
@@ -608,45 +605,6 @@ test_error_relink_test() {
     test_error_relink_regenerate_run "$_binary" "$_reference"
 }
 
-# Writes a recording of one test under a refused perf, its page the rows given.
-test_error_timing_recording_write() {
-  local _directory="$1" _test_name="$_TEST_ERROR_TIMING_TEST_NAME"
-  shift
-  mkdir -p "$_directory"
-  printf '%s\n' "$_test_name" >"$_directory/$_TEST_ERROR_TEST_LIST_FILE_NAME"
-  : >"$_directory/$_test_name$_TEST_ERROR_TIMING_STAT_FILE_SUFFIX"
-  {
-    printf '$ perf %s %s\n' "$_test_name" "$_TEST_ERROR_TIMING_LOOP_COUNT"
-    [ "$#" = 0 ] || printf '%s\n' "$@"
-  } >"$_directory/$_test_name$_TEST_ERROR_TIMING_PAGE_FILE_SUFFIX"
-}
-
-# Expects the golden duty cycle from a timing page of the rows given.
-test_error_timing_time_check() {
-  local _name="$1" _wanted="$2" _artifacts="$_TEST_ERROR_SCRATCH/timing"
-  shift 2
-  test_error_timing_recording_write "$_artifacts/$_name" "$@"
-  python3 "$_SCRIPT_DIR/perf_measure.py" timing-data \
-    "--artifacts=$_artifacts" "--report=$_name"
-  grep -q -x -F "    \"duty_cycle\": $_wanted," \
-    "$_artifacts/$_name/$_TEST_ERROR_TIMING_DATA_FILE_NAME" \
-    || test_fail "$_name" "no duty cycle of $_wanted"
-  echo "ok $_name"
-}
-
-# Expects a timing page of the rows given refused, naming its count of rows.
-test_error_timing_refusal_check() {
-  local _name="$1" _artifacts="$_TEST_ERROR_SCRATCH/timing"
-  local _page="$_artifacts/$1/$_TEST_ERROR_TIMING_TEST_NAME"
-  _page+="$_TEST_ERROR_TIMING_PAGE_FILE_SUFFIX"
-  shift
-  test_error_timing_recording_write "$_artifacts/$_name" "$@"
-  test_failure_message_expect "$_name" 1 "error: $_page holds $# time lines \
-with a time unit of ['ns', 'usecs'], expected the same count above 0 from \
-each of 5 runs" -- python3 "$_SCRIPT_DIR/perf_measure.py" timing-data \
-    "--artifacts=$_artifacts" "--report=$_name"
-}
-
 # Refuses an archive that a regenerate run wrote, as a routine run makes none.
 test_error_routine_archive_check() {
   local _report
@@ -688,20 +646,8 @@ test_error_failure_tests_run() {
   rm -rf "$_TEST_ERROR_SCRATCH"
 }
 
-# Refuses a scratch under the scripts directory, which no report may overlap.
-test_error_invocation_check() {
-  case "$(pwd -P)/" in
-    "$(cd -- "$_SCRIPT_DIR" && pwd -P)"/*)
-      printf 'error: the invocation dir %s lies in the scripts dir %s\n' \
-        "$PWD" "$_SCRIPT_DIR" >&2
-      exit 2
-      ;;
-  esac
-}
-
 main() {
   local _cache_before
-  test_error_invocation_check
   test_error_markdown_formatter_check
   test_error_cache_populated_check
   _cache_before="$(test_error_cache_snapshot)"

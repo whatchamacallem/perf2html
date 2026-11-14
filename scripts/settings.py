@@ -42,20 +42,20 @@ CALL_GRAPH_BRANCH_MIDDLE_TEXT = "┣━"
 CALL_GRAPH_BRANCH_ONLY_TEXT = "━━"
 CALL_GRAPH_BRANCH_PASS_TEXT = "┃"
 CALL_GRAPH_CLOSED_TEXT = "⊞"
+CALL_GRAPH_CUTOFF_LARGEST_PERCENT = 40
+CALL_GRAPH_CUTOFF_STOP_COUNT = 19
 CALL_GRAPH_DOWNLOAD_FILE_NAME_SUFFIX = "_call_graph.svg"
 CALL_GRAPH_LINE_TEXT = "━"
 CALL_GRAPH_MOST_DRAWN_NODES = 20000
-CALL_GRAPH_OPEN_LEAST_CUMULATIVE_PERCENT = 1.0
 CALL_GRAPH_PAD_TEXT = " "
 CALL_GRAPH_PAGE_DIR_NAME = "call-graph"
-CALL_GRAPH_REVEAL_CLEARANCE_CHARS = 1
-CALL_GRAPH_REVEAL_CLEARANCE_LINES = 0.5
 CALL_GRAPH_SORT_DEFAULT_MODE = "cumulative"
 CALL_GRAPH_VIEW_KEY = "call-graph"
 
 CALLGRIND_FILE_DATA_CODE_KEY = "t"
 CALLGRIND_FILE_DATA_ERROR_CODE = "err"
 CALLGRIND_FILE_DATA_GIT_CODE = "git"
+CALLGRIND_FILE_DATA_INDENT_CHARS = 2
 CALLGRIND_FILE_DATA_PATH_KEY = "p"
 CALLGRIND_FILE_DATA_REPO_CODE = "repo"
 CALLGRIND_FILE_DATA_SYSTEM_CODE = "sys"
@@ -161,7 +161,6 @@ FLAME_GRAPH_LOCAL_PROFILE_PATH = "profile"
 FLAME_GRAPH_LOCAL_PROFILE_URL_PREFIX = "file:///"
 FLAME_GRAPH_MAX_RECORDED_CALLS = 200
 FLAME_GRAPH_PROFILE_DIR_NAME = "profiles"
-FLAME_GRAPH_PROFILE_GLOBAL_NAME = "report_flame_graph_profiles_"
 FLAME_GRAPH_PROFILE_NAME_FORMAT = "%s (loops=%s)"
 FLAME_GRAPH_STARTUP_POLL_DELAY_MS = 50
 FLAME_GRAPH_STARTUP_POLL_MAX_ATTEMPTS = 200
@@ -174,12 +173,16 @@ FLAME_GRAPH_VIEW_ENTRY: tuple[str, str] = (
 )
 
 HEAT_MAP_COUNTER_DESCRIPTION_STRING_ID_PREFIX = "str_counter_"
-HEAT_MAP_COUNTER_LIST_DEFAULT_SHOWN_NAMES: tuple[str, ...] = ("Bm",)
+HEAT_MAP_COUNTER_LIST_DEFAULT_SHOWN_NAMES: tuple[str, ...] = ("Bm", "CEst")
+HEAT_MAP_DOWNLOAD_FILE_NAME_SUFFIX = "_heat_map.svg"
+HEAT_MAP_INFORMATION_BOX_FUNCTION_SEPARATOR_TEXT = " "
 HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX = 8
 HEAT_MAP_MODEL_DIR_NAME = "data"
-HEAT_MAP_MODEL_GLOBAL_NAME = "report_heat_map_models_"
 HEAT_MAP_SCALE_DEFAULT_VALUE = "log"
 HEAT_MAP_SORT_DEFAULT_MODE = "heat"
+HEAT_MAP_SOURCE_CALL_SITE_MARKER_TEXT = "◄"
+HEAT_MAP_SOURCE_FUNCTION_ENTRY_MARKER_TEXT = "►"
+HEAT_MAP_SOURCE_SHOWN_LINE_ROWS_ABOVE = 3
 HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE = 0.01
 HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_MAX_COUNT = 10
 HEAT_MAP_SOURCE_TAB_SIZE_CHARS = 4
@@ -214,6 +217,7 @@ MENU_ENTRY_NEEDS: dict[str, list[str]] = {
 }
 MENU_ENTRY_VIEW_KEYS: dict[str, list[str]] = {
     "call_graph_sort": [CALL_GRAPH_VIEW_KEY],
+    "heat_counter_source": [HEAT_MAP_VIEW_ENTRY[0]],
     "heat_scale": [
         CALL_GRAPH_VIEW_KEY,
         DATABASE_VIEW_KEY,
@@ -239,6 +243,8 @@ MENU_SCALE_KEY_STEPS: dict[str, int] = {"+": 1, "=": 1, "-": -1}
 NUMBER_FRACTION_DIGITS = 2
 NUMBER_LARGEST_PRINTED_MULTIPLE_TIMES = 999.99
 NUMBER_MULTIPLE_SUFFIX_TEXT = "x"
+
+OVERVIEW_DOWNLOAD_FILE_NAME = "overview.svg"
 
 PERF_TOOL_TIME_LABEL = "Time"
 PERF_TOOL_TIME_ROW_OPENING_PATTERN = r"(?:\S+\s+)?(\d+)\s+\S+,\s+"
@@ -286,6 +292,7 @@ SETTINGS_VIEW_ENTRY: tuple[str, str] = ("settings", "settings/index.html")
 
 SIGNAL_EXIT_CODE_BASE = 128
 
+STORAGE_KEY_CALL_GRAPH_CUTOFF = "call_graph.cutoff"
 STORAGE_KEY_CALL_GRAPH_SORT = "call_graph.sort"
 STORAGE_KEY_DATABASE_COUNTER_LIST = "database.counter_list"
 STORAGE_KEY_DATABASE_FUNCTION_ROWS = "database.function_rows"
@@ -297,6 +304,7 @@ STORAGE_KEY_VIEW_DARK_MODE = "view.dark_mode"
 STORAGE_KEY_VIEW_SCALE = "view.scale"
 STORAGE_OWNED_KEYS: tuple[str, ...] = (
     FLAME_GRAPH_COLOR_SCHEME_KEY_NAME,
+    STORAGE_KEY_CALL_GRAPH_CUTOFF,
     STORAGE_KEY_CALL_GRAPH_SORT,
     STORAGE_KEY_DATABASE_COUNTER_LIST,
     STORAGE_KEY_DATABASE_FUNCTION_ROWS,
@@ -398,10 +406,7 @@ STYLE_HEAT_COLOR_STOPS: list[str] = [
     "#FF7F21",
     "#F06142",
 ]
-STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_CHARS = 2
-STYLE_HEAT_MAP_SOURCE_LINE_NUMBER_MARKER_WIDTH_PROPERTY = (
-    "--heat-map-source-table-line-number-cell-callee-marker-width-"
-)
+STYLE_HEAT_MAP_SOURCE_BOX_ROOM_PROPERTY = "--heat-map-source-box-room-"
 STYLE_MENU_LOGO_START_SHARE = 0.5
 STYLE_PAGE_BACKGROUND_DARK_MODE_ROLE = "dark-mode-page-bg-"
 STYLE_PAGE_BACKGROUND_EARLY_FILL_ENABLED = True
@@ -416,6 +421,7 @@ STYLE_README_PAGE_VALUE_ENTRIES: dict[str, str] = {
     "readme-page-font-family-": "Arial",
 }
 STYLE_SVG_NAMESPACE_URL = "http://www.w3.org/2000/svg"
+STYLE_TABLE_CHUNK_ROWS_PROPERTY = "--table-chunk-rows-"
 STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS = 1.5
 STYLE_TABLE_FUNCTION_LIST_COLUMN_MAX_CHARS = 48
 STYLE_TABLE_FUNCTION_NAME_MAX_CHARS = 20
@@ -431,9 +437,10 @@ STYLE_TEXT_SCROLLBAR_FONT_MULTIPLE_PROPERTY: dict[str, str] = {
 STYLE_TEXT_SCROLLBAR_THUMB_SHORTEST_CHARS = 4
 STYLE_VALUE_ENTRIES: dict[str, str] = {
     "call-graph-border-width-": "1ch",
+    "call-graph-heading-z-index-": "1",
     "call-graph-hover-row-z-index-": "1",
+    "heat-map-main-edge-z-index-": "1",
     "heat-map-minimap-width-": "110px",
-    "heat-map-source-table-line-number-cell-callee-marker-text-": '"►"',
     "heat-map-source-ticker-tape-gap-": "1ch",
     "heat-map-tree-node-hover-z-index-": "1",
     "heat-map-tree-node-padding-right-": "1ch",
@@ -453,6 +460,7 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "page-inset-inline-": "2ch",
     "page-line-width-": "0.1em",
     "page-table-cell-padding-inline-": "1ch",
+    "page-table-hover-row-z-index-": "1",
     "page-table-title-tool-tip-z-index-": "2",
     "page-table-title-z-index-": "1",
     "page-text-scrollbar-horizontal-height-": "1lh",
@@ -460,10 +468,13 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "screenshot-z-index-": "3",
 }
 
+TABLE_CHUNK_ROW_COUNT = 100
 TABLE_COLUMN_FUNCTION_NAME = "function"
 TABLE_COLUMN_LINE_NAME = "line"
 TABLE_COLUMN_LOCATION_NAME = "location"
 TABLE_COLUMN_SOURCE_NAME = "source"
+# Sizes a saved table image at this multiple of the size the table draws.
+TABLE_DOWNLOAD_IMAGE_SCALE = 0.8
 TABLE_DOWNLOAD_URL_PREFIX = "data:image/svg+xml;charset=utf-8,"
 TABLE_MARKDOWN_COLUMN_NARROWEST_CHARS = 3
 TABLE_MARKDOWN_ESCAPE_TEXT = "\\"

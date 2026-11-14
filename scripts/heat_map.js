@@ -20,11 +20,25 @@ window.try_catch_handler_(function () {
   const DATABASE_CELL_SEPARATOR_TEXT = settings_(
     "DATABASE_CELL_SEPARATOR_TEXT",
   );
+  const HEAT_MAP_DOWNLOAD_FILE_NAME_SUFFIX = settings_(
+    "HEAT_MAP_DOWNLOAD_FILE_NAME_SUFFIX",
+  );
+  const HEAT_MAP_INFORMATION_BOX_FUNCTION_SEPARATOR_TEXT = settings_(
+    "HEAT_MAP_INFORMATION_BOX_FUNCTION_SEPARATOR_TEXT",
+  );
   const HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX = settings_(
     "HEAT_MAP_MINIMAP_VIEWPORT_BOX_SMALLEST_PX",
   );
   const HEAT_MAP_MODEL_DIR_NAME = settings_("HEAT_MAP_MODEL_DIR_NAME");
-  const HEAT_MAP_MODEL_GLOBAL_NAME = settings_("HEAT_MAP_MODEL_GLOBAL_NAME");
+  const HEAT_MAP_SOURCE_CALL_SITE_MARKER_TEXT = settings_(
+    "HEAT_MAP_SOURCE_CALL_SITE_MARKER_TEXT",
+  );
+  const HEAT_MAP_SOURCE_FUNCTION_ENTRY_MARKER_TEXT = settings_(
+    "HEAT_MAP_SOURCE_FUNCTION_ENTRY_MARKER_TEXT",
+  );
+  const HEAT_MAP_SOURCE_SHOWN_LINE_ROWS_ABOVE = settings_(
+    "HEAT_MAP_SOURCE_SHOWN_LINE_ROWS_ABOVE",
+  );
   const HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE = settings_(
     "HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE",
   );
@@ -52,18 +66,13 @@ window.try_catch_handler_(function () {
   const HEAT_MAP_VIEW_ENTRY = settings_("HEAT_MAP_VIEW_ENTRY");
   const RANKING_COUNTER_NAME = settings_("RANKING_COUNTER_NAME");
   const REPORT_SOURCES_DIR_NAME = settings_("REPORT_SOURCES_DIR_NAME");
+  const STYLE_HEAT_MAP_SOURCE_BOX_ROOM_PROPERTY = settings_(
+    "STYLE_HEAT_MAP_SOURCE_BOX_ROOM_PROPERTY",
+  );
   const STYLE_TABLE_FUNCTION_LIST_COLUMN_MAX_CHARS = settings_(
     "STYLE_TABLE_FUNCTION_LIST_COLUMN_MAX_CHARS",
   );
-  const STYLE_TABLE_FUNCTION_NAME_MAX_CHARS = settings_(
-    "STYLE_TABLE_FUNCTION_NAME_MAX_CHARS",
-  );
-  const STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS = settings_(
-    "STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS",
-  );
-  const TABLE_COLUMN_FUNCTION_NAME = settings_("TABLE_COLUMN_FUNCTION_NAME");
   const TABLE_COLUMN_LINE_NAME = settings_("TABLE_COLUMN_LINE_NAME");
-  const TABLE_COLUMN_LOCATION_NAME = settings_("TABLE_COLUMN_LOCATION_NAME");
   const TABLE_COLUMN_SOURCE_NAME = settings_("TABLE_COLUMN_SOURCE_NAME");
   const WIDGET_KEY_NAMES = settings_("WIDGET_KEY_NAMES");
   if (!window.report_source_database_)
@@ -109,6 +118,8 @@ window.try_catch_handler_(function () {
   const render_menu_button = window.render_menu_button_;
   let active_scale = null,
     shown_line_names = null,
+    // Holds whether the address shows its functions' costs, not its lines'.
+    shows_functions = null,
     sort_mode = null;
   const counter_label = (counter) =>
     report_preferences_.counter_label(counter.key);
@@ -122,7 +133,7 @@ window.try_catch_handler_(function () {
   const ranking_value = (cost_vector) => ranking_counter.get(cost_vector);
   const absolute = Math.abs;
 
-  // Takes the relayed preferences: the columns, the scale and the tree order.
+  // Takes the relayed preferences: the columns, the scale and the order.
   function preferences_handler() {
     const view_preferences = report_preferences_.now();
     shown_line_names = report_preferences_.shown_line_names(
@@ -143,8 +154,6 @@ window.try_catch_handler_(function () {
       counter.get(profile_model.heatMapTotals.totals),
     );
   let share_text = report_ui_.percent_text;
-  const share_of_test_text = (value, counter) =>
-    value ? share_text(share_of_test(value, counter)) : "";
 
   let human_text = report_ui_.human_text;
   const cell_number = (value) => ({
@@ -192,8 +201,6 @@ window.try_catch_handler_(function () {
     baseline(line_baseline_vector(file_path, line_number));
   const line_counter_baseline = (file_path, line_number, counter) =>
     counter_baseline(line_baseline_vector(file_path, line_number), counter);
-  const function_baseline = (function_index) =>
-    baseline(function_baselines[function_index]);
   const file_counter_baseline = (file_path, counter) =>
     counter_baseline(file_baselines[file_path], counter);
   const file_baseline = (file_path) =>
@@ -203,24 +210,21 @@ window.try_catch_handler_(function () {
   const heat_style = (percent) =>
     report_ui_.heat_cell_style(percent, active_scale.curve, IS_DIFF);
 
-  let CALLS_TOTAL = null;
+  // Writes a call count as a number, in its column's own color.
   const call_count_cell = (call_count) =>
-    call_count
-      ? {
-          text: human_text(call_count),
-          style: heat_style(report_ui_.share_of_test(call_count, CALLS_TOTAL)),
-        }
-      : "";
+    call_count ? cell_number(call_count) : "";
 
-  const hash_for_line = (file_path, line) =>
+  // Writes the hash of a file or a line, in the view mode given.
+  const hash_for_line = (file_path, line, line_shows_functions) =>
     report_ui_.address.hash({
       test: shown_test_name,
       view: HEAT_MAP_VIEW_ENTRY[0],
       file: file_path,
       line: line || null,
+      functions: line_shows_functions,
     });
   const hash_for_function = (name) =>
-    report_ui_.address.function_hash(shown_test_name, name);
+    report_ui_.address.function_hash(shown_test_name, name, true);
   // Returns the indexes of the functions a line declares, in name order.
   function declared_functions(file_path, line_number) {
     const file_lines = entry_line_index[file_path];
@@ -236,12 +240,24 @@ window.try_catch_handler_(function () {
       .map(Number)
       .sort((line_a, line_b) => line_a - line_b);
   }
-  // Returns the hash of a line, the function's when the line declares one.
+  // Returns a line's hash in the shown mode, its costliest function's if any.
   function hash_for_location(file_path, line_number) {
     const function_indexes = declared_functions(file_path, line_number);
-    return function_indexes.length === 1
-      ? hash_for_function(function_table[function_indexes[0]].name)
-      : hash_for_line(file_path, line_number);
+    if (!function_indexes.length)
+      return hash_for_line(file_path, line_number, shows_functions);
+    const self_cost = (function_index) =>
+      absolute(ranking_value(function_table[function_index].self));
+    const costliest_index = function_indexes.reduce(
+      (kept_index, function_index) =>
+        self_cost(function_index) > self_cost(kept_index)
+          ? function_index
+          : kept_index,
+    );
+    return report_ui_.address.function_hash(
+      shown_test_name,
+      function_table[costliest_index].name,
+      shows_functions,
+    );
   }
   // Adds cost vectors counter by counter.
   function cost_vectors_add(cost_vectors) {
@@ -316,44 +332,32 @@ window.try_catch_handler_(function () {
     return false;
   }
 
+  // Returns whether the heat map shows a line, one of a file with source.
+  const line_is_shown = (file_path, line) =>
+    line && file_table[file_path] && file_table[file_path].source !== null;
+  // Writes a cell linking a line's own address, never its function's.
   function line_link_cell(file_path, line, text) {
-    if (!file_table[file_path] || !line) return { text };
-    return { text, href: hash_for_location(file_path, line) };
+    if (!line_is_shown(file_path, line)) return { text };
+    return { text, href: hash_for_line(file_path, line, false) };
   }
 
   const function_is_linkable = (function_index) =>
     function_index != null &&
     function_table[function_index] &&
-    function_table[function_index].line &&
-    file_table[function_table[function_index].file];
-  function function_link_cell(function_index, text) {
-    if (!function_is_linkable(function_index)) return { text };
-    return {
-      text,
-      href: hash_for_function(function_table[function_index].name),
-    };
+    line_is_shown(
+      function_table[function_index].file,
+      function_table[function_index].line,
+    );
+  // Writes a cell naming a function, linking its address when it has a line.
+  function function_link_cell(function_index) {
+    const name = function_name(function_index);
+    if (!function_is_linkable(function_index)) return { text: name };
+    return { text: name, href: hash_for_function(name) };
   }
 
-  const counter_column = (counter) => ({
-    label: counter.key,
-    measure: counter_label(counter),
-    numeric: true,
-  });
-  const function_column = (label) => ({
-    label,
-    name: TABLE_COLUMN_FUNCTION_NAME,
-    clip: STYLE_TABLE_FUNCTION_NAME_MAX_CHARS,
-  });
-  // Returns a column of the places functions are defined or called at.
-  const location_column = (label) => ({
-    label,
-    name: TABLE_COLUMN_LOCATION_NAME,
-    clip: STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS,
-  });
   // Holds the source table's first column, the tree and the bar sizing it.
   const TREE_COLUMN = {
     label: text("str_heat_map_tree_label"),
-    cls: "heat-map-source-table-tree-cell-",
     is_sized_by_bar: true,
   };
   // Asks the top page for the other tree order at a click on the tree's title.
@@ -361,11 +365,6 @@ window.try_catch_handler_(function () {
     if (pressed_column !== TREE_COLUMN) return;
     report_ui_.heat_sort_toggle_send();
   }
-  // Returns the source table's column of a shown line, with its cell class.
-  const source_line_column = (line_name, cls) => ({
-    ...report_preferences_.line_column(line_name),
-    cls,
-  });
   // Writes the cell of one selected counter, its share heat colored.
   const secondary_cell = (percent) => ({
     text: percent ? share_text(percent) : "",
@@ -425,10 +424,13 @@ window.try_catch_handler_(function () {
       for (const directory_node of tree_node.dirs.values())
         running_total += subtree_sum(directory_node);
       for (const file of tree_node.files) running_total += file.self;
-      const baseline_costs = [...tree_node.dirs.values(), ...tree_node.files]
+      const child_nodes = [...tree_node.dirs.values(), ...tree_node.files];
+      const baseline_costs = child_nodes
         .map((child_node) => child_node.base)
         .filter((baseline_cost) => baseline_cost !== null);
       tree_node.self = running_total;
+      // A folder has no samples when no file below it has any.
+      tree_node.zero = child_nodes.every((child_node) => child_node.zero);
       tree_node.base = baseline_costs.length
         ? baseline_costs.reduce(
             (baseline_sum, baseline_cost) => baseline_sum + baseline_cost,
@@ -518,8 +520,13 @@ window.try_catch_handler_(function () {
       const output_parts = [];
       const directories = [...tree_node.dirs.values()].sort(node_compare);
       const file_list = [...tree_node.files].sort(node_compare);
-      const sampled_files = file_list.filter((file) => !file.zero);
-      const zero_cost_files = file_list.filter((file) => file.zero);
+      // A folder with no samples lists its files with no group around them.
+      const zero_cost_files = tree_node.zero
+        ? []
+        : file_list.filter((file) => file.zero);
+      const sampled_files = file_list.filter(
+        (file) => !zero_cost_files.includes(file),
+      );
       const last_index =
         directories.length +
         sampled_files.length +
@@ -662,7 +669,8 @@ window.try_catch_handler_(function () {
       .querySelector("table.heat-map-source-table- > thead > tr > th")
       .append(tree_track);
     tree_render();
-    tree_panel.scrollTop = tree_state.scroll_top;
+    // A moved tree starts at its top, so only a kept scroll lays it out.
+    if (tree_state.scroll_top) tree_panel.scrollTop = tree_state.scroll_top;
     if (tree_state.had_focus) tree_tab_stop_place(true);
   }
   let tree_focus_selector = null;
@@ -790,7 +798,11 @@ window.try_catch_handler_(function () {
       } else if (tree_node.getAttribute("data-file-") != null) {
         if (tree_node.classList.contains("cold-")) return;
         report_ui_.address.request(
-          hash_for_line(tree_node.getAttribute("data-file-")),
+          hash_for_line(
+            tree_node.getAttribute("data-file-"),
+            null,
+            shows_functions,
+          ),
         );
       }
     }),
@@ -804,7 +816,7 @@ window.try_catch_handler_(function () {
     if (group_rect.bottom <= tree_rect.top + tree_panel.clientHeight) return;
     tree_panel.scrollTop += group_rect.top - tree_rect.top;
   }
-  // Opens every folder above a file and the no samples group holding the file.
+  // Opens every folder above a file and any no samples group holding it.
   function tree_reveal(file_path) {
     // Returns the file a node holds itself, none when a folder below holds it.
     const held_file = (holding_node) =>
@@ -816,7 +828,8 @@ window.try_catch_handler_(function () {
       );
       expanded_directories.add(tree_node.path);
     }
-    if (held_file(tree_node).zero) expanded_cold_groups.add(tree_node.path);
+    if (held_file(tree_node).zero && !tree_node.zero)
+      expanded_cold_groups.add(tree_node.path);
   }
   // Scrolls the tree until the selected node sits inside the shown part.
   function tree_selected_show() {
@@ -833,27 +846,17 @@ window.try_catch_handler_(function () {
   }
 
   let entry_line_index = null;
+  // Holds each function's callees by its index, each row the call's site.
+  let function_callees = null;
 
-  // Writes the hottest lines of a file.
-  function hottest_lines_render(file_path) {
-    const file = file_table[file_path];
-    const tape_lines = Object.keys(file.lines)
-      .map(Number)
-      .map((line_number) => {
-        const self_cost = ranking_value(file.lines[line_number][0]);
-        return {
-          line_number,
-          self_cost,
-          percent: ranking_share(
-            self_cost,
-            line_baseline(file_path, line_number),
-          ),
-        };
-      })
+  // Writes the hottest source rows of a file, of the counter source shown.
+  function hottest_lines_render(file_path, source_rows) {
+    const tape_lines = source_rows
       .filter(
-        (tape_line) =>
-          absolute(tape_line.percent) >=
-          HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE,
+        (source_row) =>
+          source_row.costs &&
+          absolute(source_row.self_percent) >=
+            HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_LEAST_SHARE,
       )
       .sort(
         (tape_line_a, tape_line_b) =>
@@ -861,6 +864,11 @@ window.try_catch_handler_(function () {
       )
       .slice(0, HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_MAX_COUNT);
     if (!tape_lines.length) return "";
+    // A tape of lines links each line, a tape of functions each function.
+    const entry_hash = shows_functions
+      ? hash_for_location
+      : (tape_file_path, line_number) =>
+          hash_for_line(tape_file_path, line_number, false);
     return render_element(
       "div",
       {
@@ -875,16 +883,16 @@ window.try_catch_handler_(function () {
             render_html_escape(
               text_fill("str_ticker_tape_entry", {
                 line: tape_line.line_number,
-                share: share_text(tape_line.percent),
+                share: share_text(tape_line.self_percent),
               }),
             ),
             {
               tag_name: "a",
-              href: hash_for_location(file_path, tape_line.line_number),
+              href: entry_hash(file_path, tape_line.line_number),
               class_names: ["heat-map-source-ticker-tape-entry-"],
               attributes: {
                 tabindex: entry_index ? -1 : 0,
-                style: heat_style(tape_line.percent),
+                style: tape_line.heat_style_attribute,
               },
             },
           ),
@@ -892,22 +900,6 @@ window.try_catch_handler_(function () {
         .join(""),
     );
   }
-
-  // Builds a control that only calls JS, copy or close.
-  const box_control_markup = (action_name, string_id, extra_class_name) =>
-    render_menu_button("action", render_html_escape(text(string_id)), {
-      tag_name: "span",
-      class_names: [
-        "heat-map-source-information-box-control-",
-        ...(extra_class_name ? [extra_class_name] : []),
-      ],
-      attributes: { "data-information-box-action-": action_name },
-    });
-  const box_separator_markup = render_element(
-    "span",
-    { class: "heat-map-source-information-box-action-bar-separator-" },
-    render_html_escape(text("str_information_box_action_bar_separator")),
-  );
 
   // Returns what a box's counter rows read: a line, its functions or a file.
   function box_counter_source(
@@ -994,11 +986,6 @@ window.try_catch_handler_(function () {
         counter_value ? cell_number(counter_value) : "",
       ];
     });
-    const row_attributes = listed_counters.map((counter) =>
-      counter.derived
-        ? { class: "heat-map-source-information-box-synthetic-row-" }
-        : {},
-    );
     const call_cost = line_costs ? ranking_value(line_costs[1]) : 0;
     if (call_cost) {
       rows.push([
@@ -1012,92 +999,184 @@ window.try_catch_handler_(function () {
         call_count_cell(line_costs[2]),
       ]);
     }
-    return { columns, rows, row_attributes };
+    return { columns, rows };
   }
-  // Renders a function's part of a box: its totals and callers.
-  function function_part_render(file_path, function_index) {
-    const function_entry = function_table[function_index];
-    const callers = function_entry.callers
-      .slice()
-      .sort((caller_a, caller_b) => caller_b[4] - caller_a[4]);
-    const function_baseline_cost = function_baseline(function_index);
-    const function_self_text =
-      ranking_share_text(
-        ranking_value(function_entry.self),
-        function_baseline_cost,
-      ) || report_ui_.zero_percent_text();
-    const function_total_text =
-      ranking_share_text(
-        ranking_value(function_entry.self) +
-          ranking_value(function_entry.calls),
-        function_baseline_cost,
-      ) || report_ui_.zero_percent_text();
-    const heading = HAS_CALL_GRAPH
-      ? text_fill("str_information_box_function_totals", {
-          function: function_entry.name,
-          self: function_self_text,
-          total: function_total_text,
-        })
-      : text_fill("str_information_box_function_self", {
-          function: function_entry.name,
-          self: function_self_text,
+  // Lists the runs of lines of one line's functions, each broken by others'.
+  function function_line_runs(function_indexes) {
+    const own_file_path = function_table[function_indexes[0]].file;
+    const is_listed = (function_index) =>
+      function_indexes.includes(function_index);
+    const file_paths = [
+      own_file_path,
+      ...Object.keys(file_table)
+        .filter((other_path) => other_path !== own_file_path)
+        .sort(),
+    ];
+    const line_runs = [];
+    for (const file_path of file_paths) {
+      const line_functions = file_table[file_path].lineFunctions;
+      let open_run = null,
+        follows_declaration = false;
+      for (const line_number of known_lines(file_path)) {
+        const counted_indexes = line_functions[line_number] || [];
+        const declared_indexes = declared_functions(file_path, line_number);
+        const is_own = counted_indexes.some(is_listed);
+        // The functions' own declared line starts the block following it.
+        if (declared_indexes.some(is_listed)) {
+          open_run = null;
+          follows_declaration = true;
+        } else if (
+          !is_own &&
+          (counted_indexes.length || declared_indexes.length)
+        ) {
+          open_run = null;
+          follows_declaration = false;
+        }
+        if (!is_own) continue;
+        if (open_run) {
+          open_run.last_line = line_number;
+          continue;
+        }
+        open_run = {
+          file_path,
+          first_line: line_number,
+          last_line: line_number,
+          follows_declaration,
+        };
+        follows_declaration = false;
+        line_runs.push(open_run);
+      }
+    }
+    return line_runs;
+  }
+  // Writes a run of lines as its range, a run of one line as that line.
+  const line_run_text = (line_run) =>
+    line_run.first_line === line_run.last_line
+      ? String(line_run.first_line)
+      : text_fill("str_line_range", {
+          first: line_run.first_line,
+          last: line_run.last_line,
         });
-    let markup = render_element(
-      "div",
-      { class: "heat-map-source-information-box-heading-" },
-      render_html_escape(heading),
+  // Lists the titles of a calls table part, the caller's or the callee's.
+  const calls_columns = (function_label_id) => [
+    { label: text("str_column_calls"), numeric: true },
+    { label: text(function_label_id) },
+    { label: text("str_column_call_site") },
+  ];
+  // Renders a box's calls as one table: its callers, then its callees.
+  function calls_table_render(caller_rows, callee_rows) {
+    const callee_columns = calls_columns("str_column_callee");
+    // Each part's titles lead its rows, a part with no rows left out.
+    const columns = caller_rows.length
+      ? calls_columns("str_column_caller")
+      : callee_columns;
+    const rows = [
+      ...caller_rows,
+      ...(caller_rows.length && callee_rows.length
+        ? [{ title_columns: callee_columns }]
+        : []),
+      ...callee_rows,
+    ];
+    return {
+      markup: report_ui_.render_table("heat.detail.calls", columns, rows, {
+        // A row links where its linking cell does, a function or a line.
+        row_href: rows.map((row) =>
+          row.title_columns ? "" : row.map((cell) => cell.href).find(Boolean),
+        ),
+      }),
+      text: report_ui_.table_markdown(columns, rows),
+    };
+  }
+  // Sums the call rows of one function and call site, the most calls first.
+  function call_rows_merge(call_rows) {
+    const merged_rows = new Map();
+    for (const call_row of call_rows) {
+      const [function_index, call_file, call_line, , call_count] = call_row;
+      const row_key = JSON.stringify([function_index, call_file, call_line]);
+      const merged_row = merged_rows.get(row_key);
+      if (merged_row) merged_row.call_count += call_count;
+      else
+        merged_rows.set(row_key, {
+          function_index,
+          call_file,
+          call_line,
+          call_count,
+        });
+    }
+    return [...merged_rows.values()].sort(
+      (row_a, row_b) => row_b.call_count - row_a.call_count,
     );
-    const text_parts = [heading];
-    if (callers.length) {
+  }
+  // Writes a calls row: its count, its linked function and the call's site.
+  const call_row_cells = (call_row) => [
+    call_count_cell(call_row.call_count),
+    function_link_cell(call_row.function_index),
+    { text: report_ui_.location_text(call_row.call_file, call_row.call_line) },
+  ];
+  // Renders the part of a box of a line's functions: lines, then calls.
+  function function_part_render(function_indexes) {
+    const call_rows_of = (rows_of_function) =>
+      call_rows_merge(function_indexes.flatMap(rows_of_function));
+    const callers = call_rows_of((index) => function_table[index].callers);
+    const callees = call_rows_of((index) => function_callees[index]);
+    let markup = "";
+    const text_parts = [];
+    // The lines' table, left out when they are one block after the function.
+    const line_runs = function_line_runs(function_indexes);
+    if (
+      line_runs.length &&
+      !(line_runs.length === 1 && line_runs[0].follows_declaration)
+    ) {
       const columns = [
-        { label: text("str_column_call_count"), numeric: true },
-        { label: text("str_column_test_share"), numeric: true },
-        counter_column(ranking_counter),
-        function_column(text("str_column_caller")),
-        location_column(text("str_column_called_at")),
+        { label: text("str_column_file") },
+        { label: text("str_column_lines") },
       ];
-      const rows = callers.map(
-        ([caller_index, call_file, call_line, cost_vector, call_count]) => {
-          const location_text = report_ui_.location_text(call_file, call_line);
-          return [
-            call_count_cell(call_count),
-            share_of_test_text(ranking_value(cost_vector), ranking_counter),
-            cell_number(ranking_value(cost_vector)),
-            {
-              text: function_name(caller_index),
-            },
-            line_link_cell(call_file, call_line, location_text),
-          ];
-        },
-      );
-      markup += report_ui_.render_table(
-        "heat.detail.callers",
-        columns,
-        rows,
-        {},
-      );
+      const rows = line_runs.map((line_run) => [
+        { text: line_run.file_path },
+        line_link_cell(
+          line_run.file_path,
+          line_run.first_line,
+          line_run_text(line_run),
+        ),
+      ]);
+      markup += report_ui_.render_table("heat.detail.lines", columns, rows, {
+        row_href: rows.map((row) => row[1].href),
+      });
       text_parts.push(report_ui_.table_markdown(columns, rows));
-    } else if (HAS_CALL_GRAPH) {
+    }
+    // A recording with calls says so where a function's callers would show.
+    if (!callers.length && HAS_CALL_GRAPH) {
       const none = text("str_no_caller");
       markup += render_element("div", {}, render_html_escape(none));
       text_parts.push(none);
     }
-    return { markup, copy_text: text_parts.join("\n\n") };
+    if (callers.length || callees.length) {
+      const calls_table = calls_table_render(
+        callers.map(call_row_cells),
+        callees.map(call_row_cells),
+      );
+      markup += calls_table.markup;
+      text_parts.push(calls_table.text);
+    }
+    return { markup, text_parts };
   }
 
-  // Renders the information box of a file, or of a line when one is given.
+  // Renders the box of a file, or a line's when given, with its heading.
   function information_box_render(file_path, line_number) {
     const file = file_table[file_path];
-    const function_indexes = line_number
+    const declared_indexes = line_number
       ? declared_functions(file_path, line_number)
       : [];
-    // A line declaring functions with no cost of its own shows their costs.
-    const function_costs =
-      function_indexes.length && !file.lines[line_number]
-        ? declared_costs(function_indexes)
-        : null;
+    // A line holding both its own costs and a function's shows the mode's.
+    const shows_function =
+      declared_indexes.length > 0 &&
+      (!file.lines[line_number] || shows_functions);
+    const function_indexes = shows_function ? declared_indexes : [];
+    const function_costs = shows_function
+      ? declared_costs(function_indexes)
+      : null;
     const line_costs =
-      line_number && !function_costs
+      line_number && !shows_function
         ? file.lines[line_number] || [[], [], 0]
         : null;
     const line_function_indexes =
@@ -1108,61 +1187,59 @@ window.try_catch_handler_(function () {
       line_costs,
       function_costs,
     );
-    const in_function_note = line_function_indexes.length
-      ? text_fill("str_in_function", {
-          function: function_names(line_function_indexes),
+    const location_text = report_ui_.location_text(file_path, line_number);
+    // A function's box names its line's functions, a line's those costing it.
+    const title_names = function_indexes.length
+      ? function_indexes
+          .map(function_name)
+          .sort()
+          .join(HEAT_MAP_INFORMATION_BOX_FUNCTION_SEPARATOR_TEXT)
+      : function_names(line_function_indexes);
+    const title_text = title_names
+      ? text_fill("str_information_box_title", {
+          location: location_text,
+          function: title_names,
         })
-      : "";
-    const in_function_html = line_function_indexes.length
-      ? text_fill("str_in_function", {
-          function: render_element(
-            "span",
-            { class: "heat-map-source-information-box-function-name-" },
-            render_html_escape(function_names(line_function_indexes)),
-          ),
-        })
-      : "";
-    const heading_line =
-      report_ui_.location_text(file_path, line_number) + in_function_note;
+      : location_text;
     const note_texts = [];
     if (!line_number && file.group === CALLGRIND_FILE_DATA_ERROR_CODE)
       note_texts.push(text_fill("str_not_in_repo", { path: file.raw }));
     if (!line_number && source_text(file_path) == null)
       note_texts.push(text("str_source_unavailable"));
-    // A file's box is part of the page, so no control closes it.
-    let markup = line_number
-      ? box_control_markup(
-          "close",
-          "str_information_box_close_symbol",
-          "heat-map-source-information-box-close-symbol-",
-        )
-      : "";
-    markup += render_element(
+    // The body is all the image draws, its strip filled once it is placed.
+    let body_markup = render_element(
       "div",
-      {},
-      render_html_escape(report_ui_.location_text(file_path, line_number)) +
-        in_function_html,
+      { class: "heat-map-source-information-box-strip-" },
+      "",
     );
-    markup += report_ui_.render_table(
+    body_markup += report_ui_.render_table(
       "heat.detail.stats",
       counter_table.columns,
       counter_table.rows,
-      { row_attributes: counter_table.row_attributes },
+      {},
     );
+    // A blank line parts the notes from the counters table.
+    if (note_texts.length) body_markup += render_element("br", {}, null);
     for (const note_text of note_texts) {
-      markup += render_element(
+      body_markup += render_element(
         "div",
         { class: "heat-map-source-information-box-note-" },
         render_html_escape(note_text),
       );
     }
     const text_parts = [
-      heading_line +
+      title_text +
         "\n" +
         report_ui_.table_markdown(counter_table.columns, counter_table.rows),
       ...note_texts,
     ];
-    const callees = line_number
+    if (function_indexes.length) {
+      const function_part = function_part_render(function_indexes);
+      body_markup += function_part.markup;
+      text_parts.push(...function_part.text_parts);
+    }
+    // The calls a line's box shows end it, each row linking its callee's line.
+    const callees = line_costs
       ? (file.callees[line_number] || [])
           .slice()
           .sort(
@@ -1171,88 +1248,86 @@ window.try_catch_handler_(function () {
           )
       : [];
     if (callees.length) {
-      const columns = [
-        { label: text("str_column_test_share"), numeric: true },
-        counter_column(ranking_counter),
-        { label: text("str_column_call_count"), numeric: true },
-        function_column(text("str_column_callee")),
-        location_column(text("str_column_defined_at")),
-      ];
-      const rows = callees.map(
-        ([callee_index, call_file, call_line, cost_vector, call_count]) => {
-          const location_text = report_ui_.location_text(call_file, call_line);
-          return [
-            share_of_test_text(ranking_value(cost_vector), ranking_counter),
-            cell_number(ranking_value(cost_vector)),
-            call_count_cell(call_count),
-            {
-              text: function_name(callee_index),
-            },
-            function_link_cell(callee_index, location_text),
-          ];
-        },
+      const callee_rows = callees.map(
+        ([callee_index, call_file, call_line, , call_count]) => [
+          call_count_cell(call_count),
+          { text: function_name(callee_index) },
+          line_link_cell(
+            call_file,
+            call_line,
+            report_ui_.location_text(call_file, call_line),
+          ),
+        ],
       );
-      const heading = text_fill("str_information_box_callees", {
-        counter: counter_label(ranking_counter),
-      });
-      markup +=
-        render_element(
-          "div",
-          { class: "heat-map-source-information-box-heading-" },
-          render_html_escape(heading),
-        ) + report_ui_.render_table("heat.detail.callees", columns, rows, {});
-      text_parts.push(
-        heading + "\n" + report_ui_.table_markdown(columns, rows),
-      );
-    }
-    for (const function_index of function_indexes) {
-      const function_part = function_part_render(file_path, function_index);
-      markup += function_part.markup;
-      text_parts.push(function_part.copy_text);
+      const calls_table = calls_table_render([], callee_rows);
+      body_markup += calls_table.markup;
+      text_parts.push(calls_table.text);
     }
     // A line in one function links it as "function", in several by name.
     const linked_indexes = function_indexes.length
       ? []
       : line_function_indexes.filter(function_is_linkable);
-    const owner_link_markup = linked_indexes
-      .map(
-        (function_index) =>
-          render_menu_button(
-            "link",
-            render_html_escape(
-              line_function_indexes.length === 1
-                ? text("str_information_box_function")
-                : function_name(function_index),
-            ),
-            {
-              tag_name: "a",
-              href: hash_for_function(function_table[function_index].name),
-              class_names: ["heat-map-source-information-box-control-"],
-            },
-          ) + box_separator_markup,
-      )
-      .join("");
-    markup += render_element(
-      "div",
-      {},
-      owner_link_markup +
-        box_control_markup("copy", "str_information_box_copy") +
-        (line_number
-          ? box_separator_markup +
-            box_control_markup("close", "str_information_box_close")
-          : ""),
+    const link_entries = linked_indexes.map((function_index) =>
+      report_ui_.strip.entry_make(
+        String(function_index),
+        "link",
+        line_function_indexes.length === 1
+          ? text("str_information_box_function")
+          : function_name(function_index),
+        { href: hash_for_function(function_table[function_index].name) },
+      ),
     );
+    // A line in several functions is titled by its links to them alone.
+    const is_titled =
+      function_indexes.length > 0 || line_function_indexes.length < 2;
     return {
       markup: render_element(
         "div",
-        {
-          class: "heat-map-source-information-box-",
-          "data-information-box-line-": line_number,
-        },
-        markup,
+        { class: "heat-map-source-information-box-" },
+        render_element(
+          "div",
+          { class: "heat-map-source-information-box-body-" },
+          body_markup,
+        ),
       ),
       copy_text: text_parts.join("\n\n"),
+      heading_entries: [
+        ...(is_titled
+          ? [report_ui_.strip.entry_make("title", "text", title_text, {})]
+          : []),
+        ...link_entries,
+      ],
     };
+  }
+  // Draws a box in its cell, then its strip: heading, copy and close.
+  function information_box_place(box_cell, file_path, line_number) {
+    const information_box = information_box_render(file_path, line_number);
+    box_cell.innerHTML = information_box.markup;
+    const box_element = box_cell.firstElementChild;
+    const close_entries = line_number
+      ? [
+          report_ui_.strip.entry_make(
+            "close",
+            "action",
+            text("str_information_box_close"),
+            { on_activate: () => detail_close(box_cell.parentElement) },
+          ),
+        ]
+      : [];
+    report_ui_.strip.render(
+      box_element.querySelector(".heat-map-source-information-box-strip-"),
+      [
+        ...information_box.heading_entries,
+        report_ui_.strip.copy_entry_make(
+          () => information_box.copy_text,
+          box_element.querySelector(".heat-map-source-information-box-body-"),
+          shown_test_name + HEAT_MAP_DOWNLOAD_FILE_NAME_SUFFIX,
+          report_ui_.location_text(file_path, line_number),
+        ),
+        ...close_entries,
+      ],
+      [],
+    );
   }
 
   // Expands each tab to its stop, so a clip counts the columns shown.
@@ -1270,38 +1345,73 @@ window.try_catch_handler_(function () {
   }
   const file_box_row = () =>
     main_panel.querySelector("tr.heat-map-source-file-information-row-");
-  // Opens the file's box above its first line, in the source column.
+  // Writes a box's row, the tree's column left clear, its box cell the rest.
+  const box_row_markup = (row_class, column_count) =>
+    render_element(
+      "tr",
+      { class: row_class },
+      render_element("td", {}, "") +
+        render_element("td", { colspan: column_count - 1 }, ""),
+    );
+  // Opens the file's box above its first line, as wide as a line's box.
   function file_box_place(file_path) {
     const table_element = main_panel.querySelector(
       "table.heat-map-source-table-",
     );
-    const title_cells = [...table_element.tHead.rows[0].cells];
-    const source_title = table_element.tHead.querySelector(
-      `th[data-column-name-="${TABLE_COLUMN_SOURCE_NAME}"]`,
-    );
-    if (!source_title) window.throw_exception_("str_error_internal");
     table_element.tBodies[0].insertAdjacentHTML(
       "afterbegin",
-      render_element(
-        "tr",
-        { class: "heat-map-source-file-information-row-" },
-        title_cells
-          .map((title_cell, title_index) =>
-            title_cell === source_title
-              ? render_element(
-                  "td",
-                  {},
-                  information_box_render(file_path, 0).markup,
-                )
-              : render_element(
-                  "td",
-                  title_index ? {} : { class: TREE_COLUMN.cls },
-                  "",
-                ),
-          )
-          .join(""),
+      box_row_markup(
+        "heat-map-source-file-information-row-",
+        table_element.tHead.rows[0].cells.length,
       ),
     );
+    information_box_place(file_box_row().cells[1], file_path, 0);
+  }
+  // Widens the source column by what a box outgrows the titles, every chunk.
+  function box_rooms_fit() {
+    const table_element = main_panel.querySelector(
+      "table.heat-map-source-table-",
+    );
+    // The sizer rows hold the room, so a change restyles them alone.
+    const sizer_rows = table_element.querySelectorAll(
+      ":scope > :is(thead, tbody)" +
+        " > tr.table-sizer-row-:not(.table-title-copy-)",
+    );
+    const room_set = (room_text) => {
+      for (const sizer_row of sizer_rows)
+        sizer_row.style.setProperty(
+          STYLE_HEAT_MAP_SOURCE_BOX_ROOM_PROPERTY,
+          room_text,
+        );
+    };
+    // A held room widens the titles, so it goes before the widths are read.
+    if (
+      sizer_rows[0].style.getPropertyValue(
+        STYLE_HEAT_MAP_SOURCE_BOX_ROOM_PROPERTY,
+      )
+    )
+      room_set("");
+    const title_row = table_element.tHead.rows[0];
+    const source_title = [...title_row.cells].find(
+      (title_cell) =>
+        title_cell.getAttribute("data-column-name-") ===
+        TABLE_COLUMN_SOURCE_NAME,
+    );
+    let room_px = 0;
+    for (const box_row of table_element.querySelectorAll(
+      ":scope > tbody > :is(" +
+        "tr.heat-map-source-line-detail-row-," +
+        " tr.heat-map-source-file-information-row-)",
+    )) {
+      const outgrown_px =
+        design_rect(box_row).width - design_rect(title_row).width;
+      if (outgrown_px > 0)
+        room_px = Math.max(
+          room_px,
+          design_rect(source_title).width + outgrown_px,
+        );
+    }
+    if (room_px) room_set(room_px + "px");
   }
 
   function file_render(file_path) {
@@ -1311,6 +1421,22 @@ window.try_catch_handler_(function () {
       kept_scroll_top = is_first_view ? 0 : main_panel.scrollTop;
     current_file_path = file_path;
     const file_source = source_text(file_path);
+    // A file with no source shows its box alone, right of the tree's column.
+    if (file_source == null) {
+      source_replace(
+        render_element(
+          "div",
+          { class: "heat-map-source-box-alone-" },
+          tree_table_markup([TREE_COLUMN], []) + render_element("div", {}, ""),
+        ),
+      );
+      const box_cell = main_panel.querySelector(
+        ".heat-map-source-box-alone- > div",
+      );
+      information_box_place(box_cell, file_path, 0);
+      report_ui_.layout_activate(box_cell);
+      return;
+    }
     const source_calls_cell = (source_row) => {
       const calls_percent = source_row.share(
         source_row.calls,
@@ -1363,9 +1489,8 @@ window.try_catch_handler_(function () {
             (source_row) => source_row.callers,
           ),
           [COUNTER_LIST_CALLS_LINE_NAME]: {
-            column: source_line_column(
+            column: report_preferences_.line_column(
               COUNTER_LIST_CALLS_LINE_NAME,
-              "heat-map-source-table-calls-cell-",
             ),
             cell: source_calls_cell,
           },
@@ -1379,10 +1504,7 @@ window.try_catch_handler_(function () {
     function source_counter_part(counter_name) {
       if (counter_name === RANKING_COUNTER_NAME)
         return {
-          column: source_line_column(
-            counter_name,
-            "heat-map-source-table-self-cell-",
-          ),
+          column: report_preferences_.line_column(counter_name),
           cell: (source_row) => ({
             text: source_row.self_cost
               ? share_text(source_row.self_percent)
@@ -1393,10 +1515,7 @@ window.try_catch_handler_(function () {
       const secondary = counter_find(counter_name);
       if (!secondary) window.throw_exception_("str_error_internal");
       return {
-        column: source_line_column(
-          counter_name,
-          "heat-map-source-table-secondary-counter-cell-",
-        ),
+        column: report_preferences_.line_column(counter_name),
         cell: (source_row) => {
           if (!source_row.costs) return "";
           const counter_value = secondary.get(source_row.costs[0]);
@@ -1413,22 +1532,23 @@ window.try_catch_handler_(function () {
     const source_rows = [],
       attrs = [];
     const source_row_emit = (line_number, text) => {
-      const line_costs = file.lines[line_number];
-      const function_indexes = line_costs
-        ? []
-        : declared_functions(file_path, line_number);
-      // A function line with no cost of its own shows its functions' costs.
+      const line_costs = file.lines[line_number] || null;
+      const function_indexes = declared_functions(file_path, line_number);
+      // A function line holds its functions' costs, summed, beside its own.
       const function_costs = function_indexes.length
         ? declared_costs(function_indexes)
         : null;
-      const row_costs = function_costs
+      const function_row_costs = function_costs
         ? [function_costs.self, function_costs.calls]
-        : line_costs;
+        : null;
+      // Each cell of a row reads the one source the view mode shows.
+      const row_costs = shows_functions ? function_row_costs : line_costs;
+      const hidden_costs = shows_functions ? line_costs : function_row_costs;
       const row_share = (value, counter) =>
         counter_share(
           value,
           counter,
-          function_costs
+          shows_functions && function_costs
             ? counter_baseline(function_costs.baseline, counter)
             : line_counter_baseline(file_path, line_number, counter),
         );
@@ -1436,12 +1556,20 @@ window.try_catch_handler_(function () {
         calls = row_costs ? ranking_value(row_costs[1]) : 0;
       const self_percent = row_share(self_cost, ranking_counter);
       const heat_style_attribute = heat_style(self_percent);
+      // A row of hidden costs alone takes the menu's colors, still clickable.
       const class_names = [
-        row_costs && line_number ? "clickable-" : "",
-        file.callees[line_number] ? "has-callee-" : "",
+        (row_costs || hidden_costs) && line_number ? "clickable-" : "",
+        function_indexes.length ? "function-entry-" : "",
+        !row_costs && hidden_costs ? "other-counter-source-" : "",
       ]
         .filter(Boolean)
         .join(" ");
+      // A line making a call shows the call chevron, else an entry's chevron.
+      const marker_text = file.callees[line_number]
+        ? HEAT_MAP_SOURCE_CALL_SITE_MARKER_TEXT
+        : function_indexes.length
+          ? HEAT_MAP_SOURCE_FUNCTION_ENTRY_MARKER_TEXT
+          : "";
       attrs.push({
         id: `L${line_number}-`,
         ...(class_names ? { class: class_names } : {}),
@@ -1449,31 +1577,32 @@ window.try_catch_handler_(function () {
       });
       source_rows.push({
         calls,
-        callees: file.callees[line_number] || [],
-        callers: declared_functions(file_path, line_number).flatMap(
-          (function_index) => function_table[function_index].callers,
-        ),
+        callees: (!shows_functions && file.callees[line_number]) || [],
+        callers: shows_functions
+          ? function_indexes.flatMap(
+              (function_index) => function_table[function_index].callers,
+            )
+          : [],
         costs: row_costs,
         heat_style_attribute,
         line_number,
+        marker_text,
         self_cost,
         self_percent,
         share: row_share,
         text,
       });
     };
-    const source_lines = file_source == null ? [] : file_source.split("\n");
+    const source_lines = file_source.split("\n");
     if (source_lines.length && source_lines[source_lines.length - 1] === "") {
       source_lines.pop();
     }
     for (let line_index = 0; line_index < source_lines.length; line_index++) {
       source_row_emit(line_index + 1, source_lines[line_index]);
     }
-    const beyond_end_text =
-      file_source == null ? "" : text("str_source_beyond_end");
     for (const line_number of known_lines(file_path)) {
-      if (file_source != null && line_number <= source_lines.length) continue;
-      source_row_emit(line_number, beyond_end_text);
+      if (line_number > source_lines.length)
+        source_row_emit(line_number, text("str_source_beyond_end"));
     }
 
     const line_number_column = {
@@ -1482,6 +1611,16 @@ window.try_catch_handler_(function () {
       numeric: true,
       cls: "heat-map-source-table-line-number-cell-",
     };
+    // Each line fills the column, a chevron left and the number right.
+    const line_number_column_chars = source_rows.reduce(
+      (widest_chars, source_row) =>
+        Math.max(
+          widest_chars,
+          source_row.marker_text.length +
+            String(source_row.line_number).length,
+        ),
+      line_number_column.label.length,
+    );
     const source_column = {
       label: text("str_column_source"),
       name: TABLE_COLUMN_SOURCE_NAME,
@@ -1494,7 +1633,11 @@ window.try_catch_handler_(function () {
       {
         column: line_number_column,
         cell: (source_row) => ({
-          text: String(source_row.line_number),
+          text:
+            source_row.marker_text +
+            String(source_row.line_number).padStart(
+              line_number_column_chars - source_row.marker_text.length,
+            ),
           style: source_row.heat_style_attribute,
         }),
       },
@@ -1515,6 +1658,7 @@ window.try_catch_handler_(function () {
         row_attributes: attrs,
         cls: "heat-map-source-table-",
         counter_list_key: HEAT_MAP_VIEW_ENTRY[0],
+        is_chunked: true,
         on_redraw: source_redraw,
         on_sort: (column_index) =>
           title_press(column_parts[column_index].column),
@@ -1528,14 +1672,14 @@ window.try_catch_handler_(function () {
       markup,
     );
     file_box_place(file_path);
-    ticker_tape_box.innerHTML = hottest_lines_render(file_path);
+    ticker_tape_box.innerHTML = hottest_lines_render(file_path, source_rows);
     tree_track_place(tree_state);
-
-    minimap_build();
     report_ui_.table_rows.attach(
       main_panel.querySelector("table.heat-map-source-table-"),
       "tr[data-line-number-]",
     );
+    // The minimap's column is decided before the bars draw for it.
+    minimap_build();
     report_ui_.layout_activate(main_panel);
     main_panel.scrollTop = kept_scroll_top;
     minimap_sync();
@@ -1546,13 +1690,11 @@ window.try_catch_handler_(function () {
     main_panel.scrollTop = 0;
     minimap_sync();
   }
-  // Shows an address in a file: the tree node if asked, then the file box.
-  function file_address_show(file_path, line, moves_tree) {
-    if (moves_tree) {
-      tree_reveal(file_path);
-      tree_render();
-      tree_selected_show();
-    }
+  // Shows the drawn address again: its file's tree node, then the file box.
+  function file_address_show(file_path, line) {
+    tree_reveal(file_path);
+    tree_render();
+    tree_selected_show();
     if (!line) file_box_show();
   }
 
@@ -1562,6 +1704,7 @@ window.try_catch_handler_(function () {
       bottom: report_ui_.design_px(rect.bottom),
       height: report_ui_.design_px(rect.height),
       top: report_ui_.design_px(rect.top),
+      width: report_ui_.design_px(rect.width),
     };
   }
 
@@ -1579,80 +1722,133 @@ window.try_catch_handler_(function () {
     return design_rect(table_element.tHead.rows[0].cells[0]).height;
   }
 
-  function row_center(row_element) {
+  // Scrolls a row to lie the set count of its own heights below the titles.
+  function row_top_place(row_element) {
     const cover = covered_height(row_element.closest("table"));
     const row_rect = design_rect(row_element);
     const main_rect = design_rect(main_panel);
-    const detail_element = row_element.nextElementSibling;
-    const block_bottom_px =
-      detail_element &&
-      detail_element.classList.contains("heat-map-source-line-detail-row-")
-        ? design_rect(detail_element).bottom
-        : row_rect.bottom;
-    const block_height_px = block_bottom_px - row_rect.top;
-    const slack = (main_panel.clientHeight - cover - block_height_px) / 2;
-    main_panel.scrollTop += row_rect.top - main_rect.top - cover - slack;
+    main_panel.scrollTop +=
+      row_rect.top -
+      main_rect.top -
+      cover -
+      HEAT_MAP_SOURCE_SHOWN_LINE_ROWS_ABOVE * row_rect.height;
   }
 
   let scale_factor = 1,
     clone_height_px = 0,
+    clone_line_count = 0,
+    clone_line_height_px = 0,
+    clone_box_row = null,
     minimap_build_number = 0;
-  function minimap_clear() {
+  // Sizes the minimap again as the source's rows take their drawn heights.
+  const source_resize_observer = new ResizeObserver(
+    window.try_catch_handler_(() => minimap_size()),
+  );
+  // Empties the minimap, its column kept until a build or a clear decides.
+  function minimap_empty() {
     minimap_build_number++;
-    minimap_panel.classList.add("empty-");
+    source_resize_observer.disconnect();
     minimap_box.innerHTML = "";
     minimap_viewport.hidden = true;
   }
+  function minimap_clear() {
+    minimap_empty();
+    minimap_panel.classList.add("empty-");
+  }
   // Holds the room of a source taller than the view, filled before the paint.
   function minimap_build() {
-    minimap_clear();
+    minimap_empty();
     const table_element = main_panel.querySelector(
       "table.heat-map-source-table-",
     );
     const source_top_px = design_rect(
       main_panel.querySelector(".heat-map-source-"),
     ).top;
-    if (
-      design_rect(table_element).bottom - source_top_px <=
-      main_panel.clientHeight
-    )
-      return;
-    minimap_panel.classList.remove("empty-");
-    const build_number = minimap_build_number;
+    // The minimap's column widens the source alone, so its height holds.
+    const is_taller =
+      design_rect(table_element).bottom - source_top_px >
+      main_panel.clientHeight;
+    minimap_panel.classList.toggle("empty-", !is_taller);
+    if (!is_taller) return;
+    source_resize_observer.observe(table_element);
+    minimap_fill_request();
+  }
+  // Fills a shown minimap before the paint, a later request replacing it.
+  function minimap_fill_request() {
+    if (minimap_panel.classList.contains("empty-")) return;
+    const build_number = ++minimap_build_number;
     requestAnimationFrame(
       window.try_catch_handler_(() => {
-        if (build_number === minimap_build_number) minimap_fill(table_element);
+        if (build_number === minimap_build_number)
+          minimap_fill(
+            main_panel.querySelector("table.heat-map-source-table-"),
+          );
       }),
     );
   }
+  // Writes the source's lines as one block, a colored line its band.
   function minimap_fill(table_element) {
-    const table_body = table_element.tBodies[0];
-    let clone_rows_markup = "";
-    for (const row of table_body.rows) {
-      if (row.classList.contains("heat-map-source-line-detail-row-")) continue;
-      const code = row.querySelector("td.heat-map-source-table-code-cell-");
-      if (!code) continue;
-      clone_rows_markup += render_element(
-        "tr",
-        row.className ? { class: row.className } : {},
-        code.outerHTML,
+    const line_markups = [];
+    let box_row = null;
+    for (const source_row of table_element.querySelectorAll(
+      ":scope > tbody > :is(tr[data-line-number-]," +
+        " tr.heat-map-source-line-detail-row-)",
+    )) {
+      // A line's open box is a gap in the minimap, sized once it is drawn.
+      if (!source_row.hasAttribute("data-line-number-")) {
+        box_row = source_row;
+        line_markups.push(
+          render_element("span", { class: "heat-map-minimap-box-gap-" }, ""),
+        );
+        continue;
+      }
+      const code_cell = source_row.querySelector(
+        ":scope > td.heat-map-source-table-code-cell-",
+      );
+      // An empty line draws no line box, as an empty cell has no height.
+      if (!code_cell.textContent) continue;
+      const line_markup = render_html_escape(code_cell.textContent);
+      const cell_style = code_cell.getAttribute("style");
+      const band_attributes = cell_style
+        ? { class: "heat-map-minimap-band-", style: cell_style }
+        : code_cell.parentElement.classList.contains("other-counter-source-")
+          ? { class: "heat-map-minimap-band- other-counter-source-" }
+          : null;
+      line_markups.push(
+        band_attributes
+          ? render_element("span", band_attributes, line_markup)
+          : line_markup,
       );
     }
-    minimap_box.innerHTML = render_element(
-      "table",
-      { class: "heat-map-source-table-" },
-      render_element("tbody", {}, clone_rows_markup),
-    );
-    const clone_table = minimap_box.firstElementChild;
+    minimap_box.innerHTML = render_element("pre", {}, line_markups.join("\n"));
+    clone_line_count = line_markups.length;
+    clone_line_height_px =
+      minimap_box.firstElementChild.offsetHeight / clone_line_count;
+    clone_box_row = box_row;
     minimap_viewport.hidden = false;
-    clone_height_px = clone_table.offsetHeight;
+    minimap_size();
+  }
+  // Sizes a filled minimap to the source's rows as drawn, then lays it out.
+  function minimap_size() {
+    if (minimap_viewport.hidden) return;
+    const clone_element = minimap_box.firstElementChild;
+    // The gap holds the box at the scale the minimap holds the source lines.
+    if (clone_box_row) {
+      const box_height_px = design_rect(clone_box_row).height;
+      const source_height_px = geometry_measure().rows - box_height_px;
+      clone_element.querySelector(".heat-map-minimap-box-gap-").style.height =
+        (box_height_px * (clone_line_count - 1) * clone_line_height_px) /
+          source_height_px +
+        "px";
+    }
+    clone_height_px = clone_element.offsetHeight;
     minimap_layout();
   }
 
   function minimap_layout() {
     if (minimap_viewport.hidden) return;
     const band_width_px = minimap_panel.clientWidth,
-      band_height_px = main_panel.clientHeight;
+      band_height_px = minimap_panel.clientHeight;
     scale_factor = Math.min(
       1,
       band_width_px /
@@ -1668,38 +1864,24 @@ window.try_catch_handler_(function () {
 
   function geometry_measure() {
     const table_element = main_panel.querySelector(
-        "table.heat-map-source-table-",
-      ),
-      table_body = table_element.tBodies[0];
+      "table.heat-map-source-table-",
+    );
     const main = design_rect(main_panel);
-    const body_bottom_px = design_rect(table_body).bottom;
-    // The rows the minimap clones start below the file box's row.
+    const body_bottom_px = design_rect(table_element).bottom;
+    // The rows the minimap clones start below the file box's row, a box too.
     const code_top_px = design_rect(file_box_row()).bottom;
     const clone_body = {
       height: body_bottom_px - code_top_px,
       top: code_top_px,
     };
-    const detail_element = table_body.querySelector(
-      "tr.heat-map-source-line-detail-row-",
-    );
-    const detail = detail_element && design_rect(detail_element);
-    const rows = clone_body.height - (detail ? detail.height : 0);
-    const rows_above = (y_position_px) => {
-      let pixels = y_position_px - clone_body.top;
-      if (detail) {
-        pixels -= Math.max(
-          0,
-          Math.min(y_position_px, detail.bottom) - detail.top,
-        );
-      }
-      return Math.max(0, Math.min(rows, pixels));
-    };
+    const rows = clone_body.height;
+    const rows_above = (y_position_px) =>
+      Math.max(0, Math.min(rows, y_position_px - clone_body.top));
     return {
       rows,
       above: rows_above,
       cover: covered_height(table_element),
       body: clone_body,
-      detail,
       top: main.top,
       bottom: main.top + main_panel.clientHeight,
       head: design_rect(table_element.tHead.rows[0].cells[0]).bottom,
@@ -1726,15 +1908,12 @@ window.try_catch_handler_(function () {
   function scroll_to_row(row) {
     const geometry = geometry_measure();
     row = Math.max(0, Math.min(geometry.rows, row));
-    let y_position_px =
+    const y_position_px =
       geometry.body.top -
       geometry.top +
       main_panel.scrollTop +
       row -
       geometry.cover;
-    if (geometry.detail && geometry.detail.top - geometry.body.top < row) {
-      y_position_px += geometry.detail.height;
-    }
     const maximum_scroll_px =
       main_panel.scrollHeight - main_panel.clientHeight;
     main_panel.scrollTop = Math.max(
@@ -1757,7 +1936,7 @@ window.try_catch_handler_(function () {
         const geometry = geometry_measure();
         const pressed_px =
           report_ui_.design_px(press_event.clientY) -
-          design_rect(minimap_panel).top;
+          design_rect(minimap_box).top;
         scroll_to_row(
           (pressed_px / scaled_height_px) * geometry.rows -
             (main_panel.clientHeight - geometry.cover) / 2,
@@ -1805,8 +1984,8 @@ window.try_catch_handler_(function () {
     );
   }
 
-  // Shows a line, its box open below it.
-  function detail_set(line) {
+  // Shows a line, its box open below it, its row at a kept top if given.
+  function detail_set(line, kept_top) {
     if (line === detail_line()) return;
     for (const detail_row of main_panel.querySelectorAll(
       "tr.heat-map-source-line-detail-row-",
@@ -1814,12 +1993,38 @@ window.try_catch_handler_(function () {
       detail_row.remove();
     }
     const row = line ? document.getElementById("L" + line + "-") : null;
+    if (row) detail_open(current_file_path, line, row);
+    box_rooms_fit();
     if (row) {
-      detail_open(current_file_path, line, row);
       report_ui_.table_rows.tab_stop_set(row, false);
-      if (!row_is_visible(row)) row_center(row);
+      if (kept_top !== null)
+        main_panel.scrollTop += design_rect(row).top - kept_top;
+      else line_show(line);
     }
+    minimap_fill_request();
+  }
+  // Places a line near the view's top when the line is out of view.
+  function line_show(line) {
+    const row = document.getElementById("L" + line + "-");
+    if (!row_is_visible(row)) row_top_place(row);
+  }
+  // Jumps to a box row's address, its line placed only when out of view.
+  function box_row_jump(jump_hash) {
+    const shown_hash = report_ui_.address.hash(
+      report_ui_.address.of_hash(location.hash),
+    );
+    if (jump_hash !== shown_hash) {
+      jumped_hash = jump_hash;
+      report_ui_.address.request(jump_hash);
+      return;
+    }
+    // The address shown stays, its line's row taking the focus a jump gives.
+    line_show(rendered_line);
     minimap_sync();
+    report_ui_.table_rows.tab_stop_set(
+      document.getElementById("L" + rendered_line + "-"),
+      true,
+    );
   }
   function detail_close(detail_row) {
     report_ui_.table_rows.tab_stop_set(
@@ -1827,55 +2032,47 @@ window.try_catch_handler_(function () {
       true,
     );
     detail_row.remove();
-    minimap_sync();
+    box_rooms_fit();
+    minimap_fill_request();
   }
-  // Opens a line's box below its row, the tree's column left clear.
+  // Opens a line's box below its row.
   function detail_open(file_path, line_number, row) {
     row.insertAdjacentHTML(
       "afterend",
-      render_element(
-        "tr",
-        { class: "heat-map-source-line-detail-row-" },
-        render_element("td", { class: TREE_COLUMN.cls }, "") +
-          render_element(
-            "td",
-            { colspan: row.cells.length - 1 },
-            information_box_render(file_path, line_number).markup,
-          ),
-      ),
+      box_row_markup("heat-map-source-line-detail-row-", row.cells.length),
     );
     const detail_row = row.nextElementSibling;
+    information_box_place(detail_row.cells[1], file_path, line_number);
     report_ui_.layout_activate(detail_row);
   }
-  // Copies or closes the information box that holds a control.
-  function information_box_control_handler(box_control) {
-    const box_line_number = +box_control
-      .closest("[data-information-box-line-]")
-      .getAttribute("data-information-box-line-");
-    if (box_control.getAttribute("data-information-box-action-") === "copy")
-      return navigator.clipboard.writeText(
-        information_box_render(current_file_path, box_line_number).copy_text,
-      );
-    detail_close(box_control.closest("tr.heat-map-source-line-detail-row-"));
-  }
-
   main_panel.addEventListener(
     "click",
     window.try_catch_handler_((click_event) => {
-      const box_control = click_event.target.closest(
-        "[data-information-box-action-]",
-      );
-      if (box_control) return information_box_control_handler(box_control);
+      // A box table's row, its link too, jumps from here, not from the page.
+      const jump_hash =
+        click_event.target.closest(
+          ".heat-map-source-information-box- tr.row-link-",
+        ) && report_ui_.address.link_hash(click_event);
+      if (jump_hash) {
+        click_event.preventDefault();
+        return box_row_jump(jump_hash);
+      }
       if (click_event.target.closest("a")) return;
       const row = click_event.target.closest("tr.clickable-");
       if (row && current_file_path) {
         const line_number = +row.getAttribute("data-line-number-");
+        const row_top = design_rect(row).top;
+        // A pressed line's box opens with its row left where it lies.
         if (line_number === detail_line())
           detail_close(row.nextElementSibling);
-        else
+        else if (line_number === rendered_line)
+          detail_set(line_number, row_top);
+        else {
+          pressed_row_place = { line: line_number, top: row_top };
           report_ui_.address.request(
             hash_for_location(current_file_path, line_number),
           );
+        }
       }
     }),
   );
@@ -1940,16 +2137,6 @@ window.try_catch_handler_(function () {
     "keydown",
     window.try_catch_handler_((key_event) => {
       const key_name = report_ui_.widget_key.of(key_event);
-      if (!key_name) return;
-      const box_control = key_event.target.closest(
-        "[data-information-box-action-]",
-      );
-      if (box_control && report_ui_.widget_key.activates(key_name)) {
-        key_event.preventDefault();
-        if (!key_event.repeat)
-          return information_box_control_handler(box_control);
-        return;
-      }
       if (key_name !== WIDGET_KEY_NAMES.close) return;
       const detail_row = main_panel.querySelector(
         "tr.heat-map-source-line-detail-row-",
@@ -1967,17 +2154,19 @@ window.try_catch_handler_(function () {
   const source_scripts_loaded = new Set();
   const source_scripts_loading = new Set();
   let rendered_line = 0;
+  // Holds the line a press asked for and the top its row lay at, else null.
+  let pressed_row_place = null;
+  // Holds the address a box row jumped to until its route draws it, else null.
+  let jumped_hash = null;
   let rendered_key = "";
   let routed_hash = null;
   let is_routing = false;
   let load_render_log = null;
-  // Builds the tree by the ranking counter, each top level node open.
+  // Builds the tree, each top level folder with samples open.
   function ranking_tree_build() {
     tree_root = tree_build();
     for (const directory_node of tree_root.dirs.values())
-      expanded_directories.add(directory_node.path);
-    if (tree_root.files.some((file) => file.zero))
-      expanded_cold_groups.add(tree_root.path);
+      if (!directory_node.zero) expanded_directories.add(directory_node.path);
   }
   // Renders again what relayed preferences change, the first relay routing.
   function preferences_apply() {
@@ -2007,36 +2196,32 @@ window.try_catch_handler_(function () {
     render_html_escape(
       text_fill("str_no_samples_in_test", { name: unsampled_name }),
     );
-  // Shows a note in place of a file's source, the tree kept in its column.
-  function unavailable_note_render(note_markup) {
-    current_file_path = null;
+  // Writes a table led by the tree's column, as the source table is.
+  const tree_table_markup = (tree_columns, tree_rows) =>
+    report_ui_.render_table("heat.note", tree_columns, tree_rows, {
+      cls: "heat-map-source-table-",
+      on_sort: (column_index) => title_press(tree_columns[column_index]),
+      sorted_column_index: null,
+    });
+  // Shows markup in place of a file's source, the tree kept in its column.
+  function source_replace(panel_markup) {
     ticker_tape_box.replaceChildren();
     const tree_state = tree_state_read();
-    const note_columns = [TREE_COLUMN, { label: text("str_column_source") }];
-    main_panel.innerHTML = report_ui_.render_table(
-      "heat.note",
-      note_columns,
-      [["", { html: note_markup }]],
-      {
-        cls: "heat-map-source-table-",
-        on_sort: (column_index) => title_press(note_columns[column_index]),
-        sorted_column_index: null,
-      },
-    );
+    main_panel.innerHTML = panel_markup;
     main_panel.scrollTop = 0;
     tree_track_place(tree_state);
     report_ui_.layout_activate(main_panel);
     minimap_clear();
   }
-  function line_clamp(addressed_line) {
-    const source_rows = main_panel.querySelectorAll("tr[data-line-number-]");
-    let clamped_line = 0;
-    for (const source_row of source_rows) {
-      const row_line = +source_row.getAttribute("data-line-number-");
-      if (row_line > 0 && (row_line <= addressed_line || !clamped_line))
-        clamped_line = row_line;
-    }
-    return clamped_line;
+  // Shows a note in place of a file's source, the tree kept in its column.
+  function unavailable_note_render(note_markup) {
+    current_file_path = null;
+    source_replace(
+      tree_table_markup(
+        [TREE_COLUMN, { label: text("str_column_source") }],
+        [["", { html: note_markup }]],
+      ),
+    );
   }
   function main_focus_restore(main_had_focus) {
     if (!main_had_focus || main_panel.contains(document.activeElement)) return;
@@ -2059,6 +2244,9 @@ window.try_catch_handler_(function () {
       model_load(page_address.test);
       return;
     }
+    shows_functions = page_address.functions;
+    const pressed_place = pressed_row_place;
+    pressed_row_place = null;
     const is_new_address = location.hash !== routed_hash,
       is_detail_closed = !is_new_address && !detail_line(),
       previous_file_path = current_file_path;
@@ -2072,8 +2260,7 @@ window.try_catch_handler_(function () {
       );
       if (
         function_entry &&
-        function_entry.line &&
-        file_table[function_entry.file]
+        line_is_shown(function_entry.file, function_entry.line)
       ) {
         file = function_entry.file;
         line = function_entry.line;
@@ -2090,6 +2277,15 @@ window.try_catch_handler_(function () {
     }
     if (!note_markup && !sources_ready(file)) return;
     routed_hash = location.hash;
+    const is_jump = jumped_hash === report_ui_.address.hash(page_address);
+    jumped_hash = null;
+    if (is_new_address && fn && !note_markup)
+      report_ui_.function_location_send({
+        test: page_address.test,
+        function: fn,
+        file,
+        line,
+      });
     if (note_markup) {
       rendered_key = "";
       unavailable_note_render(note_markup);
@@ -2099,15 +2295,38 @@ window.try_catch_handler_(function () {
       return;
     }
 
-    const key = [file, active_scale.value, ...shown_line_names].join("\n");
-    if (key !== rendered_key) {
+    // A new file draws its source and the tree, so its tree node opens first.
+    const moves_tree = is_new_address && file !== previous_file_path;
+    if (moves_tree) tree_reveal(file);
+    const key = [
+      file,
+      active_scale.value,
+      shows_functions,
+      ...shown_line_names,
+    ].join("\n");
+    const is_drawn = key !== rendered_key;
+    if (is_drawn) {
       rendered_key = key;
       file_render(file);
     }
-    if (line) line = line_clamp(line);
-    if (!is_detail_closed) detail_set(line);
-    if (is_new_address)
-      file_address_show(file, line, file !== previous_file_path);
+    if (line && !main_panel.querySelector(`tr[data-line-number-="${line}"]`))
+      window.throw_exception_("str_error_hash_line_unknown", file, line);
+    // A new line box fits the boxes' room, else a drawn source fits it here.
+    if (!is_detail_closed && line !== detail_line())
+      detail_set(
+        line,
+        pressed_place && pressed_place.line === line
+          ? pressed_place.top
+          : null,
+      );
+    else if (is_drawn && source_text(file) != null) box_rooms_fit();
+    // A jump's line already open is placed as a newly opened one is.
+    if (is_jump && line) {
+      line_show(line);
+      minimap_sync();
+    }
+    if (moves_tree) tree_selected_show();
+    if (is_new_address && !line) file_box_show();
     rendered_line = line;
     main_focus_restore(main_had_focus);
     load_render_finish();
@@ -2124,7 +2343,7 @@ window.try_catch_handler_(function () {
     load_render_log = null;
   }
   function model_load(test_name) {
-    const held_models = window[HEAT_MAP_MODEL_GLOBAL_NAME];
+    const held_models = window.report_heat_map_models_;
     if (held_models && held_models[test_name]) {
       model_switch(test_name, held_models[test_name]);
       route_render();
@@ -2142,7 +2361,7 @@ window.try_catch_handler_(function () {
     model_script.addEventListener(
       "load",
       window.try_catch_handler_(() => {
-        const loaded_models = window[HEAT_MAP_MODEL_GLOBAL_NAME];
+        const loaded_models = window.report_heat_map_models_;
         if (!loaded_models || !loaded_models[test_name])
           window.throw_exception_("str_error_internal");
         route_render();
@@ -2161,16 +2380,6 @@ window.try_catch_handler_(function () {
     HAS_CALL_GRAPH = function_table.some(
       (function_entry) => function_entry.callers.length > 0,
     );
-    const per_function_calls = function_table.map((function_entry) =>
-      function_entry.callers.reduce(
-        (running_total, caller) => running_total + caller[4],
-        0,
-      ),
-    );
-    CALLS_TOTAL = per_function_calls.reduce(
-      (running_total, call_count) => running_total + call_count,
-      0,
-    );
     entry_line_index = {};
     function_table.forEach((function_entry, index) => {
       if (!function_entry.line) return;
@@ -2179,6 +2388,12 @@ window.try_catch_handler_(function () {
       const file_lines = entry_line_index[function_entry.file];
       file_lines[function_entry.line] = file_lines[function_entry.line] || [];
       file_lines[function_entry.line].push(index);
+    });
+    // A caller's row of a function is that caller's callee row of it.
+    function_callees = function_table.map(() => []);
+    function_table.forEach((function_entry, callee_index) => {
+      for (const [caller_index, ...call_fields] of function_entry.callers)
+        function_callees[caller_index].push([callee_index, ...call_fields]);
     });
     counters_build();
     expanded_directories.clear();
@@ -2195,10 +2410,10 @@ window.try_catch_handler_(function () {
       route_render();
       return;
     }
-    file_address_show(current_file_path, rendered_line, true);
+    file_address_show(current_file_path, rendered_line);
     if (!rendered_line) return;
-    detail_set(rendered_line);
-    row_center(document.getElementById("L" + rendered_line + "-"));
+    detail_set(rendered_line, null);
+    row_top_place(document.getElementById("L" + rendered_line + "-"));
   }
 
   report_ui_.view_activate({

@@ -38,9 +38,7 @@ _TIMING_PERF_STAT_METRICS: tuple[tuple[str, str, str, int], ...] = ()
 _TIMING_PERF_STAT_NUMBER_PATTERN: str = ""
 _TIMING_PERF_STAT_RUNS: int = 0
 _TIMING_PERF_STAT_UNCOUNTED_VALUES: tuple[str, ...] = ()
-_TRACE_OUT_VARIABLE: str = ""
 _TRACE_SKIP_ALL: int = 0
-_TRACE_SKIP_VARIABLE: str = ""
 _VERBOSE_RAW_LEVEL: int = 0
 settings.load_into(__name__)
 
@@ -645,12 +643,12 @@ class PerfMeasure:
         skipped_events: int,
     ) -> None:
         loop_words = [args.test, str(_TEST_LOOPS)]
-        skip_word = f"{_TRACE_SKIP_VARIABLE}={skipped_events}"
+        skip_word = f"PERF_TRACE_SKIP={skipped_events}"
         self.line_print(
             " ".join(
                 [
                     "$",
-                    f"{_TRACE_OUT_VARIABLE}={os.path.basename(trace_path)}",
+                    f"PERF_TRACE_OUT={os.path.basename(trace_path)}",
                     skip_word,
                     *_PINNED_COMMAND,
                     executable_shown,
@@ -664,13 +662,13 @@ class PerfMeasure:
             check=False,
             env=os.environ
             | {
-                _TRACE_OUT_VARIABLE: trace_path,
-                _TRACE_SKIP_VARIABLE: str(skipped_events),
+                "PERF_TRACE_OUT": trace_path,
+                "PERF_TRACE_SKIP": str(skipped_events),
             },
         )
         self.exit_check(
             completed.returncode,
-            [f"{_TRACE_OUT_VARIABLE}={trace_path}", skip_word, *command_words],
+            [f"PERF_TRACE_OUT={trace_path}", skip_word, *command_words],
         )
 
 

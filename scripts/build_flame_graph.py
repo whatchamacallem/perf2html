@@ -14,7 +14,6 @@ import artifacts, settings, theme
 _ASSET_TEMPLATE_FLAME_GRAPH_PAGE_NAME: str = ""
 _FLAME_GRAPH_APP_DIR_NAME: str = ""
 _FLAME_GRAPH_PROFILE_DIR_NAME: str = ""
-_FLAME_GRAPH_PROFILE_GLOBAL_NAME: str = ""
 _FLAME_GRAPH_VIEW_ENTRY: tuple[str, str] = ("", "")
 _SETTINGS_HELD_SCRIPT_TEMPLATE_ID: str = ""
 settings.load_into(__name__)
@@ -71,7 +70,7 @@ class BuildFlameGraph:
             "name": json.loads(raw.decode("utf-8"))["name"],
             "base64": base64.b64encode(raw).decode("ascii"),
         }
-        profiles_global = f"window.{_FLAME_GRAPH_PROFILE_GLOBAL_NAME}"
+        profiles_global = "window.report_flame_graph_profiles_"
         profile_dir = os.path.join(
             report_dir,
             os.path.dirname(_FLAME_GRAPH_PAGE_PATH),

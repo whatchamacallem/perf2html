@@ -16,10 +16,8 @@ import callgrind, callgrind_diff, callgrind_to_heatmap, settings, test_settings
 _FLAME_GRAPH_APP_DIR_NAME: str = ""
 _FLAME_GRAPH_EXPORTER_NAME: str = ""
 _FLAME_GRAPH_PROFILE_DIR_NAME: str = ""
-_FLAME_GRAPH_PROFILE_GLOBAL_NAME: str = ""
 _FLAME_GRAPH_VIEW_ENTRY: tuple[str, str] = ("", "")
 _HEAT_MAP_MODEL_DIR_NAME: str = ""
-_HEAT_MAP_MODEL_GLOBAL_NAME: str = ""
 _HEAT_MAP_VIEW_ENTRY: tuple[str, str] = ("", "")
 _REPORT_MANIFEST_CHECKSUM_LABEL: str = ""
 _REPORT_MANIFEST_VERSION_DIFF: str = ""
@@ -56,7 +54,6 @@ class TestReport:
         diff: bool
         baseline: str
         modified: str
-        readme_html: bool
         verbose: bool
 
     # Checks each call graph branch against the call edges, by another route.
@@ -193,6 +190,14 @@ class TestReport:
                     f"{label}'s call graph gives {function_name!r} the self"
                     f" cost {self_value!r}, expected an integer of 0 or more:"
                     f" {path}"
+                )
+            is_linked = function_row[
+                test_settings.TEST_CALL_GRAPH_FUNCTION_LINKED_FIELD
+            ]
+            if not isinstance(is_linked, bool):
+                self.fail(
+                    f"{label}'s call graph gives {function_name!r} the link"
+                    f" flag {is_linked!r}, expected true or false: {path}"
                 )
             function_names.append(function_name)
             self_total += self_value
@@ -433,6 +438,7 @@ class TestReport:
         function_start = (
             f"#test={test_name}&view={_HEAT_MAP_VIEW_KEY}&function="
         )
+        function_end = "&functions=1"
         function_links = [
             function_link
             for function_link in database_model["functions"]
@@ -441,7 +447,7 @@ class TestReport:
         if not function_links:
             self.fail(
                 f"{label} links no function into the heat map"
-                f" ({function_start}...): {path}"
+                f" ({function_start}...{function_end}): {path}"
             )
         for function_link in function_links:
             name = function_link[
@@ -451,12 +457,17 @@ class TestReport:
                 test_settings.TEST_DATABASE_FUNCTION_HREF_FIELD
             ]
             linked_name = urllib.parse.unquote(
-                href.removeprefix(function_start)
+                href.removeprefix(function_start).removesuffix(function_end)
             )
-            if not href.startswith(function_start) or linked_name != name:
+            if (
+                not href.startswith(function_start)
+                or not href.endswith(function_end)
+                or linked_name != name
+            ):
                 self.fail(
                     f"{label} links {name} as {href!r}, expected"
-                    f" {function_start} followed by the name: {path}"
+                    f" {function_start} followed by the name and"
+                    f" {function_end}: {path}"
                 )
         function_names = [
             function_link[test_settings.TEST_DATABASE_FUNCTION_NAME_FIELD]
@@ -1118,7 +1129,7 @@ class TestReport:
             path, test_settings.TEST_FLAME_GRAPH_SCRIPT_LEAST_BYTES, label
         )
         filed_profile = self.script_value(
-            script, _FLAME_GRAPH_PROFILE_GLOBAL_NAME, test_name, path
+            script, "report_flame_graph_profiles_", test_name, path
         )
         encoded_profile = filed_profile.get("base64")
         base64_text = (
@@ -1788,7 +1799,11 @@ class TestReport:
                 f"{_HEAT_MAP_MODEL_DIR_NAME}/{test_name}.js",
             )
             filed_model = self.script_value(
-                script, _HEAT_MAP_MODEL_GLOBAL_NAME, test_name, script_path
+                script,
+                "report_heat_map_models_",
+                test_name,
+                script_path,
+                is_parsed_text=True,
             )
             if (
                 not {"heatMapTotals", "files", "functions"}
@@ -1828,7 +1843,11 @@ class TestReport:
             model_label,
         )
         return self.script_value(
-            script, _HEAT_MAP_MODEL_GLOBAL_NAME, test_name, model_path
+            script,
+            "report_heat_map_models_",
+            test_name,
+            model_path,
+            is_parsed_text=True,
         )
 
     def home_dir_check(self, out_dir: str) -> None:
@@ -2001,16 +2020,16 @@ class TestReport:
         )
         with open(path, encoding="utf-8") as handle:
             page_text = handle.read()
-        if test_settings.TEST_OVERVIEW_TESTS_HEADING_MARKUP not in page_text:
+        if test_settings.TEST_OVERVIEW_HEADING_MARKUP not in page_text:
             self.fail(f"overview index.html has no 'tests' section: {path}")
-        tests_attributes = self.overview_tests_attributes(page_text, path)
+        tests_attributes = self.overview_attributes(page_text, path)
         if "data-diff-" in tests_attributes:
             self.fail(
                 "overview index.html's tests table data holds data-diff-,"
                 f" which both reports' one column list leaves out: {path}"
             )
         self.overview_sections_check(page_text, layout, path)
-        page_hrefs = self.overview_tests_hrefs(page_text, path)
+        page_hrefs = self.overview_hrefs(page_text, path)
         for test_name in tests:
             if (
                 f"#test={test_name}&view="
@@ -2197,7 +2216,7 @@ class TestReport:
         self, page_text: str, layout: TestReport.ReportLayout, path: str
     ) -> None:
         section_markups = (
-            test_settings.TEST_OVERVIEW_TESTS_HEADING_MARKUP,
+            test_settings.TEST_OVERVIEW_HEADING_MARKUP,
             *layout.header_blocks,
             *(
                 (test_settings.TEST_OVERVIEW_RAW_DATA_MARKUP,)
@@ -2217,7 +2236,7 @@ class TestReport:
             text = handle.read()
         names: list[str] = []
         linked_names: set[str] = set()
-        for href in self.overview_tests_hrefs(text, index_path):
+        for href in self.overview_hrefs(text, index_path):
             match = re.fullmatch(
                 r"#test=([\w.-]+)&view="
                 f"{re.escape(test_settings.TEST_DATABASE_VIEW_KEY)}",
@@ -2237,25 +2256,23 @@ class TestReport:
         return names
 
     # Returns the attributes of the overview's tests table data.
-    def overview_tests_attributes(
-        self, page_text: str, path: str
-    ) -> dict[str, str]:
+    def overview_attributes(self, page_text: str, path: str) -> dict[str, str]:
         attributes = self.element_attributes(
-            page_text, test_settings.TEST_OVERVIEW_TESTS_TABLE_DATA_ID
+            page_text, test_settings.TEST_OVERVIEW_TABLE_DATA_ID
         )
         if attributes is None:
             self.fail(
                 "overview index.html has no"
-                f" {test_settings.TEST_OVERVIEW_TESTS_TABLE_DATA_ID} table"
+                f" {test_settings.TEST_OVERVIEW_TABLE_DATA_ID} table"
                 f" data: {path}"
             )
         return attributes
 
     # Returns every address the overview's tests table data links.
-    def overview_tests_hrefs(self, page_text: str, path: str) -> list[str]:
+    def overview_hrefs(self, page_text: str, path: str) -> list[str]:
         return self.table_data_hrefs(
             self.table_data_rows(
-                self.overview_tests_attributes(page_text, path),
+                self.overview_attributes(page_text, path),
                 "overview index.html",
                 path,
             )
@@ -2422,22 +2439,15 @@ class TestReport:
             self.manifest_build_tree(manifest_text, manifest_path),
         )
 
-    # Faults a README page missing or unasked for, returning the help link.
-    def readme_check(self, out_dir: str, has_readme_html: bool) -> str:
-        for name, is_wanted in (
-            (test_settings.TEST_README_MARKDOWN_NAME, True),
-            (test_settings.TEST_README_HTML_NAME, has_readme_html),
+    # Faults a README page missing, returning the help link.
+    def readme_check(self, out_dir: str) -> str:
+        for name in (
+            test_settings.TEST_README_MARKDOWN_NAME,
+            test_settings.TEST_README_HTML_NAME,
         ):
-            if os.path.isfile(os.path.join(out_dir, name)) != is_wanted:
-                self.fail(
-                    f"{name} is {'missing' if is_wanted else 'unasked for'}:"
-                    f" {out_dir}"
-                )
-        return (
-            test_settings.TEST_README_HTML_NAME
-            if has_readme_html
-            else test_settings.TEST_README_MARKDOWN_NAME
-        )
+            if not os.path.isfile(os.path.join(out_dir, name)):
+                self.fail(f"{name} is missing: {out_dir}")
+        return test_settings.TEST_README_HTML_NAME
 
     # Returns the recorded counters the database pages draw, faulting changes.
     def report_counter_names(
@@ -2513,7 +2523,7 @@ class TestReport:
         self.home_dir_check(out_dir)
         self.manifest_check(out_dir, layout)
         tests = self.overview_test_names(index_path, out_dir)
-        help_name = self.readme_check(out_dir, args.readme_html)
+        help_name = self.readme_check(out_dir)
         self.overview_check(out_dir, tests, layout, help_name)
         if layout.is_regular_report:
             self.flame_app_check(out_dir)
@@ -2528,21 +2538,31 @@ class TestReport:
             print(f"test_report: ok ({out_dir})")
         return 0
 
-    # Returns the object a script assigns, a test's entry when a test is named.
+    # Returns the object a script assigns, a named test's, from its JSON text.
     def script_value(
-        self, script: str, global_name: str, test_name: str | None, path: str
+        self,
+        script: str,
+        global_name: str,
+        test_name: str | None,
+        path: str,
+        is_parsed_text: bool = False,
     ) -> dict[str, object]:
         assignment_target = f"window.{global_name}"
         if test_name is not None:
             assignment_target += f'["{test_name}"]'
         assignment_prefix = f"{assignment_target} = "
+        if is_parsed_text:
+            assignment_prefix += "JSON.parse("
         for line in script.splitlines():
             if not line.startswith(assignment_prefix):
                 continue
+            value_text = line.removeprefix(assignment_prefix).rstrip(";")
             try:
-                filed_value = json.loads(
-                    line.removeprefix(assignment_prefix).rstrip(";")
-                )
+                if is_parsed_text:
+                    if not value_text.endswith(")"):
+                        self.fail(f"{assignment_prefix!r} ends open: {path}")
+                    value_text = json.loads(value_text[:-1])
+                filed_value = json.loads(value_text)
             except ValueError as error:
                 self.fail(
                     f"{assignment_prefix!r} holds no JSON: {error}: {path}"
@@ -2911,11 +2931,12 @@ class TestReport:
                     f"{archive_name} holds {file_name}, which no diff"
                     f" reads: {path}"
                 )
+        repo_root = os.environ["PERF2HTML_REPO_ROOT"]
         for member_name, text in texts.items():
-            if callgrind.REPO_ROOT in text:
+            if repo_root in text:
                 self.fail(
                     f"{archive_name} still contains the absolute repo root "
-                    f"{callgrind.REPO_ROOT!r} in {member_name}: {path}"
+                    f"{repo_root!r} in {member_name}: {path}"
                 )
         return timing_document
 
@@ -3123,12 +3144,6 @@ def main() -> int:
         " copies first (--diff only)",
     )
     parser.add_argument(
-        "--readme-html",
-        action="store_true",
-        help=f"the report holds {test_settings.TEST_README_HTML_NAME},"
-        " which its help link opens",
-    )
-    parser.add_argument(
         "--verbose",
         action="store_true",
         help="print the ok line; a quiet run prints nothing on success",
@@ -3141,7 +3156,6 @@ def main() -> int:
             diff=namespace.diff,
             baseline=namespace.baseline,
             modified=namespace.modified,
-            readme_html=namespace.readme_html,
             verbose=namespace.verbose,
         )
     )

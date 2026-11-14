@@ -246,8 +246,7 @@ pages_write() {
   page_tool_run build_report.py database "${_flags[@]}" "${VERBOSE_FLAGS[@]}"
   page_tool_run callgrind_to_heatmap.py page "--report=$_OUT_DIR" \
     "${VERBOSE_FLAGS[@]}"
-  page_tool_run build_report.py overview "${_flags[@]}" \
-    "${README_HTML_FLAGS[@]}" "${VERBOSE_FLAGS[@]}"
+  page_tool_run build_report.py overview "${_flags[@]}" "${VERBOSE_FLAGS[@]}"
   report_finish "$_OUT_DIR" "$REPORT_MANIFEST_VERSION_DIFF" \
     "baseline=$(input_path_display "$_BASE_DIR")" \
     "modified=$(input_path_display "$_MOD_DIR")" \

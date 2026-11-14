@@ -17,9 +17,9 @@ _ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME: str = ""
 _CALLGRIND_FILE_DATA_CODE_KEY: str = ""
 _CALLGRIND_FILE_DATA_ERROR_CODE: str = ""
 _CALLGRIND_FILE_DATA_GIT_CODE: str = ""
+_CALLGRIND_FILE_DATA_INDENT_CHARS: int = 0
 _CALLGRIND_FILE_DATA_PATH_KEY: str = ""
 _HEAT_MAP_MODEL_DIR_NAME: str = ""
-_HEAT_MAP_MODEL_GLOBAL_NAME: str = ""
 _HEAT_MAP_TREE_ALWAYS_LISTED_DIRS: tuple[str, ...] = ()
 _HEAT_MAP_VIEW_ENTRY: tuple[str, str] = ("", "")
 _REPORT_SCRIPTS_DIR_NAME: str = ""
@@ -218,12 +218,14 @@ class CallgrindToHeatmap:
             relative for relative in tracked if relative not in shown
         )
 
+    # Returns a test's model script, its model JSON text the page parses.
     def data_render(
         self, test_name: str, model: CallgrindToHeatmap.HeatModel
     ) -> str:
         data = json.dumps(model, separators=(",", ":"), ensure_ascii=False)
+        data_literal = json.dumps(data, ensure_ascii=False)
         head, tail = self.model_script_parts(test_name)
-        return f"{head}{data}{tail}"
+        return f"{head}JSON.parse({data_literal}){tail}"
 
     # Writes every test's model and sources, the source database, the paths.
     def data_write(self, args: CallgrindToHeatmap.DataArgs) -> None:
@@ -274,7 +276,7 @@ class CallgrindToHeatmap:
                     f" {entry}, an earlier test as {known_entry}"
                 )
         for function in model["functions"]:
-            if function["line"]:
+            if self.function_shown(model, function):
                 database.locations.add(function["name"])
         database.files_with_counters[test_name] = sorted(
             display
@@ -287,7 +289,8 @@ class CallgrindToHeatmap:
         database.functions_with_counters[test_name] = sorted(
             function["name"]
             for function in model["functions"]
-            if function["line"] and self.function_counted(profile, function)
+            if self.function_shown(model, function)
+            and self.function_counted(profile, function)
         )
 
     # Returns the diff's path derive or None, and the tracked files.
@@ -573,23 +576,11 @@ class CallgrindToHeatmap:
                     f"wrote {path} ({len(text.encode('utf-8')) + 1:,} bytes)"
                 )
 
-    # Returns where a function is addressed, its entry line or the line before.
+    # Returns where a function is addressed, the entry line its calls name.
     def function_line(
         self, profile: callgrind.Profile, name: str
     ) -> callgrind.SourceLine:
-        entry = profile.function_entry[name]
-        before = callgrind.SourceLine(entry.file, entry.line - 1)
-        if (
-            entry.line <= 1
-            or before in profile.line_self
-            or before in profile.line_calls
-        ):
-            return entry
-        own_lines = {
-            *profile.function_lines.get(name, {}),
-            *profile.function_call_lines.get(name, set()),
-        }
-        return before if len(own_lines) > 1 else entry
+        return profile.function_entry[name]
 
     # Returns each named function's shown file and the line it is addressed at.
     def function_locations(
@@ -605,6 +596,17 @@ class CallgrindToHeatmap:
                 shown_paths[location.file], location.line
             )
         return locations
+
+    # Returns whether the heat map shows a function, at a line with source.
+    @staticmethod
+    def function_shown(
+        model: CallgrindToHeatmap.HeatModel,
+        function: CallgrindToHeatmap.FunctionModel,
+    ) -> bool:
+        return (
+            bool(function["line"])
+            and model["files"][function["file"]]["source"] is not None
+        )
 
     def functions_model(
         self,
@@ -710,7 +712,7 @@ class CallgrindToHeatmap:
 
     # Returns the text a test's model script holds before and after its model.
     def model_script_parts(self, test_name: str) -> tuple[str, str]:
-        models_global = f"window.{_HEAT_MAP_MODEL_GLOBAL_NAME}"
+        models_global = "window.report_heat_map_models_"
         return (
             f"{models_global} = {models_global} || {{}};\n"
             f"{models_global}[{json.dumps(test_name)}] = ",
@@ -809,7 +811,7 @@ class CallgrindToHeatmap:
                 }
                 for file_path in file_paths
             ],
-            separators=(",", ":"),
+            indent=_CALLGRIND_FILE_DATA_INDENT_CHARS,
             ensure_ascii=False,
         )
         with open(path, "w", encoding="utf-8") as handle:
@@ -856,7 +858,7 @@ class CallgrindToHeatmap:
         command = [
             "git",
             "-C",
-            callgrind.REPO_ROOT,
+            os.environ["PERF2HTML_REPO_ROOT"],
             "ls-files",
             "--",
             *_HEAT_MAP_TREE_ALWAYS_LISTED_DIRS,

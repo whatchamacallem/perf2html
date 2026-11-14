@@ -43,8 +43,6 @@ _SCRIPT="$PWD/${0##*/}"
 . ./scripts/settings.sh
 . ./scripts/utility.sh
 
-_REPO="$(cd -- ../.. && pwd)"
-
 args_parse() {
   local _remaining_argument
   _OUT_DIR=""
@@ -96,10 +94,10 @@ ${_flag#-DCMAKE_C_FLAGS=}"
   done
   [ "$_seen" = 1 ] || _CMAKE_FLAGS+=("-DCMAKE_C_FLAGS=-O2 -g")
   mapfile -t _TESTS < <(sed -n '/^TESTS_C *=/,/^$/p' \
-    "$_REPO/tests/perf/Makefile.inc" \
+    "$PERF2HTML_REPO_ROOT/tests/perf/Makefile.inc" \
     | grep -o '[A-Za-z0-9_]*\.c' | sed 's/\.c$//' | LC_ALL=C sort || true)
   [ "${#_TESTS[@]}" -gt 0 ] || error_exit 1 \
-    "error: no TESTS_C entry in $_REPO/tests/perf/Makefile.inc"
+    "error: no TESTS_C entry in $PERF2HTML_REPO_ROOT/tests/perf/Makefile.inc"
 }
 
 recordings_check() {
@@ -146,7 +144,7 @@ build_manifest() {
       "error: --regenerate: $_header_rows holds no compiler= row"
     return
   fi
-  _REVISION="$(revision_describe "$_REPO")"
+  _REVISION="$(revision_describe "$PERF2HTML_REPO_ROOT")"
   _CPU_MODEL="$(lscpu | grep -E 'Model name' | head -1 \
     | sed 's/^Model name:[[:space:]]*//' || true)"
   [ -n "$_CPU_MODEL" ] || _CPU_MODEL=unknown
@@ -186,7 +184,7 @@ tree_build() {
   shift
   rm -f "$_dir/CMakeCache.txt"
   local -x CCACHE_NAMESPACE="$BUILD_CCACHE_NAMESPACE"
-  local _configure_command=(cmake -S "$_REPO" -B "$_dir" -G Ninja
+  local _configure_command=(cmake -S "$PERF2HTML_REPO_ROOT" -B "$_dir" -G Ninja
     -DCURL_USE_LIBPSL=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache "$@"
     "-DCMAKE_C_COMPILER=$_COMPILER_COMMAND")
   local _command_line _exit_code=0
@@ -300,7 +298,7 @@ trace_render() {
   artifact_path _trace_log "$REPORT_ARTIFACTS_DIR" trace-log "$_test"
 
   heading_print \
-    "$TRACE_OUT_VARIABLE=${_trace_file##*/} perf $_test $TEST_LOOPS"
+    "PERF_TRACE_OUT=${_trace_file##*/} perf $_test $TEST_LOOPS"
   _command=(python3 "$PERF2HTML_DIR_/scripts/perf_measure.py" trace
     "--artifacts=$ARTIFACTS_DIR" "--report=$_OUT_DIR" "--test=$_test"
     "--executable=$_TRACE_BIN" "--executable-shown=$_TRACE_BIN_REL")
@@ -364,7 +362,7 @@ timer_artifacts_write() {
       cp "$_source" "$_member"
     done
     artifact_path _member "$_root_directory" callgrind "$_test_name"
-    sed -i "s#$_REPO/##g" "$_member"
+    sed -i "s#$PERF2HTML_REPO_ROOT/##g" "$_member"
   done
   for _kind in "${ARTIFACT_ARCHIVE_RUN_KINDS[@]}" test-list; do
     artifact_path _source "$REPORT_ARTIFACTS_DIR" "$_kind"
@@ -394,7 +392,7 @@ pages_write() {
     "${_flags[@]}"
   step_run 8 "timer artifacts" timer_artifacts_write
   step_run 9 overview page_tool_run build_report.py overview "${_flags[@]}" \
-    "${README_HTML_FLAGS[@]}" "${VERBOSE_FLAGS[@]}"
+    "${VERBOSE_FLAGS[@]}"
   step_run 10 "heat map page" page_tool_run callgrind_to_heatmap.py page \
     "--report=$_OUT_DIR" "${VERBOSE_FLAGS[@]}"
   step_run 11 finish report_finish "$_OUT_DIR" \

@@ -428,6 +428,12 @@ path_overlap_check() {
   done
 }
 
+# Refuses a `scripts/` launcher run from any dir but the project root.
+project_root_check() {
+  [ "$0" -ef "$INVOKED_FROM/scripts/${0##*/}" ] || error_exit 2 \
+    "error: the invocation dir $INVOKED_FROM is not the project root of $0"
+}
+
 quiet_switch_set() {
   QUIET_SWITCH=()
   case "$1" in
@@ -462,6 +468,21 @@ recorded_time_read() {
   printf -v "$1" '%s' "$recorded_time"
 }
 
+# Exports the curl dir, two levels above the project root or else beside it.
+repo_root_export() {
+  local project_dir above beside
+  project_dir="$(cd -- "${BASH_SOURCE[0]%/*}/.." && pwd)"
+  above="$(realpath -m -s -- "$project_dir/../..")"
+  beside="$(realpath -m -s -- "$project_dir/../$REPO_ROOT_DIR_NAME")"
+  if [ "${above##*/}" = "$REPO_ROOT_DIR_NAME" ]; then
+    export PERF2HTML_REPO_ROOT="$above"
+  elif [ -d "$beside" ]; then
+    export PERF2HTML_REPO_ROOT="$beside"
+  else
+    error_exit 1 "error: no $REPO_ROOT_DIR_NAME dir at $above or $beside"
+  fi
+}
+
 report_artifacts_dir() {
   printf -v "$1" "$REPORT_ARTIFACTS_DIR_FORMAT" "$ARTIFACTS_DIR" "${2##*/}"
 }
@@ -479,7 +500,6 @@ report_begin() {
     "${VERBOSE_FLAGS[@]}"
   cp "$markdown" "$dir/$README_MARKDOWN_NAME"
   cp "$html" "$dir/$README_HTML_NAME"
-  README_HTML_FLAGS=(--readme-html)
 }
 
 report_delete() {
@@ -846,3 +866,5 @@ verbose_filter() {
   [ "$loose" != loose ] || VERBOSE_BLOCK_PRINTED=loose
   return "$status"
 }
+
+repo_root_export

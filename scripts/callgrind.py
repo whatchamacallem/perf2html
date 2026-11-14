@@ -43,10 +43,6 @@ settings.load_into(__name__)
 
 Costs: TypeAlias = list[int]
 
-REPO_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
-)
-
 _Key = TypeVar("_Key")
 
 
@@ -444,6 +440,28 @@ class Callgrind:
                         " of that function"
                     )
 
+    # Returns the function of a context, its name before its callers'.
+    def context_function(self, context: ContextKey) -> FunctionKey:
+        return FunctionKey(
+            context.image_path,
+            context.name.partition(_CALLGRIND_FORMAT_CONTEXT_SEPARATOR)[0],
+        )
+
+    # Refuses a context in no image, which the recording bills to its caller.
+    def context_key(
+        self,
+        names: Callgrind.CompressedNames,
+        compressed_name: str,
+        image_path: str,
+        path: str,
+    ) -> ContextKey:
+        name = names.uncompress(
+            _CALLGRIND_FORMAT_FUNCTION_KEY, compressed_name
+        )
+        if image_path == _CALLGRIND_UNKNOWN_NAME:
+            sys.exit(f"error: {path}: function {name} lies in no image")
+        return ContextKey(image_path, name)
+
     # Records the line a call enters its callee at, refusing a second line.
     def entry_record(
         self,
@@ -507,28 +525,6 @@ class Callgrind:
             profile.file_image.setdefault(
                 call.callee_file, call.callee.image_path
             )
-
-    # Returns the function of a context, its name before its callers'.
-    def context_function(self, context: ContextKey) -> FunctionKey:
-        return FunctionKey(
-            context.image_path,
-            context.name.partition(_CALLGRIND_FORMAT_CONTEXT_SEPARATOR)[0],
-        )
-
-    # Refuses a context in no image, which the recording bills to its caller.
-    def context_key(
-        self,
-        names: Callgrind.CompressedNames,
-        compressed_name: str,
-        image_path: str,
-        path: str,
-    ) -> ContextKey:
-        name = names.uncompress(
-            _CALLGRIND_FORMAT_FUNCTION_KEY, compressed_name
-        )
-        if image_path == _CALLGRIND_UNKNOWN_NAME:
-            sys.exit(f"error: {path}: function {name} lies in no image")
-        return ContextKey(image_path, name)
 
     # Returns each function's shown name, a shared one under its image's.
     def function_names(
@@ -1197,11 +1193,12 @@ def path_norm(path: str) -> PathInfo:
     display = path_canonical(path)
     if posixpath.basename(path) == _CALLGRIND_UNKNOWN_NAME:
         return PathInfo(display, None, _CALLGRIND_FILE_DATA_ERROR_CODE)
-    root = REPO_ROOT + "/"
+    repo_root = os.environ["PERF2HTML_REPO_ROOT"]
+    root = repo_root + "/"
     if os.path.isabs(path):
         path = posixpath.normpath(path)
     if path.startswith(root):
-        local = os.path.join(REPO_ROOT, path[len(root) :])
+        local = os.path.join(repo_root, path[len(root) :])
         if os.path.isfile(local):
             return PathInfo(display, local, _CALLGRIND_FILE_DATA_REPO_CODE)
         return PathInfo(display, None, _CALLGRIND_FILE_DATA_ERROR_CODE)
@@ -1209,7 +1206,7 @@ def path_norm(path: str) -> PathInfo:
         if os.path.isfile(path):
             return PathInfo(display, path, _CALLGRIND_FILE_DATA_SYSTEM_CODE)
         return PathInfo(display, None, _CALLGRIND_FILE_DATA_ERROR_CODE)
-    candidate = os.path.join(REPO_ROOT, path)
+    candidate = os.path.join(repo_root, path)
     if os.path.isfile(candidate):
         return PathInfo(display, candidate, _CALLGRIND_FILE_DATA_REPO_CODE)
     cached = cached_source(display)
@@ -1262,9 +1259,9 @@ def recorded_file_key(file_path: str, image_path: str) -> str:
     return file_path
 
 
-# Cuts the repository root as the archived recordings have it cut.
+# Cuts the curl dir as the archived recordings have it cut.
 def repo_root_strip(text: str) -> str:
-    return text.replace(REPO_ROOT + "/", "")
+    return text.replace(os.environ["PERF2HTML_REPO_ROOT"] + "/", "")
 
 
 # Returns each derived counter the recorded counters supply, with its terms.

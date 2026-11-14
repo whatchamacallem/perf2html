@@ -20,10 +20,6 @@ window.try_catch_handler_(function () {
   const FLAME_GRAPH_VIEW_KEY = FLAME_GRAPH_VIEW_ENTRY[0];
   const HEAT_MAP_VIEW_KEY = HEAT_MAP_VIEW_ENTRY[0];
   const REPORT_NAME_TEXT = window.ui_strings_.text("str_report_name");
-  const SCALE_CELL_TEXTS = {
-    after_stop: window.ui_strings_.text("str_menu_scale_cell_after_stop"),
-    before_stop: window.ui_strings_.text("str_menu_scale_cell_before_stop"),
-  };
   const SCALE_LAST_STOP = window.report_ui_.design_scale_last_stop;
   const SETTINGS_VIEW_KEY = SETTINGS_VIEW_ENTRY[0];
   const TITLE_PART_SEPARATOR = window.ui_strings_.text(
@@ -41,8 +37,6 @@ window.try_catch_handler_(function () {
   const help_href = menu_strip.getAttribute("data-help-href-");
   const preference_strip = document.getElementById("menu-preference-");
 
-  if (typeof window.report_manifest_table_ === "undefined")
-    window.throw_exception_("str_error_report_incomplete");
   if (!window.report_source_database_)
     window.throw_exception_("str_error_internal");
   const call_graph_sort_choices =
@@ -79,11 +73,22 @@ window.try_catch_handler_(function () {
     );
     return entry_link;
   }
+  // Counts the names of the shown test, with no link made.
+  function heat_map_entry_count(names_by_test) {
+    return names_by_test[active_test_name()].length;
+  }
   // Links each name of the shown test to the heat map hash written for it.
   function heat_map_entries(names_by_test, entry_name, name_hash) {
     const entry_test_name = active_test_name();
     return names_by_test[entry_test_name].map((name) =>
       pulldown_link(name, name_hash(entry_test_name, name), entry_name),
+    );
+  }
+  // Returns whether a file link shows functions: as shown, a line's never.
+  function file_link_shows_functions(line_number) {
+    const address = window.report_frame_.address_now();
+    return (
+      !line_number && address.view === HEAT_MAP_VIEW_KEY && address.functions
     );
   }
   function files_entries(line_number) {
@@ -96,6 +101,7 @@ window.try_catch_handler_(function () {
           view: HEAT_MAP_VIEW_KEY,
           file: file_name,
           line: line_number || null,
+          functions: file_link_shows_functions(line_number),
         }),
     );
   }
@@ -103,7 +109,12 @@ window.try_catch_handler_(function () {
     return heat_map_entries(
       window.report_source_database_.functionsWithCounters,
       "str_menu_function",
-      window.report_ui_.address.function_hash,
+      (test_name, function_name) =>
+        window.report_ui_.address.function_hash(
+          test_name,
+          function_name,
+          true,
+        ),
     );
   }
   // Returns the address with another test, the database from the overview.
@@ -122,9 +133,15 @@ window.try_catch_handler_(function () {
   function tests_pulldown_closed() {
     window.report_frame_.view_post("tests_pulldown_closed");
   }
-  function pulldown_options(entries, on_close, reads_line_number) {
+  function pulldown_options(
+    entries,
+    entry_count,
+    on_close,
+    reads_line_number,
+  ) {
     return {
       entries,
+      entry_count,
       keeps_open: false,
       on_close,
       on_move: null,
@@ -196,10 +213,9 @@ window.try_catch_handler_(function () {
   function choice_label(choices, choice_value) {
     return choices.find((choice) => choice.value === choice_value).label;
   }
-  // Shows or hides one line of a counters list, unless the list keeps it.
+  // Shows or hides one line of a counters list.
   function counter_line_toggle(list_key, line_name) {
-    if (!window.report_preferences_.counter_line_toggle(list_key, line_name))
-      return;
+    window.report_preferences_.counter_line_toggle(list_key, line_name);
     window.report_frame_.view_post("preferences_apply");
   }
   // Moves one line of a counters list next to its anchor, columns following.
@@ -210,6 +226,11 @@ window.try_catch_handler_(function () {
       anchor_name,
       lands_after,
     );
+    window.report_frame_.view_post("preferences_apply");
+  }
+  // Chooses a call graph cutoff, the view opening its nodes by it again.
+  function call_graph_cutoff_choose(cutoff_root) {
+    window.report_preferences_.call_graph_cutoff_choose(cutoff_root);
     window.report_frame_.view_post("preferences_apply");
   }
   // Chooses a call graph sort, then labels its pulldown with it.
@@ -254,10 +275,7 @@ window.try_catch_handler_(function () {
   }
 
   function scale_text(scale_stop) {
-    return (
-      SCALE_CELL_TEXTS.before_stop.repeat(scale_stop) +
-      SCALE_CELL_TEXTS.after_stop.repeat(SCALE_LAST_STOP - scale_stop)
-    );
+    return window.report_ui_.strip.slider_text(scale_stop, SCALE_LAST_STOP);
   }
   function scale_stop_request(scale_stop) {
     if (
@@ -272,18 +290,6 @@ window.try_catch_handler_(function () {
       "str_menu_scale",
       scale_text(scale_stop),
     );
-  }
-  function scale_click_handler(click_event) {
-    const cell_span = click_event.target.closest(
-      ".menu-button-widget- > span",
-    );
-    if (!cell_span) return;
-    const cell_index = Array.prototype.indexOf.call(
-      cell_span.parentElement.children,
-      cell_span,
-    );
-    const scale_stop = window.report_ui_.design_scale_stop_now();
-    scale_stop_request(cell_index < scale_stop ? cell_index : cell_index + 1);
   }
   function scale_key_handler(key_name) {
     if (!Object.prototype.hasOwnProperty.call(MENU_SCALE_KEY_STEPS, key_name))
@@ -360,15 +366,32 @@ window.try_catch_handler_(function () {
       entry("str_menu_test", "pulldown", address, null, {
         pulldown_options: pulldown_options(
           tests_entries,
+          () => window.report_frame_.test_names.length,
           tests_pulldown_closed,
           false,
         ),
       }),
       entry("str_menu_file", "pulldown", address, null, {
-        pulldown_options: pulldown_options(files_entries, () => {}, true),
+        pulldown_options: pulldown_options(
+          files_entries,
+          () =>
+            heat_map_entry_count(
+              window.report_source_database_.filesWithCounters,
+            ),
+          () => {},
+          true,
+        ),
       }),
       entry("str_menu_function", "pulldown", address, null, {
-        pulldown_options: pulldown_options(functions_entries, () => {}, false),
+        pulldown_options: pulldown_options(
+          functions_entries,
+          () =>
+            heat_map_entry_count(
+              window.report_source_database_.functionsWithCounters,
+            ),
+          () => {},
+          false,
+        ),
       }),
       view_entry(
         VIEW_STRING_IDS[DATABASE_VIEW_KEY],
@@ -399,7 +422,7 @@ window.try_catch_handler_(function () {
         is_numbered: false,
         is_widget: true,
         widget_text: scale_text(window.report_ui_.design_scale_stop_now()),
-        on_activate: scale_click_handler,
+        on_stop_choose: scale_stop_request,
       }),
     ];
   }
@@ -421,6 +444,7 @@ window.try_catch_handler_(function () {
         is_available: entry_available(entry_name, address, null),
         pulldown_options: {
           entries: () => window.report_ui_.strip.choice_entries(choices()),
+          entry_count: () => choices().length,
           keeps_open,
           on_close: () => {},
           on_move,
@@ -444,10 +468,31 @@ window.try_catch_handler_(function () {
         counter_line_move(list_key, line_name, anchor_name, lands_after),
     );
   }
-  // Assembles the preference row, the counters entry built only where shown.
+  // Builds the view mode entry, its label the shown mode, its link the other.
+  function view_mode_entry(address) {
+    return window.report_ui_.strip.entry_make(
+      "heat_counter_source",
+      "link",
+      window.ui_strings_.text(
+        address.functions
+          ? "str_menu_counter_source_functions"
+          : "str_menu_counter_source_lines",
+      ),
+      {
+        href: window.report_ui_.address.hash({
+          ...address,
+          functions: !address.functions,
+        }),
+      },
+    );
+  }
+  // Assembles the preference row, the mode and counters made only if shown.
   function preference_entries(address) {
     const shown_preferences = window.report_preferences_.now();
     return [
+      ...(entry_available("heat_counter_source", address, null)
+        ? [view_mode_entry(address)]
+        : []),
       ...(entry_available("counters", address, null)
         ? [counters_entry(address)]
         : []),
@@ -488,16 +533,42 @@ window.try_catch_handler_(function () {
     ];
   }
 
-  function heat_map_part_text(address) {
+  // Writes a source location as its file's base name and its line.
+  function base_name_location_text(file_path, line_number) {
+    return window.report_ui_.location_text(
+      file_path.split("/").pop(),
+      line_number,
+    );
+  }
+  // Writes the heat map's address part, a location through the writer given.
+  function heat_map_part_text(address, location_write) {
     if (address.function !== null) return address.function;
     if (address.file === null) return "";
-    const base_name = address.file.split("/").pop();
-    return window.report_ui_.location_text(base_name, address.line);
+    return location_write(address.file, address.line);
   }
-  // Lists the heat map's status label: a function, else a file and its line.
+  // Lists the heat map's status labels: a function after its file and line.
   function heat_map_status_entries(address) {
-    const part_text = heat_map_part_text(address);
-    return part_text ? [part_text] : [];
+    const part_text = heat_map_part_text(
+      address,
+      window.report_ui_.location_text,
+    );
+    if (!part_text) return [];
+    const shown_location = window.report_frame_.function_location_now();
+    // The location shows once the heat map sends the address's own.
+    if (
+      address.function === null ||
+      shown_location === null ||
+      shown_location.test !== address.test ||
+      shown_location.function !== address.function
+    )
+      return [part_text];
+    return [
+      window.report_ui_.location_text(
+        shown_location.file,
+        shown_location.line,
+      ),
+      part_text,
+    ];
   }
   // Lists the focused path labels while the call graph shows, root first.
   function focused_path_status_entries(address) {
@@ -525,7 +596,7 @@ window.try_catch_handler_(function () {
     return [
       address.test,
       window.ui_strings_.text(VIEW_STRING_IDS[address.view]),
-      heat_map_part_text(address),
+      heat_map_part_text(address, base_name_location_text),
     ]
       .filter((part_text) => part_text)
       .join(TITLE_PART_SEPARATOR);
@@ -592,6 +663,7 @@ window.try_catch_handler_(function () {
 
   window.report_menu_ = {
     address_show,
+    call_graph_cutoff_choose,
     counter_line_move,
     heat_sort_toggle,
     menu_key_handler,

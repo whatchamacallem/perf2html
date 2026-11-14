@@ -5,11 +5,13 @@
 window.ui_strings_ = (function () {
   "use strict";
   const STRINGS = {
+    str_call_graph_cutoff: "cutoff",
+    str_call_graph_cutoff_log: "call graph cutoff {percent}",
     str_clip_ellipsis: "…",
     str_column_baseline_share: "vs baseline",
     str_column_branch_miss_ratio: "branch miss",
     str_column_call_count: "call count",
-    str_column_called_at: "called at",
+    str_column_call_site: "call site",
     str_column_callee: "callee",
     str_column_callees: "callees",
     str_column_caller: "caller",
@@ -17,12 +19,13 @@ window.ui_strings_ = (function () {
     str_column_calls: "calls",
     str_column_count: "count",
     str_column_counter: "counter",
-    str_column_defined_at: "defined at",
     str_column_duty_cycle: "duty cycle",
+    str_column_file: "file",
     str_column_function: "function",
     str_column_instructions_per_cycle: "instructions/cycle",
     str_column_l1d_miss_ratio: "L1D miss",
     str_column_line: "line",
+    str_column_lines: "lines",
     str_column_loads_per_instruction: "loads/instruction",
     str_column_location: "location",
     str_column_report: "report",
@@ -58,8 +61,13 @@ window.ui_strings_ = (function () {
       "url names function {0} together with a file or line",
     str_error_hash_function_unknown:
       "url encodes a function address this report never recorded: {0}",
+    str_error_hash_functions_unusable:
+      "url encodes a functions value that is not 0 or 1: {0}",
+    str_error_hash_heat_map_functions_missing:
+      "heat map requires functions=0 or functions=1",
     str_error_hash_heat_map_parts_missing:
       "heat map requires test and file or function",
+    str_error_hash_line_unknown: "url encodes a line {0} does not have: {1}",
     str_error_hash_line_unusable:
       "url encodes a line that is not a line number: {0}",
     str_error_hash_part_misplaced: "url part {0} is not one view {1} reads",
@@ -81,8 +89,6 @@ window.ui_strings_ = (function () {
     str_error_held_script_unframed:
       "a view page opened outside the overview gets no settings to run under",
     str_error_internal: "internal error: halted and caught fire",
-    str_error_report_incomplete:
-      "report incomplete, scripts/debug.js not written.",
     str_error_screenshot_label_query_unusable:
       "the {0} query value came out as {1}, expected {2}",
     str_error_setting_choice_missing:
@@ -91,6 +97,8 @@ window.ui_strings_ = (function () {
       "setting {0} names a choice more than once: {1}",
     str_error_setting_choice_unknown:
       "setting {0} names a choice this report does not offer: {1}",
+    str_error_setting_stop_count_unusable:
+      "setting {0} holds {1}, not an odd stop count above 1",
     str_error_setting_unknown: "no such setting: {0}",
     str_error_settings_debug_query_unusable:
       "the {0} query value came out as {1}, expected {2} or {3}",
@@ -109,16 +117,10 @@ window.ui_strings_ = (function () {
     str_heading_tests: "tests",
     str_heat_map_main_label: "heat map view",
     str_heat_map_tree_label: "files",
-    str_in_function: " in {function}",
-    str_information_box_action_bar_separator: " | ",
-    str_information_box_callees: "calls from this line (total {counter})",
     str_information_box_close: "close",
-    str_information_box_close_symbol: "x",
-    str_information_box_copy: "copy",
     str_information_box_function: "function",
-    str_information_box_function_self: "{function}: self {self}.",
-    str_information_box_function_totals:
-      "{function} by call count: self {self}, total {total}.",
+    str_information_box_title: "{location} {function}",
+    str_line_range: "{first}-{last}",
     str_line_self: "line self",
     str_load_log_asset_entry: "[{time}ms] {page} loaded {asset}",
     str_load_log_frame_entry:
@@ -139,6 +141,8 @@ window.ui_strings_ = (function () {
     str_location_cell: "{file}:{line}",
     str_menu_button: "{number} {label}",
     str_menu_counter_selected_mark: "◼ ",
+    str_menu_counter_source_functions: "functions",
+    str_menu_counter_source_lines: "lines",
     str_menu_counter_unselected_mark: "  ",
     str_menu_counters: "counters",
     str_menu_dark_mode_enabled: "dark",
@@ -148,8 +152,6 @@ window.ui_strings_ = (function () {
     str_menu_light_mode: "light",
     str_menu_reset: "reset",
     str_menu_scale: "scale",
-    str_menu_scale_cell_after_stop: "▓",
-    str_menu_scale_cell_before_stop: "▒",
     str_menu_status_separator: " / ",
     str_menu_test: "test",
     str_no_caller: "(no recorded caller)",
@@ -167,6 +169,8 @@ window.ui_strings_ = (function () {
     str_settings_debug_query: "{name}={value}",
     str_settings_load_log_history: "history: {count}",
     str_settings_paste: "paste",
+    str_slider_cell_after_stop: "▓",
+    str_slider_cell_before_stop: "▒",
     str_sort_alphabetical: "alphabetical",
     str_sort_cumulative_first: "cumulative first",
     str_sort_hottest_first: "hottest first",
@@ -174,6 +178,7 @@ window.ui_strings_ = (function () {
     str_source_unavailable: "Source not available.",
     str_strip_gap: " ",
     str_table_heading_copy: "copy",
+    str_table_heading_copy_path: "path",
     str_table_heading_copy_svg: "svg",
     str_table_heading_copy_text: "text",
     str_text_scrollbar_chevron_down: "▼",

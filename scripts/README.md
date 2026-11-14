@@ -57,6 +57,7 @@ report generators. Start by running the tests and checking the results.
 - `file`: Hash key, heat map view only, that names the source file to open.
 - `function`: Hash key, heat map view only, that names the function to open and
   excludes `file` and `line`.
+- `functions`: Hash key, required by the heat map view. Selects view mode.
 - `line`: Hash key, heat map view only, that names the line within `file` to
   scroll to.
 - `localProfilePath`: Hash key, flame graph view only, that is speedscope's own
@@ -82,6 +83,9 @@ the user never chose one and the default in `settings.py` applies.
 If the `perf2html.version` does not match `STORAGE_VERSION` then all
 preferences are reset at startup.
 
+- `call_graph.cutoff`: The call graph cutoff slider's stop root, the cutoff its
+  square, the roots of `CALL_GRAPH_CUTOFF_STOP_COUNT` stops evenly spaced from
+  the smallest printed percent's to `CALL_GRAPH_CUTOFF_LARGEST_PERCENT`'s.
 - `database.counter_list`: The database counters list, each line, calls,
   callers, callees or any counter, in the order of the pulldown and the
   columns, with whether the line is shown, every line toggled, the ranking
@@ -90,7 +94,7 @@ preferences are reset at startup.
   `TABLE_ROW_COUNT_CHOICES`.
 - `heatmap.counter_list`: The heat map counters list, each line, calls or any
   counter, in the order of the pulldown and the columns, with whether the line
-  is shown, the ranking counter always shown.
+  is shown, every line toggled, the ranking counter too.
 - `heatmap.scale`: The heat map scale curve, `log` or `linear`.
 - `heatmap.sort`: The heat map sort order, `heat` or `name`.
 - `log.display_length`: The load log line count the settings view shows.
@@ -387,7 +391,8 @@ A diff report's run keeps these.
 |                             | map, flame graph and timer artifacts of one  |
 |                             | report.                                      |
 | `test_screenshot.py`        | Shoots the golden bookmarks of one report in |
-|                             | Chrome and writes `test_index.html`.         |
+|                             | Chrome, times its golden clicks, and writes  |
+|                             | `test_index.html` and `timing.txt`.          |
 | `test_settings.py`          | Holds the golden values the test scripts     |
 |                             | compare the reports and sources against.     |
 | `test_source_scan.py`       | Faults long comment blocks, comment          |

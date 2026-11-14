@@ -27,11 +27,11 @@ _FLAME_GRAPH_LOCAL_PROFILE_PATH: str = ""
 _FLAME_GRAPH_VIEW_ENTRY: tuple[str, str] = ("", "")
 _HEAT_MAP_VIEW_ENTRY: tuple[str, str] = ("", "")
 _OVERVIEW_PAGE_PATH: str = ""
+_OVERVIEW_DOWNLOAD_FILE_NAME: str = ""
 _PROFILE_START_FUNCTION_NAME: str = ""
 _PROFILE_START_FUNCTION_UNRECORDED_CALLS: int = 0
 _RANKING_COUNTER_NAME: str = ""
 _README_HTML_NAME: str = ""
-_README_MARKDOWN_NAME: str = ""
 _REPORT_SCRIPTS_DIR_NAME: str = ""
 _SETTINGS_HELD_SCRIPT_TEMPLATE_ID: str = ""
 _SETTINGS_VIEW_ENTRY: tuple[str, str] = ("", "")
@@ -78,6 +78,7 @@ class BuildReport:
     class CallGraphFunction(NamedTuple):
         name: str
         self_value: int
+        is_linked: bool
 
     class CallGraphModel(TypedDict):
         functions: list[BuildReport.CallGraphFunction]
@@ -157,8 +158,12 @@ class BuildReport:
         self, test_name: str, view_key: str, function_name: str = ""
     ) -> str:
         hash_text = f"#test={self.address_value(test_name)}&view={view_key}"
+        # A function's address shows its functions' costs, not its lines'.
         if function_name:
-            hash_text += f"&function={self.address_value(function_name)}"
+            hash_text += (
+                f"&function={self.address_value(function_name)}"
+                f"&functions={int(True)}"
+            )
         if view_key == _FLAME_GRAPH_VIEW_KEY:
             hash_text += f"&localProfilePath={_FLAME_GRAPH_LOCAL_PROFILE_PATH}"
         return hash_text
@@ -212,6 +217,10 @@ class BuildReport:
     ) -> BuildReport.CallGraphModel:
         edges = self.call_graph_edges(profile)
         root_names = self.call_graph_roots(test_name, edges)
+        function_names = sorted({name for pair in edges for name in pair})
+        linked_names = self.linked_names(
+            *self.function_places(profile, function_names)
+        )
         call_graph_functions = [
             BuildReport.CallGraphFunction(
                 function_name,
@@ -220,10 +229,9 @@ class BuildReport:
                     profile.function_self.get(function_name, []),
                     _RANKING_COUNTER_NAME,
                 ),
+                function_name in linked_names,
             )
-            for function_name in sorted(
-                {name for pair in edges for name in pair}
-            )
+            for function_name in function_names
         ]
         index_by_name = {
             function.name: index
@@ -394,15 +402,11 @@ class BuildReport:
             name for name, calls in calls_by_name.items() if calls > 0
         }
         named_names = row_names | {name for pair in edges for name in pair}
-        locations = callgrind_to_heatmap.CallgrindToHeatmap(
-            self.verbose
-        ).function_locations(
-            profile, self.file_display_paths(profile), named_names
-        )
+        locations, sourced_paths = self.function_places(profile, named_names)
         function_links = self.function_links(
             test_name,
             named_names,
-            {name for name, location in locations.items() if location.line},
+            self.linked_names(locations, sourced_paths),
         )
         index_by_name = {
             link.name: index for index, link in enumerate(function_links)
@@ -551,10 +555,17 @@ class BuildReport:
             )
             for name in named_names
         }
+        sourced_paths = {
+            locations[name].file
+            for name in named_names
+            if derived.path_entry(
+                function_diff["files"][diff_rows[name].file_index]
+            ).has_source
+        }
         function_links = self.function_links(
             test_name,
             named_names,
-            {name for name, location in locations.items() if location.line},
+            self.linked_names(locations, sourced_paths),
         )
         index_by_name = {
             link.name: index for index, link in enumerate(function_links)
@@ -624,9 +635,7 @@ class BuildReport:
         return modified_calls - baseline_calls, baseline_calls
 
     # Writes the diff's overview page, a row of each test's change.
-    def diff_overview(
-        self, args: BuildReport.ReportArgs, has_readme_html: bool
-    ) -> None:
+    def diff_overview(self, args: BuildReport.ReportArgs) -> None:
         artifacts_dir = artifacts.report_artifacts_dir(
             args.artifacts, args.report
         )
@@ -643,7 +652,6 @@ class BuildReport:
             "",
             counters,
             True,
-            has_readme_html,
         )
 
     # Returns a row per test, each timing value's change from its baseline.
@@ -673,23 +681,6 @@ class BuildReport:
             )
         return rows
 
-    # Returns the path the heat map shows for each file the profile names.
-    def file_display_paths(self, profile: callgrind.Profile) -> dict[str, str]:
-        raw_paths = (
-            {key.file for key in profile.line_self}
-            | {key.file for key in profile.line_calls}
-            | {entry.file for entry in profile.function_entry.values()}
-        )
-        shown_paths: dict[str, str] = {}
-        for raw_path in sorted(raw_paths):
-            path_info = callgrind.path_norm(raw_path)
-            shown_paths[raw_path] = callgrind.display_path(
-                path_info.display,
-                path_info.group,
-                profile.file_image[raw_path],
-            )
-        return shown_paths
-
     # Returns the recorded calls, a settings count for an uncalled start.
     def function_calls(self, function_name: str, recorded_calls: int) -> int:
         if (
@@ -715,6 +706,35 @@ class BuildReport:
             )
             for function_name in sorted(function_names)
         ]
+
+    # Returns each named function's place and the shown files with source.
+    def function_places(
+        self, profile: callgrind.Profile, function_names: Iterable[str]
+    ) -> tuple[dict[str, callgrind.SourceLine], set[str]]:
+        heat_map = callgrind_to_heatmap.CallgrindToHeatmap(self.verbose)
+        path_infos = heat_map.profile_path_infos(profile, None)
+        locations = heat_map.function_locations(
+            profile,
+            {raw: path_info.display for raw, path_info in path_infos.items()},
+            function_names,
+        )
+        return locations, {
+            path_info.display
+            for path_info in path_infos.values()
+            if path_info.local is not None
+        }
+
+    # Returns the located functions the heat map shows, at a line with source.
+    def linked_names(
+        self,
+        locations: dict[str, callgrind.SourceLine],
+        sourced_paths: Container[str],
+    ) -> set[str]:
+        return {
+            name
+            for name, location in locations.items()
+            if location.line and location.file in sourced_paths
+        }
 
     # Returns the header tables, the run's own rows or each diffed report's.
     def manifest_blocks_read(
@@ -786,12 +806,8 @@ class BuildReport:
         test_names: Sequence[str],
         counters: Sequence[str],
         is_diff: bool,
-        has_readme_html: bool,
     ) -> str:
-        help_href = theme.href(
-            _OVERVIEW_PAGE_SCRIPTS_DEPTH,
-            _README_HTML_NAME if has_readme_html else _README_MARKDOWN_NAME,
-        )
+        help_href = theme.href(_OVERVIEW_PAGE_SCRIPTS_DEPTH, _README_HTML_NAME)
         names_text = json.dumps(list(test_names), ensure_ascii=False)
         menu_markup = theme.render_element(
             "nav",
@@ -812,9 +828,7 @@ class BuildReport:
         )
 
     # Writes the overview page, a row of each test's timing page.
-    def overview(
-        self, args: BuildReport.ReportArgs, has_readme_html: bool
-    ) -> None:
+    def overview(self, args: BuildReport.ReportArgs) -> None:
         artifacts_dir = artifacts.report_artifacts_dir(
             args.artifacts, args.report
         )
@@ -834,7 +848,6 @@ class BuildReport:
             os.path.basename(raw_data_path),
             counters,
             False,
-            has_readme_html,
         )
 
     def overview_page(
@@ -846,24 +859,29 @@ class BuildReport:
         raw_data_name: str,
         counters: Sequence[str],
         is_diff: bool,
-        has_readme_html: bool,
     ) -> None:
         raw_data_markup = self.raw_data_render(raw_data_name)
         tests_markup = self.table_data_render(
             {"id": "overview-tests-table-"}, "overview.tests", rows
         )
         manifest_markup = self.manifest_blocks_render(manifest_blocks)
-        menu_markup = self.menu_render(
-            test_names, counters, is_diff, has_readme_html
-        )
+        menu_markup = self.menu_render(test_names, counters, is_diff)
         page_content = theme.template_fill(
             _OVERVIEW_PAGE,
             {
                 "__MENU__": menu_markup,
                 "__RAW_DATA__": raw_data_markup,
                 "__MANIFEST__": manifest_markup,
-                "__TESTS_HEADING__": theme.render_heading(
-                    "", "overview-tests-heading-"
+                "__TESTS_HEADING__": theme.render_element(
+                    "div",
+                    {
+                        "id": "overview-tests-heading-",
+                        "class": "page-heading-",
+                        "data-download-file-name-": (
+                            _OVERVIEW_DOWNLOAD_FILE_NAME
+                        ),
+                    },
+                    "",
                 ),
                 "__TESTS__": tests_markup,
             },
@@ -1014,12 +1032,6 @@ def main() -> None:
         " test's change instead of its native timing, which a diff does"
         " not have",
     )
-    overview_parser.add_argument(
-        "--readme-html",
-        action="store_true",
-        help=f"the report holds {_README_HTML_NAME}, which the help link"
-        f" opens instead of {_README_MARKDOWN_NAME}",
-    )
 
     for report_parser in (
         call_graph_parser,
@@ -1083,8 +1095,7 @@ def main() -> None:
                 artifacts=namespace.artifacts,
                 report=namespace.report,
                 diff=namespace.diff,
-            ),
-            namespace.readme_html,
+            )
         )
 
 

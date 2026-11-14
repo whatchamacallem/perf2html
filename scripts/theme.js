@@ -96,6 +96,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const STYLE_HEAT_COLOR_STOPS = settings_("STYLE_HEAT_COLOR_STOPS");
   const STYLE_PAGE_FONT_FAMILY = settings_("STYLE_PAGE_FONT_FAMILY");
   const STYLE_SVG_NAMESPACE_URL = settings_("STYLE_SVG_NAMESPACE_URL");
+  const STYLE_TABLE_CHUNK_ROWS_PROPERTY = settings_(
+    "STYLE_TABLE_CHUNK_ROWS_PROPERTY",
+  );
   const STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS = settings_(
     "STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS",
   );
@@ -105,6 +108,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const STYLE_TEXT_SCROLLBAR_THUMB_SHORTEST_CHARS = settings_(
     "STYLE_TEXT_SCROLLBAR_THUMB_SHORTEST_CHARS",
   );
+  const TABLE_CHUNK_ROW_COUNT = settings_("TABLE_CHUNK_ROW_COUNT");
+  const TABLE_DOWNLOAD_IMAGE_SCALE = settings_("TABLE_DOWNLOAD_IMAGE_SCALE");
   const TABLE_DOWNLOAD_URL_PREFIX = settings_("TABLE_DOWNLOAD_URL_PREFIX");
   const TABLE_MARKDOWN_COLUMN_NARROWEST_CHARS = settings_(
     "TABLE_MARKDOWN_COLUMN_NARROWEST_CHARS",
@@ -137,6 +142,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     "file",
     "line",
     "function",
+    "functions",
     "localProfilePath",
     "setting",
     SETTINGS_DEBUG_HASH_KEY_NAME,
@@ -145,7 +151,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     [CALL_GRAPH_VIEW_KEY, []],
     [DATABASE_VIEW_KEY, []],
     [FLAME_GRAPH_VIEW_ENTRY[0], ["localProfilePath"]],
-    [HEAT_MAP_VIEW_ENTRY[0], ["file", "line", "function"]],
+    [HEAT_MAP_VIEW_ENTRY[0], ["file", "line", "function", "functions"]],
     [SETTINGS_VIEW_ENTRY[0], ["setting"]],
   ]);
   // Tells per view whether an address of the view needs a test.
@@ -179,6 +185,11 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const SIGNED_PERCENT_AMOUNT_CHARS = (
     fixed_text(-100, NUMBER_FRACTION_DIGITS) + "%"
   ).length;
+  // Holds a slider's cell texts, before its stop and after it.
+  const SLIDER_CELL_TEXTS = {
+    after_stop: window.ui_strings_.text("str_slider_cell_after_stop"),
+    before_stop: window.ui_strings_.text("str_slider_cell_before_stop"),
+  };
   const SMALLEST_PRINTED_PERCENT = 1 / 10 ** NUMBER_FRACTION_DIGITS;
   const STRIP_ENTRY_KIND_NAMES = [
     "action",
@@ -255,7 +266,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const page_scroll_claims = { frame: false, home: false };
   const kept_column_widths = new Map();
   const redrawn_tables = new Map();
-  const registered_panes = [];
   const rendered_strips = new WeakMap();
   const resize_settle_callbacks = [];
   const row_walks = new WeakMap();
@@ -646,11 +656,24 @@ window.report_ui_ = window.try_catch_handler_(function () {
         parsed_address.line,
       );
     if (
+      parsed_address.functions !== null &&
+      !/^[01]$/.test(parsed_address.functions)
+    )
+      window.throw_exception_(
+        "str_error_hash_functions_unusable",
+        parsed_address.functions,
+      );
+    if (
       parsed_address.view === HEAT_MAP_VIEW_ENTRY[0] &&
       (parsed_address.test === null ||
         (parsed_address.file === null && parsed_address.function === null))
     )
       window.throw_exception_("str_error_hash_heat_map_parts_missing");
+    if (
+      parsed_address.view === HEAT_MAP_VIEW_ENTRY[0] &&
+      parsed_address.functions === null
+    )
+      window.throw_exception_("str_error_hash_heat_map_functions_missing");
     if (
       parsed_address.test === null &&
       ADDRESS_VIEW_NEEDS_TEST.get(parsed_address.view)
@@ -677,14 +700,21 @@ window.report_ui_ = window.try_catch_handler_(function () {
     address_parts_check(parsed_address);
     if (parsed_address.line !== null)
       parsed_address.line = Number(parsed_address.line);
+    // The heat map's view mode reads as whether it shows functions.
+    if (parsed_address.functions !== null)
+      parsed_address.functions = Boolean(Number(parsed_address.functions));
     return Object.freeze(parsed_address);
   }
   function address_parts_hash(full_address) {
     const hash_parts = [];
     for (const key_name of ADDRESS_KEY_NAMES) {
-      if (full_address[key_name] == null) continue;
+      const part_value = full_address[key_name];
+      if (part_value == null) continue;
+      // A view mode writes as 0 or 1, as its address reads it.
+      const written_value =
+        typeof part_value === "boolean" ? Number(part_value) : part_value;
       hash_parts.push(
-        `${key_name}=${hash_value_encode(String(full_address[key_name]))}`,
+        `${key_name}=${hash_value_encode(String(written_value))}`,
       );
     }
     return "#" + hash_parts.join("&");
@@ -706,11 +736,14 @@ window.report_ui_ = window.try_catch_handler_(function () {
     });
   }
   // Writes the hash of a test's heat map at a function, the one door for it.
-  function address_function_hash(test_name, function_name) {
+  function address_function_hash(test_name, function_name, shows_functions) {
+    if (typeof shows_functions !== "boolean")
+      window.throw_exception_("str_error_internal");
     return address_hash({
       test: test_name,
       view: HEAT_MAP_VIEW_ENTRY[0],
       function: function_name,
+      functions: shows_functions,
     });
   }
   function address_home_hash(test_name, view_key) {
@@ -772,6 +805,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
   function address_top_href(hash) {
     return REPORT_TOP_PAGE_HREF + hash;
   }
+  // Asks the top page for a hash.
   function address_request_send(hash) {
     const carried_hash = address_hash(address_of_hash(hash));
     if (is_framed)
@@ -788,6 +822,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
   // Asks the top page to keep this many history entries and relay them.
   function load_log_history_send(line_count) {
     parent_post({ report_ui: "load_log_history_set", line_count });
+  }
+  // Asks the top page to choose a call graph cutoff by its stop's root.
+  function call_graph_cutoff_choose_send(cutoff_root) {
+    parent_post({ report_ui: "call_graph_cutoff_choose", cutoff_root });
   }
   // Asks the top page to move a counters list line before or after another.
   function counter_line_move_send(
@@ -811,6 +849,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
   // Sends the call graph's focused path up, root first, for the status line.
   function focused_path_send(path_entries) {
     parent_post({ report_ui: "focused_path_set", path_entries });
+  }
+  // Sends the heat map's function and its file and line up for the status.
+  function function_location_send(function_location) {
+    parent_post({ report_ui: "function_location_set", function_location });
   }
   // Returns the path of a report file from the report root, which a log names.
   function address_path(file_href) {
@@ -968,7 +1010,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
 
   // Escapes text for markup, the one escape the page scripts write through.
   function render_html_escape(text) {
-    return String(text)
+    const escaped_text = String(text);
+    // Most text holds nothing to escape, so it is returned as it is.
+    if (!/[&<>"]/.test(escaped_text)) return escaped_text;
+    return escaped_text
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;")
@@ -976,13 +1021,15 @@ window.report_ui_ = window.try_catch_handler_(function () {
   }
   // Writes one element, the one writer of a tag, a null inner a void tag.
   function render_element(tag_name, attributes, inner_markup) {
-    const attribute_text = Object.entries(attributes)
-      .map(([attribute_name, attribute_value]) => {
-        if (!["number", "string"].includes(typeof attribute_value))
-          window.throw_exception_("str_error_internal");
-        return ` ${attribute_name}="${render_html_escape(attribute_value)}"`;
-      })
-      .join("");
+    let attribute_text = "";
+    for (const attribute_name of Object.keys(attributes)) {
+      const attribute_value = attributes[attribute_name];
+      const value_type = typeof attribute_value;
+      if (value_type !== "number" && value_type !== "string")
+        window.throw_exception_("str_error_internal");
+      const value_markup = render_html_escape(attribute_value);
+      attribute_text += ` ${attribute_name}="${value_markup}"`;
+    }
     const start_tag = `<${tag_name}${attribute_text}>`;
     if (inner_markup === null) return start_tag;
     return `${start_tag}${inner_markup}</${tag_name}>`;
@@ -1111,11 +1158,14 @@ window.report_ui_ = window.try_catch_handler_(function () {
         render_html_escape(window.ui_strings_.text("str_no_match")),
       ),
     );
+    // A small pulldown never searches, so its placeholder takes no room.
+    const is_small =
+      pulldown_options.entry_count() <= MENU_PULLDOWN_SMALL_ENTRY_MAX_COUNT;
     let entries = [],
       entries_line_number = 0,
       highlight_index = -1,
       is_open = false,
-      is_small = false,
+      list_scrollbar_handle = null,
       matches = [],
       search_text = "";
 
@@ -1151,7 +1201,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
     function entries_offer(line_number) {
       entries_line_number = line_number;
       entries = pulldown_options.entries(line_number);
-      is_small = entries.length <= MENU_PULLDOWN_SMALL_ENTRY_MAX_COUNT;
       for (const entry_element of entries) {
         entry_element.setAttribute("role", "option");
         entry_element.tabIndex = -1;
@@ -1195,6 +1244,13 @@ window.report_ui_ = window.try_catch_handler_(function () {
       root_element.classList.add("open-");
       root_element.setAttribute("aria-expanded", "true");
       entry_box.hidden = false;
+      // A closed list shows no bar, so the bar starts at the first open.
+      if (!list_scrollbar_handle)
+        list_scrollbar_handle = text_scrollbar_attach(
+          list_scrollbar,
+          entry_list,
+          "vertical",
+        );
       entries_offer(search_parts(search_text)[1]);
       // A small pulldown keeps its label, with no search box and no scrollbar.
       if (is_small) search_text = "";
@@ -1353,14 +1409,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     root_element.setAttribute("aria-haspopup", "listbox");
     root_element.tabIndex = 0;
     closed_show();
-    // A small pulldown never searches, so its placeholder takes no room.
-    entries_offer(0);
     placeholder_box.hidden = is_small;
-    const list_scrollbar_handle = text_scrollbar_attach(
-      list_scrollbar,
-      entry_list,
-      "vertical",
-    );
     root_element.addEventListener(
       "keydown",
       window.try_catch_handler_((key_event) => {
@@ -1372,11 +1421,13 @@ window.report_ui_ = window.try_catch_handler_(function () {
           key_event.preventDefault();
       }),
     );
+    // A press on the cell opens its list, a press on an open cell closes it.
     root_element.addEventListener(
       "click",
       window.try_catch_handler_((click_event) => {
-        if (!is_open && !entry_box.contains(click_event.target))
-          pulldown_open("");
+        if (entry_box.contains(click_event.target)) return;
+        if (is_open) pulldown_close();
+        else pulldown_open("");
       }),
     );
     root_element.addEventListener(
@@ -1536,11 +1587,28 @@ window.report_ui_ = window.try_catch_handler_(function () {
       const entry = entries_by_name.get(
         entry_cell.getAttribute("data-entry-name-"),
       );
-      if (entry.kind === "action") entry.on_activate(click_event);
+      if (entry.kind === "action" && !entry.is_widget)
+        entry.on_activate(click_event);
       if (entry.kind !== "link" || !click_is_plain(click_event)) return;
       const entry_link = entry_cell.querySelector(":scope > a");
       if (!entry_link.contains(click_event.target)) entry_link.click();
       else if (entry.on_activate) entry.on_activate(click_event);
+    }
+    // Hands a press on a slider's cells to the slider drag.
+    function slider_press_handler(press_event) {
+      if (press_event.button) return;
+      const widget_box = press_event.target.closest(".menu-button-widget-");
+      if (!widget_box) return;
+      const entry_cell = widget_box.closest(".menu-button-");
+      if (entry_cell.parentElement !== strip_line) return;
+      press_event.preventDefault();
+      strip_slider_drag(
+        press_event,
+        strip_element,
+        widget_box,
+        entries_by_name.get(entry_cell.getAttribute("data-entry-name-"))
+          .on_stop_choose,
+      );
     }
     function entry_key_handler(key_event) {
       const entry_cell = key_event.target;
@@ -1626,7 +1694,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
 
     if (previous_strip) previous_strip.reset();
     for (const entry of entries) {
-      if (entries_by_name.has(entry.name))
+      if (
+        entries_by_name.has(entry.name) ||
+        entry.is_widget !== (entry.on_stop_choose !== null)
+      )
         window.throw_exception_("str_error_internal");
       entries_by_name.set(entry.name, entry);
       if (!entry.is_available) continue;
@@ -1659,6 +1730,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
     strip_line.addEventListener(
       "click",
       window.try_catch_handler_(entry_click_handler),
+    );
+    strip_line.addEventListener(
+      "pointerdown",
+      window.try_catch_handler_(slider_press_handler),
     );
     strip_line.addEventListener(
       "keydown",
@@ -1704,131 +1779,67 @@ window.report_ui_ = window.try_catch_handler_(function () {
       TABLE_MARKDOWN_PIPE_TEXT,
       TABLE_MARKDOWN_ESCAPE_TEXT + TABLE_MARKDOWN_PIPE_TEXT,
     );
-  // Keeps a piece's text as the page shows it.
-  const text_as_shown = (piece_text) => piece_text;
-  // Splits a cell's text into pieces, each a text node's, by its element.
-  function cell_text_pieces(table_cell, piece_escape) {
-    const text_walker = document.createTreeWalker(
-      table_cell,
-      NodeFilter.SHOW_TEXT,
-    );
-    const text_pieces = [];
-    for (
-      let text_node = text_walker.nextNode();
-      text_node;
-      text_node = text_walker.nextNode()
-    )
-      text_pieces.push({
-        text: piece_escape(text_node.data),
-        element: text_node.parentElement,
-      });
-    return text_pieces;
-  }
-  // Joins a placed run's pieces into its text.
-  function run_text(placed_run) {
-    return placed_run.text_pieces
-      .map((text_piece) => text_piece.text)
-      .join("");
-  }
-  // Makes a markdown cell of plain text, which takes its table's style.
-  function markdown_text_cell(cell_text) {
-    return {
-      table_cell: null,
-      text_pieces: [{ text: cell_text, element: null }],
-    };
-  }
-  // Places markdown lines: titles, rule and rows, each cell between pipes.
-  function markdown_lines_place(column_numerics, title_cells, cell_rows) {
-    const column_widths = title_cells.map((title_cell, column_index) =>
+  // Writes a markdown table: titles, rule and rows, each cell between pipes.
+  function markdown_table_write(column_numerics, title_texts, cell_text_rows) {
+    const column_widths = title_texts.map((title_text, column_index) =>
       Math.max(
         TABLE_MARKDOWN_COLUMN_NARROWEST_CHARS,
-        run_text(title_cell).length,
-        ...cell_rows.map(
-          (cell_row) => run_text(cell_row[column_index]).length,
-        ),
+        title_text.length,
+        ...cell_text_rows.map((cell_texts) => cell_texts[column_index].length),
       ),
     );
-    const rule_cells = column_widths.map((column_width, column_index) =>
-      markdown_text_cell(
-        column_numerics[column_index]
-          ? TABLE_MARKDOWN_RULE_TEXT.repeat(
-              column_width - TABLE_MARKDOWN_RULE_RIGHT_TEXT.length,
-            ) + TABLE_MARKDOWN_RULE_RIGHT_TEXT
-          : TABLE_MARKDOWN_RULE_TEXT.repeat(column_width),
-      ),
+    const rule_texts = column_widths.map((column_width, column_index) =>
+      column_numerics[column_index]
+        ? TABLE_MARKDOWN_RULE_TEXT.repeat(
+            column_width - TABLE_MARKDOWN_RULE_RIGHT_TEXT.length,
+          ) + TABLE_MARKDOWN_RULE_RIGHT_TEXT
+        : TABLE_MARKDOWN_RULE_TEXT.repeat(column_width),
     );
-    // Places a line's cells, each padded on both sides, a pipe around each.
-    function line_place(line_cells) {
-      let column_start = 0;
-      const placed_runs = [];
-      function pipe_place() {
-        placed_runs.push({
-          ...markdown_text_cell(TABLE_MARKDOWN_PIPE_TEXT),
-          column_start,
-          column_width: TABLE_MARKDOWN_PIPE_TEXT.length,
-          text_start: column_start,
-        });
-        column_start += TABLE_MARKDOWN_PIPE_TEXT.length;
-      }
-      pipe_place();
-      line_cells.forEach((line_cell, column_index) => {
-        const right_room = column_numerics[column_index]
-          ? column_widths[column_index] - run_text(line_cell).length
-          : 0;
-        const column_width =
-          TABLE_MARKDOWN_PAD_TEXT.length +
-          column_widths[column_index] +
-          TABLE_MARKDOWN_PAD_TEXT.length;
-        placed_runs.push({
-          ...line_cell,
-          column_start,
-          column_width,
-          text_start:
-            column_start + TABLE_MARKDOWN_PAD_TEXT.length + right_room,
-        });
-        column_start += column_width;
-        pipe_place();
-      });
-      return placed_runs;
-    }
-    return [title_cells, rule_cells, ...cell_rows].map(line_place);
+    // Writes a line's cells, each padded to its column, a pipe around each.
+    const line_write = (cell_texts) =>
+      cell_texts.reduce(
+        (line_text, cell_text, column_index) =>
+          line_text +
+          TABLE_MARKDOWN_PAD_TEXT +
+          (column_numerics[column_index]
+            ? cell_text.padStart(column_widths[column_index])
+            : cell_text.padEnd(column_widths[column_index])) +
+          TABLE_MARKDOWN_PAD_TEXT +
+          TABLE_MARKDOWN_PIPE_TEXT,
+        TABLE_MARKDOWN_PIPE_TEXT,
+      );
+    return [title_texts, rule_texts, ...cell_text_rows]
+      .map(line_write)
+      .join("\n");
   }
   // Writes columns and rows as a markdown table, numbers right aligned.
   function table_markdown(columns, rows) {
-    return placed_lines_text(
-      markdown_lines_place(
-        columns.map((column) => column.numeric),
-        columns.map((column) => markdown_text_cell(column.label)),
-        rows.map((row) =>
-          row.map((value) =>
-            markdown_text_cell(markdown_escape(cell_normalize(value).text)),
-          ),
-        ),
+    return markdown_table_write(
+      columns.map((column) => column.numeric),
+      columns.map((column) => column.label),
+      rows.map((row) =>
+        row.title_columns
+          ? row.title_columns.map((column) => markdown_escape(column.label))
+          : row.map((value) => markdown_escape(cell_normalize(value).text)),
       ),
     );
   }
-  // Places a shown table as markdown lines, each piece styled as its element.
-  function table_element_markdown_lines(table_element) {
+  // Writes a shown table as a markdown table of the text its cells show.
+  function table_element_markdown(table_element) {
     const title_row = table_element.tHead ? table_element.tHead.rows[0] : null;
-    const body_rows = [...table_element.tBodies[0].rows];
+    const body_rows = table_body_rows(table_element);
     const sample_cells = [...(title_row || body_rows[0]).cells];
-    return markdown_lines_place(
+    return markdown_table_write(
       sample_cells.map((sample_cell) =>
         sample_cell.classList.contains("numeric-"),
       ),
       sample_cells.map((sample_cell) =>
-        title_row
-          ? {
-              table_cell: sample_cell,
-              text_pieces: cell_text_pieces(sample_cell, text_as_shown),
-            }
-          : markdown_text_cell(""),
+        title_row ? sample_cell.textContent : "",
       ),
       body_rows.map((body_row) =>
-        [...body_row.cells].map((body_cell) => ({
-          table_cell: body_cell,
-          text_pieces: cell_text_pieces(body_cell, markdown_escape),
-        })),
+        [...body_row.cells].map((body_cell) =>
+          markdown_escape(body_cell.textContent),
+        ),
       ),
     );
   }
@@ -1872,13 +1883,97 @@ window.report_ui_ = window.try_catch_handler_(function () {
       line: line_number,
     });
   }
-  // Writes a cell, its text clipped at the characters shown, a link plain.
-  function table_cell_render(cell, column, clip_chars) {
-    const cell_attributes = {};
-    const class_names = [column.numeric ? "numeric-" : "", column.cls || ""]
+  // Returns a table's body rows across its chunks, its sizer rows left out.
+  function table_body_rows(table_element) {
+    return [...table_element.tBodies].flatMap((table_body) =>
+      [...table_body.rows].filter(
+        (body_row) => !body_row.classList.contains("table-sizer-row-"),
+      ),
+    );
+  }
+  // Returns a table's title row, then each copy its chunks size columns by.
+  function table_title_rows(table_element) {
+    return [
+      table_element.tHead.rows[0],
+      ...[...table_element.tBodies]
+        .map((table_body) => table_body.rows[0])
+        .filter(
+          (first_row) =>
+            first_row && first_row.classList.contains("table-title-copy-"),
+        ),
+    ];
+  }
+  // Returns the characters an element shows, a lone text node's read as is.
+  function shown_text_length(text_element) {
+    const first_node = text_element.firstChild;
+    if (!first_node) return 0;
+    if (first_node.nodeType === Node.TEXT_NODE && !first_node.nextSibling)
+      return first_node.length;
+    return text_element.textContent.length;
+  }
+  // Fills each sizer row with each column's widest shown cell, sizes chunks.
+  function table_chunks_fit(table_element) {
+    if (!table_element.classList.contains("table-chunked-")) return;
+    const title_count = table_element.tHead.rows[0].cells.length;
+    const widest_cells = [],
+      widest_lengths = new Array(title_count).fill(-1);
+    const row_class_texts = new Set();
+    for (const body_row of table_body_rows(table_element)) {
+      const row_cells = body_row.cells;
+      // A row of another cell count or holding a box's table sizes no column.
+      if (
+        row_cells.length !== title_count ||
+        body_row.getElementsByTagName("table").length
+      )
+        continue;
+      row_class_texts.add(body_row.className);
+      for (let cell_index = 0; cell_index < title_count; cell_index++) {
+        const shown_length = shown_text_length(row_cells[cell_index]);
+        if (shown_length <= widest_lengths[cell_index]) continue;
+        widest_lengths[cell_index] = shown_length;
+        widest_cells[cell_index] = row_cells[cell_index];
+      }
+    }
+    const row_class_names = new Set(["table-sizer-row-"]);
+    for (const row_class_text of row_class_texts)
+      for (const class_name of row_class_text.split(" "))
+        if (class_name) row_class_names.add(class_name);
+    const sizer_cells_markup = widest_cells
+      .map((widest_cell) => widest_cell.outerHTML)
+      .join("");
+    for (const sizer_row of table_element.querySelectorAll(
+      ":scope > :is(thead, tbody)" +
+        " > tr.table-sizer-row-:not(.table-title-copy-)",
+    )) {
+      sizer_row.className = [...row_class_names].join(" ");
+      sizer_row.innerHTML = sizer_cells_markup;
+    }
+    for (const table_body of table_element.tBodies) {
+      const row_count = [...table_body.rows].filter(
+        (body_row) => !body_row.classList.contains("table-sizer-row-"),
+      ).length;
+      table_body.style.setProperty(
+        STYLE_TABLE_CHUNK_ROWS_PROPERTY,
+        String(row_count),
+      );
+      table_body.hidden = !row_count;
+    }
+  }
+  // Gives a column's title, and each copy of it in a chunk, a min width.
+  function title_min_width_set(title_cell, min_width_text) {
+    for (const title_row of table_title_rows(title_cell.closest("table")))
+      title_row.cells[title_cell.cellIndex].style.minWidth = min_width_text;
+  }
+  // Returns the classes each cell of a column takes, or empty for none.
+  function column_cell_class_text(column) {
+    return [column.numeric ? "numeric-" : "", column.cls || ""]
       .filter(Boolean)
       .join(" ");
-    if (class_names) cell_attributes.class = class_names;
+  }
+  // Writes a cell, its text clipped at the characters shown, a link plain.
+  function table_cell_render(cell, cell_class_text, clip_chars) {
+    const cell_attributes = {};
+    if (cell_class_text) cell_attributes.class = cell_class_text;
     if (cell.style) cell_attributes.style = cell.style;
     const shown_text =
       clip_chars != null ? text_clip(cell.text, clip_chars) : cell.text;
@@ -2014,75 +2109,125 @@ window.report_ui_ = window.try_catch_handler_(function () {
     );
     // A cell given as a function is written for its column's clip.
     const cell_rows = rows.map((row) =>
-      column_order.map((column_index, drawn_index) => {
-        const cell = row[column_index];
-        return cell_normalize(
-          typeof cell === "function"
-            ? cell(clip_chars_list[drawn_index])
-            : cell,
-        );
-      }),
+      row.title_columns
+        ? row
+        : column_order.map((column_index, drawn_index) => {
+            const cell = row[column_index];
+            return cell_normalize(
+              typeof cell === "function"
+                ? cell(clip_chars_list[drawn_index])
+                : cell,
+            );
+          }),
     );
-    const title_markup = render_element(
-      "thead",
-      {},
-      render_element(
+    // Writes a row of titles, the head's or one given among the rows.
+    const title_cells_render = (title_columns, sorted_index) =>
+      column_order
+        .map((column_index, drawn_index) => {
+          const column = title_columns[column_index];
+          return render_element(
+            "th",
+            {
+              ...(column.numeric ? { class: "numeric-" } : {}),
+              ...(drawn_index === sorted_index
+                ? { "aria-sort": table_options.sort_direction }
+                : {}),
+              ...(column.name ? { "data-column-name-": column.name } : {}),
+              ...(column.is_sized_by_bar
+                ? { "data-column-sized-by-bar-": "" }
+                : {}),
+              ...(column.measure && column.measure !== column.label
+                ? { "data-tool-tip-text-": column.measure }
+                : {}),
+            },
+            render_html_escape(column.label),
+          );
+        })
+        .join("");
+    const title_cells_markup = title_cells_render(columns, sorted_drawn_index);
+    const cell_class_texts = drawn_columns.map(column_cell_class_text);
+    const row_markups = cell_rows.map((row, row_index) => {
+      if (row.title_columns)
+        return render_element(
+          "tr",
+          { class: "table-title-row-" },
+          title_cells_render(row.title_columns, -1),
+        );
+      const row_href =
+        table_options.row_href && table_options.row_href[row_index];
+      const row_attributes = row_href
+        ? { class: "row-link-", "data-href-": row_href }
+        : table_options.row_attributes
+          ? table_options.row_attributes[row_index]
+          : {};
+      return render_element(
         "tr",
-        {},
-        drawn_columns
-          .map((column, drawn_index) =>
-            render_element(
-              "th",
-              {
-                ...(column.numeric ? { class: "numeric-" } : {}),
-                ...(drawn_index === sorted_drawn_index
-                  ? { "aria-sort": table_options.sort_direction }
-                  : {}),
-                ...(column.name ? { "data-column-name-": column.name } : {}),
-                ...(column.is_sized_by_bar
-                  ? { "data-column-sized-by-bar-": "" }
-                  : {}),
-                ...(column.measure && column.measure !== column.label
-                  ? { "data-tool-tip-text-": column.measure }
-                  : {}),
-              },
-              render_html_escape(column.label),
+        row_attributes,
+        row
+          .map((cell, drawn_index) =>
+            table_cell_render(
+              cell,
+              cell_class_texts[drawn_index],
+              clip_chars_list[drawn_index],
             ),
           )
           .join(""),
-      ),
+      );
+    });
+    const table_class_names = ["table-", table_options.cls || ""];
+    if (!table_options.is_chunked)
+      return render_element(
+        "table",
+        {
+          class: table_class_names.filter(Boolean).join(" "),
+          "data-key-": table_key,
+        },
+        render_element(
+          "thead",
+          {},
+          render_element("tr", {}, title_cells_markup),
+        ) + render_element("tbody", {}, row_markups.join("")),
+      );
+    const sizer_markup = render_element(
+      "tr",
+      { class: "table-sizer-row-", "aria-hidden": "true" },
+      "",
     );
-    const body_markup = cell_rows
-      .map((row, row_index) => {
-        const row_href =
-          table_options.row_href && table_options.row_href[row_index];
-        const row_attributes = row_href
-          ? { class: "row-link-", "data-href-": row_href }
-          : table_options.row_attributes
-            ? table_options.row_attributes[row_index]
-            : {};
-        return render_element(
-          "tr",
-          row_attributes,
-          row
-            .map((cell, drawn_index) =>
-              table_cell_render(
-                cell,
-                drawn_columns[drawn_index],
-                clip_chars_list[drawn_index],
-              ),
-            )
-            .join(""),
-        );
-      })
-      .join("");
+    const title_copy_markup = render_element(
+      "tr",
+      { class: "table-sizer-row- table-title-copy-", "aria-hidden": "true" },
+      title_cells_markup,
+    );
+    let chunks_markup = "";
+    for (
+      let chunk_start = 0;
+      chunk_start < Math.max(row_markups.length, 1);
+      chunk_start += TABLE_CHUNK_ROW_COUNT
+    ) {
+      const chunk_rows = row_markups.slice(
+        chunk_start,
+        chunk_start + TABLE_CHUNK_ROW_COUNT,
+      );
+      chunks_markup += render_element(
+        "tbody",
+        {
+          style: `${STYLE_TABLE_CHUNK_ROWS_PROPERTY}: ${chunk_rows.length}`,
+        },
+        title_copy_markup + sizer_markup + chunk_rows.join(""),
+      );
+    }
+    table_class_names.push("table-chunked-");
     return render_element(
       "table",
       {
-        class: ["table-", table_options.cls || ""].filter(Boolean).join(" "),
+        class: table_class_names.filter(Boolean).join(" "),
         "data-key-": table_key,
       },
-      title_markup + render_element("tbody", {}, body_markup),
+      render_element(
+        "thead",
+        {},
+        render_element("tr", {}, title_cells_markup) + sizer_markup,
+      ) + chunks_markup,
     );
   }
   // Writes a table of records, each column part a column and its cells.
@@ -2199,7 +2344,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     return [
       strip_entry_make("sort_order", "pulldown", sorted_label, {
         pulldown_options: choice_pulldown_options(
-          () => strip_choice_entries(order_choices),
+          order_choices,
           on_column_choose,
         ),
       }),
@@ -2274,7 +2419,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
     if (cell_row === title_row) return table_cell;
     // A row of another cell count, a detail row among them, has no columns.
     if (
-      cell_row.parentElement !== table_element.tBodies[0] ||
+      cell_row.parentElement === table_element.tHead ||
+      cell_row.classList.contains("table-sizer-row-") ||
       cell_row.cells.length !== title_row.cells.length
     )
       return null;
@@ -2316,7 +2462,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     const table_cell = pointer_event.target.closest("td, th");
     return edge_grab_holds(pointer_event, table_cell) ? table_cell : null;
   }
-  // Marks the cell or pane whose edge grab holds the pointer, unmarks others.
+  // Marks the cell whose edge grab holds the pointer, unmarks the others.
   function column_edge_hover_set(edge_element) {
     if (column_press_is_active || edge_element === column_edge_hovered_element)
       return;
@@ -2369,7 +2515,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     for (const title_cell of table_element.tHead.rows[0].cells) {
       const kept_width = kept_widths.get(title_width_name(title_cell));
       if (kept_width !== undefined)
-        title_cell.style.minWidth = kept_width.width_px + "px";
+        title_min_width_set(title_cell, kept_width.width_px + "px");
     }
   }
   // Returns the drawn title of a table's column, by the name its width keeps.
@@ -2385,21 +2531,13 @@ window.report_ui_ = window.try_catch_handler_(function () {
     if (!title_cell) window.throw_exception_("str_error_internal");
     return title_cell;
   }
-  // Sizes a column title's min width or a pane's max width by its right edge.
-  function column_edge_drag(
-    press_event,
-    grab_element,
-    sized_element,
-    size_property_name,
-  ) {
+  // Sizes a column title's min width by its right edge.
+  function column_edge_drag(press_event, grab_element, sized_element) {
     const start_width_px = design_px(
       sized_element.getBoundingClientRect().width,
     );
-    const is_column = size_property_name === "minWidth";
-    const table_key = is_column
-      ? sized_element.closest("table").getAttribute("data-key-")
-      : null;
-    const width_name = is_column ? title_width_name(sized_element) : null;
+    const table_key = sized_element.closest("table").getAttribute("data-key-");
+    const width_name = title_width_name(sized_element);
     let animation_frame = 0,
       has_travelled = false;
     // Moves the drag to the title a redraw put in place of the sized one.
@@ -2422,13 +2560,11 @@ window.report_ui_ = window.try_catch_handler_(function () {
       const wanted_width_px =
         start_width_px + design_px(move_event.clientX - press_event.clientX);
       const sized_width_px = Math.max(0, wanted_width_px);
-      sized_element.style[size_property_name] = sized_width_px + "px";
-      if (is_column) {
-        column_width_keep(sized_element, sized_width_px);
-        // The column's cells take its width's characters as the drag goes.
-        table_clip_refresh(table_key);
-        redrawn_title_take();
-      }
+      title_min_width_set(sized_element, sized_width_px + "px");
+      column_width_keep(sized_element, sized_width_px);
+      // The column's cells take its width's characters as the drag goes.
+      table_clip_refresh(table_key);
+      redrawn_title_take();
       if (animation_frame) return;
       animation_frame = requestAnimationFrame(
         window.try_catch_handler_(() => {
@@ -2605,7 +2741,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
         const edge_cell = column_edge_cell(press_event, table_element);
         if (edge_cell) {
           press_event.preventDefault();
-          column_edge_drag(press_event, edge_cell, title_cell, "minWidth");
+          column_edge_drag(press_event, edge_cell, title_cell);
           return;
         }
         // A table showing the lines of a counters list moves its columns.
@@ -2666,10 +2802,11 @@ window.report_ui_ = window.try_catch_handler_(function () {
     for (const table_element of root_element.querySelectorAll(
       "table.table-",
     )) {
+      table_chunks_fit(table_element);
       column_widths_restore(table_element);
       table_column_press_attach(table_element);
       table_sort_attach(table_element);
-      if (table_element.tBodies[0].querySelector("a[href]"))
+      if (table_element.querySelector(":scope > tbody a[href]"))
         table_rows_attach(table_element, "tr");
     }
     for (const heading_element of root_element.querySelectorAll(
@@ -2691,8 +2828,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
         scrolled_element,
         text_scrollbar_axis(bar_element),
       );
-      if (bar_element.hasAttribute("data-sizes-"))
-        pane_edge_attach(bar_sized_pane(bar_element));
     }
     layout_refresh(root_element);
     window.report_load_log_.event_render_log();
@@ -2704,13 +2839,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
     kept_column_orders.clear();
     kept_column_widths.clear();
     for (const title_cell of root_element.querySelectorAll(
-      "table.table- > thead > tr > th",
+      "table.table- > :is(thead, tbody) > tr > th",
     ))
       title_cell.style.minWidth = "";
-    for (const pane_entry of registered_panes) {
-      if (!root_element.contains(pane_entry.pane_element)) continue;
-      pane_entry.pane_width_forget();
-    }
     const heading_elements = root_element.querySelectorAll(".page-heading-");
     for (const heading_element of heading_elements) {
       const attached_heading = attached_headings.get(heading_element);
@@ -2784,24 +2915,45 @@ window.report_ui_ = window.try_catch_handler_(function () {
       (row_link) => row_link.closest("tr") === row_element,
     );
   }
-  function walked_row(focused_element, table_body, row_selector) {
+  // Returns whether a row is a body row of the table the walk takes.
+  function row_is_walked(table_row, table_element, row_selector) {
+    return (
+      table_row.parentElement.parentElement === table_element &&
+      table_row.parentElement !== table_element.tHead &&
+      !table_row.classList.contains("table-sizer-row-") &&
+      table_row.matches(row_selector)
+    );
+  }
+  function walked_row(focused_element, table_element, row_selector) {
     const row_element = focused_element.closest("tr");
     const is_walked =
-      !!row_element &&
-      row_element.parentElement === table_body &&
-      row_element.matches(row_selector);
+      !!row_element && row_is_walked(row_element, table_element, row_selector);
     return is_walked ? row_element : null;
   }
+  // Returns the walked row a step reaches, from one chunk into the next.
   function walked_row_beside(row_element, row_selector, step_direction) {
     const sibling_name =
       step_direction > 0 ? "nextElementSibling" : "previousElementSibling";
+    const table_element = row_element.closest("table");
+    let row_body = row_element.parentElement;
     let sibling_row = row_element[sibling_name];
-    while (sibling_row && !sibling_row.matches(row_selector))
-      sibling_row = sibling_row[sibling_name];
-    return sibling_row;
+    for (;;) {
+      while (
+        sibling_row &&
+        !row_is_walked(sibling_row, table_element, row_selector)
+      )
+        sibling_row = sibling_row[sibling_name];
+      if (sibling_row) return sibling_row;
+      row_body = row_body[sibling_name];
+      if (!row_body) return null;
+      sibling_row =
+        step_direction > 0
+          ? row_body.firstElementChild
+          : row_body.lastElementChild;
+    }
   }
-  function walked_rows_in(table_body, row_selector) {
-    return [...table_body.rows].filter((walked_row) =>
+  function walked_rows_in(table_element, row_selector) {
+    return table_body_rows(table_element).filter((walked_row) =>
       walked_row.matches(row_selector),
     );
   }
@@ -2809,17 +2961,17 @@ window.report_ui_ = window.try_catch_handler_(function () {
     const owning_table = row_element.closest("table");
     const row_walk = row_walks.get(owning_table);
     if (!row_walk) window.throw_exception_("str_error_internal");
-    tab_stop_move(
-      row_element.parentElement.querySelector(':scope > tr[tabindex="0"]'),
-      row_element,
-      takes_focus,
-    );
+    tab_stop_move(row_walk.tab_stop_row, row_element, takes_focus);
     row_walk.tab_stop_row = row_element;
   }
-  function table_row_key_handler(key_event, table_body, row_selector) {
+  function table_row_key_handler(key_event, table_element, row_selector) {
     const key_name = widget_key(key_event);
     const focused_element = key_event.target;
-    const row_element = walked_row(focused_element, table_body, row_selector);
+    const row_element = walked_row(
+      focused_element,
+      table_element,
+      row_selector,
+    );
     if (!key_name || !row_element) return;
     const focused_row_links = row_links(row_element);
     const link_index = focused_row_links.indexOf(focused_element);
@@ -2842,10 +2994,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
         next_element = walked_row_beside(row_element, row_selector, 1);
         break;
       case WIDGET_KEY_NAMES.first:
-        next_element = walked_rows_in(table_body, row_selector)[0];
+        next_element = walked_rows_in(table_element, row_selector)[0];
         break;
       case WIDGET_KEY_NAMES.last:
-        next_element = walked_rows_in(table_body, row_selector).pop();
+        next_element = walked_rows_in(table_element, row_selector).pop();
         break;
       case WIDGET_KEY_NAMES.left:
         next_element =
@@ -2872,14 +3024,13 @@ window.report_ui_ = window.try_catch_handler_(function () {
   function table_rows_attach(table_element, row_selector) {
     if (table_element.is_row_walk_attached) return;
     table_element.is_row_walk_attached = true;
-    const table_body = table_element.tBodies[0];
-    const walked_rows = walked_rows_in(table_body, row_selector);
+    const walked_rows = walked_rows_in(table_element, row_selector);
     if (!walked_rows.length) return;
     const row_walk = {
       focus_row: null,
       row_selector,
       tab_stop_row: walked_rows[0],
-      table_body,
+      table_element,
     };
     row_walks.set(table_element, row_walk);
     table_element.setAttribute("role", "treegrid");
@@ -2893,7 +3044,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       window.try_catch_handler_((focus_event) => {
         const row_element = walked_row(
           focus_event.target,
-          table_body,
+          table_element,
           row_selector,
         );
         row_walk.focus_row = row_element;
@@ -2911,7 +3062,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     table_element.addEventListener(
       "keydown",
       window.try_catch_handler_((key_event) =>
-        table_row_key_handler(key_event, table_body, row_selector),
+        table_row_key_handler(key_event, table_element, row_selector),
       ),
     );
   }
@@ -2919,8 +3070,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
   function table_rows_refresh(table_element) {
     const row_walk = row_walks.get(table_element);
     if (!row_walk) return;
-    const { focus_row, row_selector, table_body, tab_stop_row } = row_walk;
-    const walked_rows = walked_rows_in(table_body, row_selector);
+    const { focus_row, row_selector, tab_stop_row } = row_walk;
+    const walked_rows = walked_rows_in(table_element, row_selector);
     const is_focus_lost =
       focus_row !== null &&
       !walked_rows.includes(focus_row) &&
@@ -2948,14 +3099,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
     if (stored_count === null) return default_count;
     return row_count_checked(count_key, stored_count);
   }
-  function row_count_entries() {
-    return strip_choice_entries(
-      TABLE_ROW_COUNT_CHOICES.map((row_count) => ({
-        label: String(row_count),
-        value: String(row_count),
-      })),
-    );
-  }
   // Makes one pulldown entry element per choice: any mark, a label, a value.
   function strip_choice_entries(choices) {
     return choices.map((choice) =>
@@ -2970,15 +3113,132 @@ window.report_ui_ = window.try_catch_handler_(function () {
     );
   }
   // Fills the options of a pulldown that closes on a choice and moves nothing.
-  function choice_pulldown_options(entries, on_select) {
+  function choice_pulldown_options(choices, on_select) {
     return {
-      entries,
+      entries: () => strip_choice_entries(choices),
+      entry_count: () => choices.length,
       keeps_open: false,
       on_close: () => {},
       on_move: null,
       on_select,
       reads_line_number: false,
     };
+  }
+  // Saves an element drawn as an SVG image.
+  function element_image_download(drawn_element, file_name) {
+    const link_markup = render_element(
+      "a",
+      {
+        href:
+          TABLE_DOWNLOAD_URL_PREFIX +
+          encodeURIComponent(element_image_draw(drawn_element)),
+        download: file_name,
+      },
+      "",
+    );
+    // A made element saves nothing until the page adopts it.
+    document.adoptNode(render_element_of(link_markup)).click();
+  }
+  // Makes the copy pulldown: the copied text, the element as SVG or a path.
+  function strip_copy_entry_make(
+    copied_text,
+    drawn_element,
+    download_file_name,
+    copied_path,
+  ) {
+    const path_choices =
+      copied_path === null
+        ? []
+        : [
+            {
+              label: window.ui_strings_.text("str_table_heading_copy_path"),
+              on_select: () => navigator.clipboard.writeText(copied_path),
+              value: "path",
+            },
+          ];
+    const copy_choices = [
+      {
+        label: window.ui_strings_.text("str_table_heading_copy_text"),
+        on_select: () => navigator.clipboard.writeText(copied_text()),
+        value: "text",
+      },
+      {
+        label: window.ui_strings_.text("str_table_heading_copy_svg"),
+        on_select: () =>
+          element_image_download(drawn_element, download_file_name),
+        value: "svg",
+      },
+      ...path_choices,
+    ];
+    return strip_entry_make(
+      "copy",
+      "pulldown",
+      window.ui_strings_.text("str_table_heading_copy"),
+      {
+        pulldown_options: choice_pulldown_options(
+          copy_choices,
+          (chosen_value) =>
+            copy_choices
+              .find((copy_choice) => copy_choice.value === chosen_value)
+              .on_select(),
+        ),
+      },
+    );
+  }
+  // Writes a slider's cells, one per step, those before its stop marked.
+  function strip_slider_text(stop_index, last_stop_index) {
+    return (
+      SLIDER_CELL_TEXTS.before_stop.repeat(stop_index) +
+      SLIDER_CELL_TEXTS.after_stop.repeat(last_stop_index - stop_index)
+    );
+  }
+  // Chooses each stop whose cell edge lies nearest the pointer while pressed.
+  function strip_slider_drag(
+    press_event,
+    held_element,
+    widget_box,
+    on_stop_choose,
+  ) {
+    // The edges stay where the press found them, as a new scale moves them.
+    const cell_rects = Array.from(widget_box.children, (cell_span) =>
+      cell_span.getBoundingClientRect(),
+    );
+    const edge_positions = [
+      cell_rects[0].left,
+      ...cell_rects.map((cell_rect) => cell_rect.right),
+    ];
+    let chosen_stop = null;
+    function pointer_stop_choose(pointer_event) {
+      const pointer_x = pointer_event.clientX;
+      const nearest_stop = edge_positions.reduce(
+        (best_stop, edge_position, stop_index) =>
+          Math.abs(edge_position - pointer_x) <
+          Math.abs(edge_positions[best_stop] - pointer_x)
+            ? stop_index
+            : best_stop,
+        0,
+      );
+      if (nearest_stop === chosen_stop) return;
+      chosen_stop = nearest_stop;
+      on_stop_choose(nearest_stop);
+    }
+    const on_pointer_move = window.try_catch_handler_((move_event) => {
+      if (move_event.pointerId !== press_event.pointerId) return;
+      pointer_stop_choose(move_event);
+    });
+    const on_pointer_release = window.try_catch_handler_((release_event) => {
+      if (release_event.pointerId !== press_event.pointerId) return;
+      // A capture another element loses ends nothing of this drag.
+      if (
+        release_event.type === "lostpointercapture" &&
+        release_event.target !== held_element
+      )
+        return;
+      listeners_bind(window, on_pointer_move, on_pointer_release, false);
+    });
+    held_element.setPointerCapture(press_event.pointerId);
+    listeners_bind(window, on_pointer_move, on_pointer_release, true);
+    pointer_stop_choose(press_event);
   }
   // Fills every strip entry field the caller leaves out.
   function strip_entry_make(entry_name, kind_name, label, entry_fields) {
@@ -2995,12 +3255,13 @@ window.report_ui_ = window.try_catch_handler_(function () {
       opens_new_tab: false,
       withholds_tab_stop: false,
       on_activate: null,
+      on_stop_choose: null,
       pulldown_options: null,
       ...entry_fields,
     };
   }
-  // Places each layout table cell in its row's line, padded to its column.
-  function layout_table_lines(layout_table) {
+  // Writes a layout table's rows as lines, each cell padded to its column.
+  function layout_table_text(layout_table) {
     const column_cells = layout_table.tHead.rows[0].cells;
     const column_widths = new Array(column_cells.length).fill(0);
     // Lists a row's cells, an empty spanning cell as each column it covers.
@@ -3017,178 +3278,208 @@ window.report_ui_ = window.try_catch_handler_(function () {
         }));
       });
     }
-    const row_runs = [...layout_table.tBodies[0].rows].map(row_column_runs);
+    const row_runs = table_body_rows(layout_table).map(row_column_runs);
     for (const { column_index, table_cell } of row_runs.flat())
       column_widths[column_index] = Math.max(
         column_widths[column_index],
         table_cell.textContent.length,
       );
-    return row_runs.map((column_runs) => {
-      let column_start = 0;
-      return column_runs.map(({ column_index, table_cell }) => {
-        const column_width = column_widths[column_index];
-        const right_room =
-          getComputedStyle(table_cell).textAlign === "right"
-            ? column_width - table_cell.textContent.length
-            : 0;
-        const placed_cell = {
-          table_cell,
-          text_pieces: cell_text_pieces(table_cell, text_as_shown),
-          column_start,
-          column_width,
-          text_start: column_start + right_room,
-        };
-        column_start += column_width;
-        return placed_cell;
-      });
-    });
-  }
-  // Writes placed lines as text, each run at its place in its column.
-  function placed_lines_text(placed_lines) {
-    return placed_lines
-      .map((placed_runs) => {
-        let line_text = "";
-        for (const placed_run of placed_runs)
-          line_text = (
-            line_text.padEnd(placed_run.text_start) + run_text(placed_run)
-          ).padEnd(placed_run.column_start + placed_run.column_width);
-        return line_text.trimEnd();
-      })
+    return row_runs
+      .map((column_runs) =>
+        column_runs
+          .map(({ column_index, table_cell }) =>
+            getComputedStyle(table_cell).textAlign === "right"
+              ? table_cell.textContent.padStart(column_widths[column_index])
+              : table_cell.textContent.padEnd(column_widths[column_index]),
+          )
+          .join("")
+          .trimEnd(),
+      )
       .join("\n");
   }
-  // Returns an element's computed background color, null for a clear one.
-  function painted_background_color(painted_element) {
-    const background_color = getComputedStyle(painted_element).backgroundColor;
-    return background_color === CLEAR_BACKGROUND_COLOR
+  // Returns a computed style's background color, null for a clear one.
+  function painted_background_color(painted_style) {
+    return painted_style.backgroundColor === CLEAR_BACKGROUND_COLOR
       ? null
-      : background_color;
+      : painted_style.backgroundColor;
   }
-  // Draws placed lines as an SVG image in their table's computed style.
-  function placed_lines_svg(placed_lines, shown_table) {
-    const table_style = getComputedStyle(shown_table);
-    const line_height = parseFloat(table_style.lineHeight);
-    if (!Number.isFinite(line_height))
-      window.throw_exception_("str_error_internal");
+  // Draws an element as an SVG image, each background and word as shown.
+  function element_image_draw(drawn_element) {
+    const drawn_style = getComputedStyle(drawn_element);
     const measure_context = document.createElement("canvas").getContext("2d");
-    measure_context.font = table_style.fontSize + " " + table_style.fontFamily;
+    measure_context.font = drawn_style.fontSize + " " + drawn_style.fontFamily;
     const glyph_metrics = measure_context.measureText(CH_UNIT_GLYPH);
-    const character_width = glyph_metrics.width;
-    // Drops the baseline as a line box does, the font's height centred in it.
-    const baseline_drop =
-      (line_height +
-        glyph_metrics.fontBoundingBoxAscent -
-        glyph_metrics.fontBoundingBoxDescent) /
-      2;
-    const inset_left = parseFloat(table_style.borderLeftWidth);
-    const inset_top = parseFloat(table_style.borderTopWidth);
-    let ground_element = shown_table;
-    while (painted_background_color(ground_element) === null) {
+    let ground_element = drawn_element.parentElement;
+    while (
+      painted_background_color(getComputedStyle(ground_element)) === null
+    ) {
       ground_element = ground_element.parentElement;
       if (!ground_element) window.throw_exception_("str_error_internal");
     }
-    const line_characters = Math.max(
-      ...placed_lines
-        .flat()
-        .map(
-          (placed_run) => placed_run.column_start + placed_run.column_width,
-        ),
+    const inner_elements = [...drawn_element.querySelectorAll("*")];
+    // A stuck element is measured at its place in the flow, then stuck again.
+    const stuck_elements = inner_elements.filter(
+      (inner_element) => getComputedStyle(inner_element).position === "sticky",
     );
-    const image_width =
-      inset_left +
-      line_characters * character_width +
-      parseFloat(table_style.borderRightWidth);
-    const image_height =
-      inset_top +
-      placed_lines.length * line_height +
-      parseFloat(table_style.borderBottomWidth);
+    const stuck_style_texts = stuck_elements.map((stuck_element) =>
+      stuck_element.getAttribute("style"),
+    );
+    for (const stuck_element of stuck_elements)
+      stuck_element.style.position = "static";
+    const drawn_rect = drawn_element.getBoundingClientRect();
+    const drawn_zoom = drawn_element.currentCSSZoom;
+    const image_width = drawn_rect.width / drawn_zoom;
+    const image_height = drawn_rect.height / drawn_zoom;
+    // Returns a client rect's place and size in the image, unzoomed.
+    const image_box = (client_rect) => ({
+      x: (client_rect.left - drawn_rect.left) / drawn_zoom,
+      y: (client_rect.top - drawn_rect.top) / drawn_zoom,
+      width: client_rect.width / drawn_zoom,
+      height: client_rect.height / drawn_zoom,
+    });
     const shape_markups = [
       render_element(
         "rect",
         {
           width: image_width,
           height: image_height,
-          fill: painted_background_color(ground_element),
+          fill: painted_background_color(getComputedStyle(ground_element)),
         },
         "",
       ),
     ];
-    const text_markups = [];
-    // Draws a background over a span of a line's characters.
-    function span_paint(line_top, span_start, span_length, fill_color) {
+    // Paints a pseudo element's background, which only an absolute one has.
+    function pseudo_background_paint(painted_element, pseudo_name) {
+      const pseudo_style = getComputedStyle(painted_element, pseudo_name);
+      if (pseudo_style.content === "none") return;
+      // A pseudo element's text has no range to place it, so none is drawn.
+      if (pseudo_style.content !== '""')
+        window.throw_exception_("str_error_internal");
+      const fill_color = painted_background_color(pseudo_style);
+      if (fill_color === null || pseudo_style.visibility !== "visible") return;
+      if (pseudo_style.position !== "absolute")
+        window.throw_exception_("str_error_internal");
+      let block_element = painted_element;
+      while (getComputedStyle(block_element).position === "static") {
+        block_element = block_element.parentElement;
+        if (!block_element) window.throw_exception_("str_error_internal");
+      }
+      const block_style = getComputedStyle(block_element);
+      const block_box = image_box(block_element.getBoundingClientRect());
       shape_markups.push(
         render_element(
           "rect",
           {
-            x: inset_left + span_start * character_width,
-            y: line_top,
-            width: span_length * character_width,
-            height: line_height,
+            x:
+              block_box.x +
+              parseFloat(block_style.borderLeftWidth) +
+              parseFloat(pseudo_style.left) +
+              parseFloat(pseudo_style.marginLeft),
+            y:
+              block_box.y +
+              parseFloat(block_style.borderTopWidth) +
+              parseFloat(pseudo_style.top) +
+              parseFloat(pseudo_style.marginTop),
+            width: parseFloat(pseudo_style.width),
+            height: parseFloat(pseudo_style.height),
             fill: fill_color,
           },
           "",
         ),
       );
     }
-    placed_lines.forEach((placed_runs, line_index) => {
-      const line_top = inset_top + line_index * line_height;
-      for (const placed_run of placed_runs) {
-        const table_cell = placed_run.table_cell;
-        const cell_color =
-          table_cell === null ? null : painted_background_color(table_cell);
-        if (cell_color !== null)
-          span_paint(
-            line_top,
-            placed_run.column_start,
-            placed_run.column_width,
-            cell_color,
+    // Returns whether an element is a strip's button, a control never drawn.
+    const is_strip_control = (page_element) =>
+      page_element.closest(".strip-line- > .menu-button-") !== null;
+    // Paints an element's background, its before, its children, its after.
+    function backgrounds_paint(painted_element) {
+      if (
+        !painted_element.checkVisibility() ||
+        is_strip_control(painted_element)
+      )
+        return;
+      const fill_color = painted_background_color(
+        getComputedStyle(painted_element),
+      );
+      if (
+        fill_color !== null &&
+        painted_element.checkVisibility({ visibilityProperty: true })
+      )
+        for (const client_rect of painted_element.getClientRects())
+          shape_markups.push(
+            render_element(
+              "rect",
+              { ...image_box(client_rect), fill: fill_color },
+              "",
+            ),
           );
-        let piece_start = placed_run.text_start;
-        for (const text_piece of placed_run.text_pieces) {
-          const piece_text = text_piece.text;
-          const piece_element = text_piece.element;
-          // A piece inside its cell takes its nearest own background under it.
-          for (
-            let painted_element = piece_element;
-            painted_element !== null && painted_element !== table_cell;
-            painted_element = painted_element.parentElement
-          ) {
-            const piece_color = painted_background_color(painted_element);
-            if (piece_color === null) continue;
-            span_paint(line_top, piece_start, piece_text.length, piece_color);
-            break;
-          }
-          // A piece of no element, a pipe or a rule, takes the table's color.
-          const text_color =
-            piece_element === null
-              ? table_style.color
-              : getComputedStyle(piece_element).color;
-          for (const word_match of piece_text.matchAll(/\S+/g))
-            text_markups.push(
-              render_element(
-                "text",
-                {
-                  x:
-                    inset_left +
-                    (piece_start + word_match.index) * character_width,
-                  y: line_top + baseline_drop,
-                  fill: text_color,
-                  textLength: word_match[0].length * character_width,
-                },
-                render_html_escape(word_match[0]),
-              ),
-            );
-          piece_start += piece_text.length;
-        }
+      pseudo_background_paint(painted_element, "::before");
+      for (const child_element of painted_element.children)
+        backgrounds_paint(child_element);
+      pseudo_background_paint(painted_element, "::after");
+    }
+    backgrounds_paint(drawn_element);
+    const text_markups = [];
+    const word_range = document.createRange();
+    const text_walker = document.createTreeWalker(
+      drawn_element,
+      NodeFilter.SHOW_TEXT,
+    );
+    for (
+      let text_node = text_walker.nextNode();
+      text_node;
+      text_node = text_walker.nextNode()
+    ) {
+      const text_element = text_node.parentElement;
+      if (
+        !text_element.checkVisibility({ visibilityProperty: true }) ||
+        is_strip_control(text_element)
+      )
+        continue;
+      const text_color = getComputedStyle(text_element).color;
+      for (const word_match of text_node.data.matchAll(/\S+/g)) {
+        word_range.setStart(text_node, word_match.index);
+        word_range.setEnd(text_node, word_match.index + word_match[0].length);
+        const word_box = image_box(word_range.getBoundingClientRect());
+        // Drops the baseline as a line box does, the font's height centred.
+        const baseline_drop =
+          (word_box.height +
+            glyph_metrics.fontBoundingBoxAscent -
+            glyph_metrics.fontBoundingBoxDescent) /
+          2;
+        text_markups.push(
+          render_element(
+            "text",
+            {
+              x: word_box.x,
+              y: word_box.y + baseline_drop,
+              fill: text_color,
+              textLength: word_box.width,
+            },
+            render_html_escape(word_match[0]),
+          ),
+        );
+      }
+    }
+    // Each stuck element gets its style attribute back as it was, or none.
+    stuck_elements.forEach((stuck_element, stuck_index) => {
+      const style_text = stuck_style_texts[stuck_index];
+      if (style_text !== null) stuck_element.setAttribute("style", style_text);
+      else {
+        // A removal alone leaves the unwritten inline style, so it is written.
+        stuck_element.setAttribute("style", "");
+        stuck_element.removeAttribute("style");
       }
     });
     return render_element(
       "svg",
       {
         xmlns: STYLE_SVG_NAMESPACE_URL,
-        width: image_width,
-        height: image_height,
-        "font-family": table_style.fontFamily,
-        "font-size": table_style.fontSize,
+        width: image_width * TABLE_DOWNLOAD_IMAGE_SCALE,
+        height: image_height * TABLE_DOWNLOAD_IMAGE_SCALE,
+        viewBox: `0 0 ${image_width} ${image_height}`,
+        "font-family": drawn_style.fontFamily,
+        "font-size": drawn_style.fontSize,
         "shape-rendering": "crispEdges",
       },
       shape_markups.join("") + text_markups.join(""),
@@ -3229,28 +3520,14 @@ window.report_ui_ = window.try_catch_handler_(function () {
       count_key === null
         ? 0
         : row_count_checked(count_key, Number(default_count_text));
-    const table_body = table_element ? table_element.tBodies[0] : null;
-    const all_rows = table_body ? [...table_body.rows] : [];
-    // Holds the copy pulldown's entries, each with the action it takes.
-    const copy_choices = [
-      {
-        label: window.ui_strings_.text("str_table_heading_copy_text"),
-        on_select: table_copy,
-        value: "text",
-      },
-      {
-        label: window.ui_strings_.text("str_table_heading_copy_svg"),
-        on_select: table_download,
-        value: "svg",
-      },
-    ];
-    const copy_options = choice_pulldown_options(
-      () => strip_choice_entries(copy_choices),
-      copy_choose,
-    );
+    const all_rows = table_element ? table_body_rows(table_element) : [];
+    const row_bodies = all_rows.map((table_row) => table_row.parentElement);
     const copy_text = window.ui_strings_.text("str_table_heading_copy");
     const row_count_options = choice_pulldown_options(
-      row_count_entries,
+      TABLE_ROW_COUNT_CHOICES.map((row_count) => ({
+        label: String(row_count),
+        value: String(row_count),
+      })),
       row_count_choose,
     );
     let shown_count = default_count,
@@ -3261,9 +3538,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
       shown_count = row_count;
       all_rows.forEach((table_row, row_index) => {
         if (row_index >= row_count) table_row.remove();
-        else if (table_row.parentElement !== table_body)
-          table_body.append(table_row);
+        else if (!table_row.isConnected)
+          row_bodies[row_index].append(table_row);
       });
+      table_chunks_fit(table_element);
       table_rows_refresh(table_element);
     }
     function row_count_show(row_count) {
@@ -3286,11 +3564,11 @@ window.report_ui_ = window.try_catch_handler_(function () {
         pulldown_options: row_count_options,
       });
     }
-    // Places the shown table's copy text: a data table's markdown, else lines.
-    function shown_table_lines() {
+    // Writes the shown table's text: a data table's markdown, else lines.
+    function shown_table_text() {
       return table_element
-        ? table_element_markdown_lines(table_element)
-        : layout_table_lines(shown_element);
+        ? table_element_markdown(table_element)
+        : layout_table_text(shown_element);
     }
     // Copies tables as markdown or lines, a lone link its address, else text.
     function table_copy() {
@@ -3300,34 +3578,11 @@ window.report_ui_ = window.try_catch_handler_(function () {
         lone_link.textContent === shown_element.textContent;
       return navigator.clipboard.writeText(
         is_table_shown
-          ? placed_lines_text(shown_table_lines())
+          ? shown_table_text()
           : is_link_line
             ? lone_link.href
             : shown_element.textContent,
       );
-    }
-    // Saves the table's copy text drawn as an SVG image under the file name.
-    function table_download() {
-      const link_markup = render_element(
-        "a",
-        {
-          href:
-            TABLE_DOWNLOAD_URL_PREFIX +
-            encodeURIComponent(
-              placed_lines_svg(shown_table_lines(), shown_element),
-            ),
-          download: download_file_name,
-        },
-        "",
-      );
-      // A made element saves nothing until the page adopts it.
-      document.adoptNode(render_element_of(link_markup)).click();
-    }
-    // Takes the copy pulldown's chosen entry's action.
-    function copy_choose(chosen_value) {
-      copy_choices
-        .find((copy_choice) => copy_choice.value === chosen_value)
-        .on_select();
     }
     function heading_render() {
       const title_entries = heading_text
@@ -3343,9 +3598,12 @@ window.report_ui_ = window.try_catch_handler_(function () {
           ? strip_entry_make("copy", "action", copy_text, {
               on_activate: table_copy,
             })
-          : strip_entry_make("copy", "pulldown", copy_text, {
-              pulldown_options: copy_options,
-            });
+          : strip_copy_entry_make(
+              shown_table_text,
+              shown_element,
+              download_file_name,
+              null,
+            );
       strip_handle = strip_render(
         heading_element,
         [
@@ -3388,60 +3646,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
     attached_heading.tail_entries_set(tail_entries);
   }
 
-  // Narrows a pane that fills its room by its right edge, until a reset.
-  function pane_edge_attach(pane_element) {
-    if (pane_element.is_pane_edge_attached) return;
-    pane_element.is_pane_edge_attached = true;
-    registered_panes.push({
-      pane_element,
-      pane_width_forget: () => {
-        pane_element.style.maxWidth = "";
-      },
-    });
-    const holds_edge_grab = (pointer_event) =>
-      !pointer_event.target.closest(".text-scrollbar-") &&
-      edge_grab_holds(pointer_event, pane_element);
-    // Taken while capturing, so the pane's edge wins over what lies under it.
-    pane_element.addEventListener(
-      "pointerdown",
-      window.try_catch_handler_((press_event) => {
-        if (
-          press_event.button ||
-          press_event.defaultPrevented ||
-          !holds_edge_grab(press_event)
-        )
-          return;
-        press_event.preventDefault();
-        column_edge_drag(press_event, pane_element, pane_element, "maxWidth");
-      }),
-      true,
-    );
-    // Runs after a table inside marks its own cells, then marks the pane.
-    pane_element.addEventListener(
-      "pointermove",
-      window.try_catch_handler_((move_event) => {
-        if (holds_edge_grab(move_event)) column_edge_hover_set(pane_element);
-        else if (column_edge_hovered_element === pane_element)
-          column_edge_hover_set(null);
-      }),
-    );
-    pane_element.addEventListener(
-      "pointerleave",
-      window.try_catch_handler_(() => {
-        if (column_edge_hovered_element === pane_element)
-          column_edge_hover_set(null);
-      }),
-    );
-  }
-
-  // Returns the pane a bar's `data-sizes-` names, refusing a missing one.
-  function bar_sized_pane(bar_element) {
-    const pane_element = document.getElementById(
-      bar_element.getAttribute("data-sizes-"),
-    );
-    if (!pane_element) window.throw_exception_("str_error_internal");
-    return pane_element;
-  }
   function text_scrollbar_axis(bar_element) {
     const axis_names = Object.keys(TEXT_SCROLLBAR_AXES).filter((axis_name) =>
       bar_element.classList.contains(axis_name + "-"),
@@ -3804,16 +4008,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
         scroll_offset_now() + step_chars * bar_geometry.units_per_char,
       );
     }
-    // Returns the column title or pane a sideways drag sizes, or null.
+    // Returns the column title a sideways drag sizes, or null.
     function bar_sized_target() {
-      const sized_title = bar_element.closest("th[data-column-sized-by-bar-]");
-      if (sized_title)
-        return { element: sized_title, size_property_name: "minWidth" };
-      if (!bar_element.hasAttribute("data-sizes-")) return null;
-      return {
-        element: bar_sized_pane(bar_element),
-        size_property_name: "maxWidth",
-      };
+      return bar_element.closest("th[data-column-sized-by-bar-]");
     }
     // Steps at a chevron press, else returns the grab in the moved thumb.
     function thumb_press_offset(press_event, bar_geometry) {
@@ -3876,8 +4073,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
           column_edge_drag(
             press_state.press_event,
             bar_element,
-            press_state.sized_target.element,
-            press_state.sized_target.size_property_name,
+            press_state.sized_target,
           );
           return;
         }
@@ -4086,6 +4282,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       settings_cleared_hash: address_settings_cleared_hash,
       top_href: address_top_href,
     },
+    call_graph_cutoff_choose_send,
     dark_mode_enabled_now_,
     dark_mode_set_,
     design_character_width_px: DESIGN_CHARACTER_WIDTH_PX,
@@ -4097,6 +4294,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     fixed_text,
     focused_path_send,
     function_list_cell,
+    function_location_send,
     heat_cell_style,
     heat_sort_toggle_send,
     home_panel,
@@ -4127,10 +4325,13 @@ window.report_ui_ = window.try_catch_handler_(function () {
     share_of_test,
     signed_human_text,
     signed_percent_text,
+    smallest_printed_percent: SMALLEST_PRINTED_PERCENT,
     strip: {
       choice_entries: strip_choice_entries,
+      copy_entry_make: strip_copy_entry_make,
       entry_make: strip_entry_make,
       render: strip_render,
+      slider_text: strip_slider_text,
     },
     tab_stop_move,
     table_markdown,
@@ -4157,6 +4358,5 @@ window.report_ui_ = window.try_catch_handler_(function () {
       link_click_handler: link_click_key_handler,
       of: widget_key,
     },
-    zero_percent_text,
   };
 })();

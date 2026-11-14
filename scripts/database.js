@@ -265,6 +265,7 @@ window.try_catch_handler_(function () {
       shown_records,
       {
         counter_list_key: DATABASE_VIEW_KEY,
+        is_chunked: true,
         heading_entries: window.report_ui_.table_sort.heading_entries({
           table_key: FUNCTIONS_TABLE_KEY,
           sort_columns,

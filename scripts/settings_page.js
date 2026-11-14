@@ -265,6 +265,7 @@ window.try_catch_handler_(function () {
                     }),
                   ),
                 ),
+              entry_count: () => SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES.length,
               keeps_open: false,
               on_close: () => {},
               on_move: null,

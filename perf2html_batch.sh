@@ -41,17 +41,16 @@ _SCRIPT="$PWD/${0##*/}"
 . ./scripts/settings.sh
 . ./scripts/utility.sh
 
-_REPO="$(cd -- ../.. && pwd)"
-
 header_table_print() {
   local _revision _cmake_version _cc_version _curl_version
-  _revision="$(revision_describe "$_REPO")"
+  local _version_header="$PERF2HTML_REPO_ROOT/include/curl/curlver.h"
+  _revision="$(revision_describe "$PERF2HTML_REPO_ROOT")"
   _cmake_version="$(cmake --version | head -1)"
   _cc_version="$(cc --version | head -1)"
   _curl_version="$(sed -n 's/^#define LIBCURL_VERSION "\(.*\)"/\1/p' \
-    "$_REPO/include/curl/curlver.h")"
+    "$_version_header")"
   [ -n "$_curl_version" ] || error_exit 1 \
-    "error: no LIBCURL_VERSION define in $_REPO/include/curl/curlver.h"
+    "error: no LIBCURL_VERSION define in $_version_header"
   table_print 7 started git cmake cc curl kernel "pinned cpu" \
     "$(date '+%F %T %z')" "$_revision" "$_cmake_version" "$_cc_version" \
     "$_curl_version" "$(uname -r)" "$PROFILE_PINNED_CPU"

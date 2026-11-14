@@ -21,10 +21,11 @@ EOF
 set -euo pipefail
 
 INVOKED_FROM="$PWD"
-cd -- "$(dirname -- "$0")/.."
 
-. ./scripts/settings.sh
-. ./scripts/utility.sh
+. "$(dirname -- "$0")/settings.sh"
+. "$(dirname -- "$0")/utility.sh"
+
+project_root_check
 
 args_parse() {
   case "$#:${1-}" in
