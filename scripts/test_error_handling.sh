@@ -348,7 +348,7 @@ writes another $_part/ than one made inside it"
 test_error_diff_tests() {
   local _baseline="$1" _modified="$2" _diff="$3" _copy _archive _kept
   local _test_list _first_test _model_path _model_text _source
-  local _source_pattern='"source":"([^"]+)"'
+  local _source_pattern='\\"source\\":\\"([^\\]+)\\"'
   local _tool="$PERF2HTML_DIR_/perf2html_diff.sh"
   local _scratch="$_TEST_ERROR_SCRATCH"
 

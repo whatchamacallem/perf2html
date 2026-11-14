@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE-MIT.md file.
 
+ADMIN_INSTRUCTIONS_FILE_NAME=packages.md
+
 ARTIFACTS_NAME=perf2html_temporary_artifacts
 
 ARTIFACT_ARCHIVE_KINDS=(callgrind function-data)
@@ -90,25 +92,6 @@ CALLGRIND_SEPARATE_CALLERS=200
 
 CALLGRIND_SEPARATE_RECURSIONS=1
 
-declare -A CONTAINING_PACKAGES=(
-  [cmake]=cmake
-  [ninja]=ninja-build
-  [ccache]=ccache
-  [cc]=build-essential
-  [valgrind]=valgrind
-  [perf]=linux-perf
-  [taskset]=util-linux
-  [python3]=python3
-  [addr2line]=binutils
-  [readelf]=binutils
-  [cksum]=coreutils
-  [curl]=curl
-  [tar]=tar
-  [xz]=xz-utils
-  ["dpkg-query"]=dpkg
-  ["cmark-gfm"]=cmark-gfm
-)
-
 DEFAULT_FLAGS=(-D CMAKE_C_FLAGS=-Os)
 
 DIFF_EXTRACTED_ROOT_DISPLAY_NAME='$tmp'
@@ -124,8 +107,6 @@ declare -A FLAME_GRAPH_APP_NAME_PATTERNS=(
 LOG_FAILURE_TAIL_LINES=40
 
 OVERVIEW_PAGE_PATH=index.html
-
-PACKAGE_INSTALL_COMMAND='sudo apt-get install -y'
 
 PROFILE_PINNED_CPU=3
 
@@ -178,10 +159,6 @@ TIMING_PERF_STAT_EVENTS=(cycles:u instructions:u branches:u branch-misses:u
   L1-dcache-loads:u L1-dcache-load-misses:u)
 
 TIMING_PERF_STAT_RUNS=5
-
-declare -A TOOL_INSTALL_COMMANDS=(
-  [speedscope]='npm install -g speedscope'
-)
 
 TRACE_BUILD_DIR=build-instr
 

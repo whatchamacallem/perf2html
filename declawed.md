@@ -45,8 +45,8 @@ scripts too."""
   writes the frame query as `1` or `0` and the stored preference is cast to
   `1` or `0`, a query's text read through `Number`.
 - Linux perf counting is the other exception to fail fast validation, and
-  `perf` (the `linux-perf` package, named by the toolchain check through
-  `CONTAINING_PACKAGES`) is a required tool all the same. `perf_measure.py
+  `perf` (the `linux-perf` package, named by the toolchain check) is a
+  required tool all the same. `perf_measure.py
   timing` runs `perf stat -j -r TIMING_PERF_STAT_RUNS -o
   <test>.perf-stat.json -e '{TIMING_PERF_STAT_EVENTS}' --` over the pinned
   curl perf tool command. A count perf writes as one of
@@ -680,10 +680,14 @@ The single function/check owning each concern - never bypass or duplicate:
   reach the terminal verbatim; a non-zero exit is `error_exit`, the gold
   comparison's `SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE` aside. The one
   exception is `pyright_filtered_run` at level 1.
-- `tools_resolve` (or equivalent) must find every formatter/linter and the
-  screenshot browser before anything is deleted, naming every missing tool
-  with its install command - never discover a missing tool mid-run after
-  damage is done.
+- `tools_resolve` (or equivalent) must find every formatter/linter, the
+  screenshot browser, Pillow and the `toolchain_missing_list` toolchain
+  before anything is deleted, naming every missing tool in one line that
+  points to `packages.md` (`ADMIN_INSTRUCTIONS_FILE_NAME`) - never discover a
+  missing tool mid-run after damage is done.
+- `packages.md` holds every install command, a section for the perf2html*.sh
+  scripts and one for developers running `test_all.sh`; no script prints
+  an install command.
 - An install command names a package as this machine's release names it;
   package name compatibility with other releases is ignored, never reported.
 - `test_all.sh` captures nothing and makes no temp file - refusals stream live
@@ -745,11 +749,10 @@ The single function/check owning each concern - never bypass or duplicate:
   from the shipping scripts to compare against - not a bug to flag on sight.
 - One line helper functions in `.sh` are discouraged and require approval.
 - `error_exit` calls and other error messages must be only one line while
-  printing relevant variables too. `tools_resolve`'s missing tools error is
-  the single exception, a line per install command.
+  printing relevant variables too.
 - An error message states what failed and carries no advice: no fix, no next
-  step, no command to run. A missing tool named with its install command
-  (`tools_resolve` or equivalent) is the one exception.
+  step, no command to run. A missing tool's pointer to `packages.md`
+  (`tools_resolve`, `toolchain_check`) is the one exception.
 - `test_all.sh` should print significant run times, it is not "no news is good
   news".
 - Don't change code when unable to implement a request as specified. Do not

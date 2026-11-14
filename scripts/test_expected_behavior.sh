@@ -56,11 +56,8 @@ _BUILD_LOCATION_SCRATCH_NAME=test_expected_build_location_scratch
 _BUILD_LOCATION_TRACE_TREES=build-instr
 _ROWS_FILE_NAME=perf2html.txt
 # Chrome for Testing as the puppeteer browsers tool installs it.
-_SCREENSHOT_BROWSER_ROOT="$HOME/.local/share/chrome-for-testing"
-_SCREENSHOT_BROWSER_VERSION=157.0.8103.78
-_SCREENSHOT_BROWSER_DIR="$_SCREENSHOT_BROWSER_ROOT/chrome"
-_SCREENSHOT_BROWSER_DIR+="/linux-$_SCREENSHOT_BROWSER_VERSION/chrome-linux64"
-_SCREENSHOT_BROWSER_PATH="$_SCREENSHOT_BROWSER_DIR/chrome"
+_SCREENSHOT_BROWSER_PATH="$HOME/.local/share/chrome-for-testing/chrome"
+_SCREENSHOT_BROWSER_PATH+="/linux-157.0.8103.78/chrome-linux64/chrome"
 _SCREENSHOT_DIFF_DIR="$PERF2HTML_DIR_/screenshots-diff"
 _SCREENSHOT_GOLD_DIR="$PERF2HTML_DIR_/screenshots-gold"
 _SCREENSHOT_SCRIPT_NAME=test_screenshot.py
@@ -74,12 +71,8 @@ _DEFAULT_REPORTS=(
 )
 
 tools_resolve() {
-  local _missing=() _browser_install _browser_libraries
-  _browser_install="npx --yes @puppeteer/browsers install"
-  _browser_install+=" chrome@$_SCREENSHOT_BROWSER_VERSION"
-  _browser_install+=" --path $_SCREENSHOT_BROWSER_ROOT"
-  _browser_libraries="sudo apt-get satisfy -y"
-  _browser_libraries+=" \"\$(paste -sd, $_SCREENSHOT_BROWSER_DIR/deb.deps)\""
+  local _missing=() _line _pillow_check
+  local _admin="$PERF2HTML_DIR_/$ADMIN_INSTRUCTIONS_FILE_NAME"
   _SHFMT="$(tool_find shfmt)" || _missing+=(shfmt)
   _RUFF="$(tool_find ruff)" || _missing+=(ruff)
   _CLANG_FORMAT="$(tool_find clang-format)" || _missing+=(clang-format)
@@ -87,14 +80,13 @@ tools_resolve() {
   _PYRIGHT="$(tool_find pyright)" || _missing+=(pyright)
   _SCREENSHOT_BROWSER="$_SCREENSHOT_BROWSER_PATH"
   [ -x "$_SCREENSHOT_BROWSER" ] || _missing+=("$_SCREENSHOT_BROWSER")
+  _pillow_check='from importlib.util import find_spec'
+  _pillow_check+='; raise SystemExit(not find_spec("PIL"))'
+  python3 -c "$_pillow_check" || _missing+=(pillow)
+  toolchain_missing_list _missing
+  _line="error: ${#_missing[@]} tool(s) missing, so nothing is verified:"
   [ "${#_missing[@]}" = 0 ] || error_exit 127 \
-    "error: ${#_missing[@]} tool(s) missing, so nothing is verified:" \
-    "${_missing[*]}" \
-    "  sudo apt-get install -y shfmt clang-format" \
-    "  pip3 install --user --break-system-packages ruff" \
-    "  npm install -g prettier pyright" \
-    "  $_browser_install" \
-    "  $_browser_libraries"
+    "$_line ${_missing[*]}, install commands in $_admin"
   readme_converter_resolve
 }
 

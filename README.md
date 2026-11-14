@@ -1,5 +1,7 @@
 # perf2html README.md
 
+## Introduction
+
 `perf2html` is a collection of scripts that profile `perf` and generate html
 reports about the results.
 
@@ -80,6 +82,9 @@ These settings may be unique to a given page or shared.
   callee's own cost, or by name.
 
 ## Running The Generator Scripts
+
+See `packages.md` for the Ubuntu administrator commands needed to install the
+packages required to use the command line tools.
 
 These are the scripts for using `perf2html`. While the scripts directory does
 contain a few more interesting files, none of them should be needed to use the
