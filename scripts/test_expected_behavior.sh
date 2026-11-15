@@ -55,14 +55,9 @@ _BUILD_LOCATION_ROOT_NAME=build
 _BUILD_LOCATION_SCRATCH_NAME=test_expected_build_location_scratch
 _BUILD_LOCATION_TRACE_TREES=build-instr
 _ROWS_FILE_NAME=perf2html.txt
-# Chrome for Testing's headless shell, headless without a switch.
-_SCREENSHOT_BROWSER_NAME=chrome-headless-shell
-_SCREENSHOT_BROWSER_PATH=/opt/chrome-headless-shell-linux64
-_SCREENSHOT_BROWSER_PATH+="/$_SCREENSHOT_BROWSER_NAME"
-_SCREENSHOT_BROWSER_URL=https://storage.googleapis.com
-_SCREENSHOT_BROWSER_URL+=/chrome-for-testing-public/156.0.8078.47/linux64
-_SCREENSHOT_BROWSER_URL+=/chrome-headless-shell-linux64.zip
-_SCREENSHOT_BROWSER_ZIP=/tmp/chrome-headless-shell-linux64.zip
+# Chrome for Testing as the puppeteer browsers tool installs it.
+_SCREENSHOT_BROWSER_PATH="$HOME/.local/share/chrome-for-testing/chrome"
+_SCREENSHOT_BROWSER_PATH+="/linux-157.0.8103.78/chrome-linux64/chrome"
 _SCREENSHOT_DIFF_DIR="$PERF2HTML_DIR_/screenshots-diff"
 _SCREENSHOT_GOLD_DIR="$PERF2HTML_DIR_/screenshots-gold"
 _SCREENSHOT_SCRIPT_NAME=test_screenshot.py
@@ -76,24 +71,22 @@ _DEFAULT_REPORTS=(
 )
 
 tools_resolve() {
-  local _missing=()
+  local _missing=() _line _pillow_check
+  local _admin="$PERF2HTML_DIR_/$ADMIN_INSTRUCTIONS_FILE_NAME"
   _SHFMT="$(tool_find shfmt)" || _missing+=(shfmt)
   _RUFF="$(tool_find ruff)" || _missing+=(ruff)
   _CLANG_FORMAT="$(tool_find clang-format)" || _missing+=(clang-format)
   _PRETTIER="$(tool_find prettier)" || _missing+=(prettier)
   _PYRIGHT="$(tool_find pyright)" || _missing+=(pyright)
-  _SCREENSHOT_BROWSER="$(tool_find "$_SCREENSHOT_BROWSER_NAME")" \
-    || _missing+=("$_SCREENSHOT_BROWSER_NAME")
+  _SCREENSHOT_BROWSER="$_SCREENSHOT_BROWSER_PATH"
+  [ -x "$_SCREENSHOT_BROWSER" ] || _missing+=("$_SCREENSHOT_BROWSER")
+  _pillow_check='from importlib.util import find_spec'
+  _pillow_check+='; raise SystemExit(not find_spec("PIL"))'
+  python3 -c "$_pillow_check" || _missing+=(pillow)
+  toolchain_missing_list _missing
+  _line="error: ${#_missing[@]} tool(s) missing, so nothing is verified:"
   [ "${#_missing[@]}" = 0 ] || error_exit 127 \
-    "error: ${#_missing[@]} tool(s) missing, so nothing is verified:" \
-    "${_missing[*]}" \
-    "  sudo apt-get install -y shfmt clang-format" \
-    "  pip3 install --user --break-system-packages ruff" \
-    "  npm install -g prettier pyright" \
-    "  sudo apt-get install -y libasound2t64 unzip" \
-    "  curl -fsSLo $_SCREENSHOT_BROWSER_ZIP $_SCREENSHOT_BROWSER_URL" \
-    "  sudo unzip -q -o $_SCREENSHOT_BROWSER_ZIP -d /opt" \
-    "  sudo ln -sf $_SCREENSHOT_BROWSER_PATH /usr/local/bin"
+    "$_line ${_missing[*]}, install commands in $_admin"
   readme_converter_resolve
 }
 
@@ -269,17 +262,19 @@ pyright_filtered_run() {
 }
 
 long_lines_report() {
-  local _over _count
-  _over="$(awk -v max="$_COLUMNS_MAX" \
-    'length > max { print FILENAME ":" FNR ": " length " cols\n  " $0 }' \
-    "${_WHITELISTED_FILES[@]}")"
+  local _over _count _grep_exit=0
+  # Counts characters, as a UTF 8 locale makes grep read them.
+  _over="$(LC_ALL=C.UTF-8 grep -nE "^.{$((_COLUMNS_MAX + 1))}" \
+    "${_WHITELISTED_FILES[@]}")" || _grep_exit=$?
+  [ "$_grep_exit" -le 1 ] \
+    || error_exit "$_grep_exit" "error: exit $_grep_exit from the columns grep"
 
   if [ -z "$_over" ]; then
     log_verbose "columns: none over $_COLUMNS_MAX"
     return 0
   fi
 
-  _count="$(echo "$_over" | grep -c ' cols$')"
+  _count="$(echo "$_over" | grep -c '')"
   error_exit 1 "error: $_count line(s) over $_COLUMNS_MAX columns:" "$_over"
 }
 

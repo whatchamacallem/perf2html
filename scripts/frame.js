@@ -311,15 +311,12 @@ window.try_catch_handler_(function () {
     else if (message_tag === "load_log_history_set")
       load_log_history_set(message_data.line_count);
     else if (message_tag === "load_log_request") load_log_relay_post();
-    else if (message_tag === "menu_key_pressed") {
-      if (
-        !window.report_menu_.menu_key_handler(
-          message_data.key,
-          message_data.repeat,
-        )
-      )
-        view_post("tests_pulldown_closed");
-    } else if (message_tag === "page_scroll_claim") {
+    else if (message_tag === "menu_key_pressed")
+      window.report_menu_.menu_key_handler(
+        message_data.key,
+        message_data.repeat,
+      );
+    else if (message_tag === "page_scroll_claim") {
       window.report_ui_.page_scroll.claim_set(
         "frame",
         message_data.is_claimed,

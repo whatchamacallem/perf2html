@@ -25,9 +25,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const MENU_PULLDOWN_LINE_NUMBER_PATTERN = settings_(
     "MENU_PULLDOWN_LINE_NUMBER_PATTERN",
   );
-  const MENU_PULLDOWN_OPENING_KEY_PATTERN = settings_(
-    "MENU_PULLDOWN_OPENING_KEY_PATTERN",
-  );
   const MENU_PULLDOWN_SKIPPED_KEY_NAMES = settings_(
     "MENU_PULLDOWN_SKIPPED_KEY_NAMES",
   );
@@ -134,6 +131,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const TEXT_SCROLLBAR_WHEEL_NOTCH_LINES = settings_(
     "TEXT_SCROLLBAR_WHEEL_NOTCH_LINES",
   );
+  const TOOL_TIP_HIDE_DELAY_MS = settings_("TOOL_TIP_HIDE_DELAY_MS");
+  const TOOL_TIP_SHOW_DELAY_MS = settings_("TOOL_TIP_SHOW_DELAY_MS");
   const WIDGET_KEY_NAMES = settings_("WIDGET_KEY_NAMES");
 
   const ADDRESS_KEY_NAMES = [
@@ -173,7 +172,14 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const DESIGN_SCALE_LAST_STOP = STYLE_DESIGN_SCALE_STOP_COUNT - 1;
   const DESIGN_SCALE_LOWER_TRAVEL_SHARE =
     STYLE_DESIGN_SCALE_DEFAULT_STOP / DESIGN_SCALE_LAST_STOP;
-  const MENU_BUTTON_KIND_NAMES = ["action", "label", "link", "pulldown"];
+  const MENU_BUTTON_KIND_NAMES = [
+    "action",
+    "label",
+    "link",
+    "pulldown",
+    "search",
+    "treeitem",
+  ];
   const PULLDOWN_COMMAND_KEY_NAMES = Object.values(MENU_PULLDOWN_KEY_NAMES);
   const PULLDOWN_HIGHLIGHTED_ENTRY_CLASS = "highlighted-entry-";
   const RAMP_CHANNEL_STOPS = STYLE_HEAT_COLOR_STOPS.map((hex) =>
@@ -196,6 +202,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     "label",
     "link",
     "pulldown",
+    "search",
     "text",
   ];
   const STRIP_GAP_TEXT = window.ui_strings_.text("str_strip_gap");
@@ -269,20 +276,26 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const rendered_strips = new WeakMap();
   const resize_settle_callbacks = [];
   const row_walks = new WeakMap();
+  // Holds each drawn table's deferred chunks, by their chunk's index.
+  const table_deferred_chunks = new WeakMap();
   const table_heading_entries = new Map();
   const table_sort_callbacks = new Map();
   const view_storage = window.report_view_storage_;
+  // Holds a written table's deferred chunks, by its key, until it is drawn.
+  const written_deferred_chunks = new Map();
   let page_scroll_redraw = null;
   // Holds the top page's scroll a framed page was last shown, or null.
   let page_scroll_shown = null;
   let settle_animation_frame = 0;
   let window_resize_is_pending = false;
-  let tests_pulldown_is_open = false;
   let dark_mode_is_enabled = null;
   let design_scale = 1;
   let design_scale_stop = null;
   let column_edge_hovered_element = null;
   let column_press_is_active = false;
+  // Holds the tool tip's cell, the one the pointer last entered, or null.
+  let tool_tip_cell = null;
+  let tool_tip_timer = 0;
 
   function ramp_channels_at(fraction) {
     const scaled_position = fraction * (RAMP_CHANNEL_STOPS.length - 1);
@@ -875,6 +888,12 @@ window.report_ui_ = window.try_catch_handler_(function () {
       key_event.target.isContentEditable
     );
   }
+  // Returns a paste's first line, null for one a field or handler took.
+  function pasted_text(paste_event) {
+    if (paste_event.defaultPrevented || field_owns_key(paste_event))
+      return null;
+    return paste_event.clipboardData.getData("text/plain").split(/[\r\n]/)[0];
+  }
   function pulldown_key_is_command(key_name) {
     return PULLDOWN_COMMAND_KEY_NAMES.includes(key_name);
   }
@@ -894,23 +913,15 @@ window.report_ui_ = window.try_catch_handler_(function () {
       ? key_name
       : "";
   }
-  function view_key_opens_tests_pulldown(key_name) {
-    return new RegExp(MENU_PULLDOWN_OPENING_KEY_PATTERN).test(key_name);
-  }
+  // Sends a typed key up to the menu, which keeps the pulldown command keys.
   function view_key_forward(key_name, is_repeat) {
-    const is_command_key = pulldown_key_is_command(key_name);
-    if (!is_framed || (is_command_key && !tests_pulldown_is_open))
-      return false;
-    if (view_key_opens_tests_pulldown(key_name)) tests_pulldown_is_open = true;
+    if (!is_framed || pulldown_key_is_command(key_name)) return false;
     parent_post({
       report_ui: "menu_key_pressed",
       key: key_name,
       repeat: is_repeat,
     });
     return true;
-  }
-  function view_key_tests_pulldown_closed() {
-    tests_pulldown_is_open = false;
   }
   function widget_key(key_event) {
     const is_plain =
@@ -984,9 +995,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
         );
       else if (message_name === "recenter") {
         if (view_options.recenter) view_options.recenter();
-      } else if (message_name === "tests_pulldown_closed")
-        view_key_tests_pulldown_closed();
-      else if (
+      } else if (
         message_name !== "preferences_apply" &&
         message_name !== "view_reset"
       )
@@ -1068,8 +1077,15 @@ window.report_ui_ = window.try_catch_handler_(function () {
         );
       }
     } else if (kind_name === "action") {
-      own_attributes.role = "button";
-      if (!fields.is_widget) own_attributes.tabindex = 0;
+      own_attributes.role = fields.is_widget ? "slider" : "button";
+      own_attributes.tabindex = 0;
+    } else if (kind_name === "search") {
+      own_attributes.role = "searchbox";
+      own_attributes.tabindex = 0;
+    } else if (kind_name === "treeitem") {
+      // A tree's owner moves its one tab stop among its items.
+      own_attributes.role = "treeitem";
+      own_attributes.tabindex = -1;
     }
     const extra_attributes = fields.attributes || {};
     for (const attribute_name of Object.keys(extra_attributes)) {
@@ -1101,13 +1117,16 @@ window.report_ui_ = window.try_catch_handler_(function () {
     ).join("");
   }
 
-  function pulldown_pattern(search_text) {
+  // Returns whether a text matches a search, a case blind pattern, a bad none.
+  function search_matcher(search_text) {
+    let search_pattern = null;
     try {
-      return new RegExp(search_text, "i");
+      search_pattern = new RegExp(search_text, "i");
     } catch (pattern_error) {
       if (!(pattern_error instanceof SyntaxError)) throw pattern_error;
-      return null;
     }
+    return (matched_text) =>
+      search_pattern !== null && search_pattern.test(matched_text);
   }
   function pulldown_opening_key_is(key_name) {
     return (
@@ -1209,10 +1228,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
     function entries_filter() {
       const [filter_text, line_number] = search_parts(search_text);
       if (line_number !== entries_line_number) entries_offer(line_number);
-      const search_pattern = pulldown_pattern(filter_text);
-      matches = entries.filter(
-        (entry_element) =>
-          !!search_pattern && search_pattern.test(entry_element.textContent),
+      const text_matches = search_matcher(filter_text);
+      matches = entries.filter((entry_element) =>
+        text_matches(entry_element.textContent),
       );
       entry_list.replaceChildren(
         ...(matches.length ? matches : [no_match_note]),
@@ -1270,14 +1288,17 @@ window.report_ui_ = window.try_catch_handler_(function () {
     function pulldown_close() {
       if (!is_open) return;
       closed_show();
-      // Every close leaves the cell unfocused, an Escape or a press away too.
-      root_element.blur();
       pulldown_options.on_close();
     }
     function search_text_set(typed_text) {
       search_text = typed_text;
       entries_filter();
       root_focus();
+    }
+    // Searches with pasted text as with typed keys, a closed list opening.
+    function pulldown_paste(clipboard_text) {
+      if (!is_open) pulldown_open(clipboard_text);
+      else if (!is_small) search_text_set(search_text + clipboard_text);
     }
     function pulldown_key_handler(key_name) {
       if (!is_open) {
@@ -1421,6 +1442,15 @@ window.report_ui_ = window.try_catch_handler_(function () {
           key_event.preventDefault();
       }),
     );
+    root_element.addEventListener(
+      "paste",
+      window.try_catch_handler_((paste_event) => {
+        const clipboard_text = pasted_text(paste_event);
+        if (clipboard_text === null) return;
+        paste_event.preventDefault();
+        pulldown_paste(clipboard_text);
+      }),
+    );
     // A press on the cell opens its list, a press on an open cell closes it.
     root_element.addEventListener(
       "click",
@@ -1512,16 +1542,58 @@ window.report_ui_ = window.try_catch_handler_(function () {
       label: entry.label,
     });
   }
-  function strip_widget_cells_markup(widget_text) {
-    return Array.from(widget_text, (widget_character) =>
-      render_element("span", {}, render_html_escape(widget_character)),
+  function strip_widget_cells_markup(stop_index, last_stop_index) {
+    return Array.from(
+      strip_slider_text(stop_index, last_stop_index),
+      (widget_character) =>
+        render_element("span", {}, render_html_escape(widget_character)),
     ).join("");
+  }
+  // Writes a search cell's text after its label, a gap before any.
+  function strip_search_text(search_text) {
+    return search_text ? STRIP_GAP_TEXT + search_text : "";
+  }
+  // Returns the search a key leaves, null for a key changing nothing.
+  function strip_search_key_text(search_text, key_name) {
+    let next_text = null;
+    if (key_name === MENU_PULLDOWN_KEY_NAMES.erase)
+      next_text = [...search_text].slice(0, -1).join("");
+    else if (key_name === MENU_PULLDOWN_KEY_NAMES.close) next_text = "";
+    else if (key_name.length === 1) next_text = search_text + key_name;
+    return next_text === search_text ? null : next_text;
+  }
+  // Returns the stop a slider key reaches, null for a key moving none.
+  function strip_slider_key_stop(stop_index, last_stop_index, key_name) {
+    let next_stop = null;
+    if ([WIDGET_KEY_NAMES.left, WIDGET_KEY_NAMES.down].includes(key_name))
+      next_stop = stop_index - 1;
+    else if ([WIDGET_KEY_NAMES.right, WIDGET_KEY_NAMES.up].includes(key_name))
+      next_stop = stop_index + 1;
+    else if (key_name === WIDGET_KEY_NAMES.first) next_stop = 0;
+    else if (key_name === WIDGET_KEY_NAMES.last) next_stop = last_stop_index;
+    if (next_stop === null) return null;
+    return Math.min(Math.max(next_stop, 0), last_stop_index);
+  }
+  // Returns the name of the entry cell the root holds focused, else null.
+  function strip_kept_focus_name(root_element) {
+    const focused_element = document.activeElement;
+    if (
+      !root_element.contains(focused_element) ||
+      !focused_element.hasAttribute("data-entry-name-")
+    )
+      return null;
+    return focused_element.getAttribute("data-entry-name-");
   }
   // Writes an entry cell, a title as page emphasis, else a menu button.
   function strip_cell_render(entry, label_markup) {
     if (!STRIP_ENTRY_KIND_NAMES.includes(entry.kind))
       window.throw_exception_("str_error_internal");
-    const name_attributes = { "data-entry-name-": entry.name };
+    const name_attributes = {
+      "data-entry-name-": entry.name,
+      ...(entry.tool_tip_text
+        ? { "aria-description": entry.tool_tip_text }
+        : {}),
+    };
     if (entry.kind === "text")
       return render_page_emphasis(label_markup, {
         tag_name: "span",
@@ -1533,17 +1605,36 @@ window.report_ui_ = window.try_catch_handler_(function () {
         render_element(
           "span",
           { class: "menu-button-widget-" },
-          strip_widget_cells_markup(entry.widget_text),
+          strip_widget_cells_markup(entry.slider_stop, entry.slider_last_stop),
         )
       : "";
-    return render_menu_button(entry.kind, shown_markup + widget_markup, {
-      tag_name: "span",
-      href: entry.href,
-      opens_new_tab: entry.opens_new_tab,
-      withholds_tab_stop: entry.withholds_tab_stop,
-      is_widget: entry.is_widget,
-      attributes: name_attributes,
-    });
+    const search_markup =
+      entry.kind === "search"
+        ? render_element(
+            "span",
+            { class: "menu-search-text-" },
+            render_html_escape(strip_search_text(entry.search_text)),
+          )
+        : "";
+    const slider_attributes = entry.is_widget
+      ? {
+          "aria-valuemin": 0,
+          "aria-valuemax": entry.slider_last_stop,
+          "aria-valuenow": entry.slider_stop,
+        }
+      : {};
+    return render_menu_button(
+      entry.kind,
+      shown_markup + widget_markup + search_markup,
+      {
+        tag_name: "span",
+        href: entry.href,
+        opens_new_tab: entry.opens_new_tab,
+        withholds_tab_stop: entry.withholds_tab_stop,
+        is_widget: entry.is_widget,
+        attributes: { ...name_attributes, ...slider_attributes },
+      },
+    );
   }
   // Writes the status line as text, indented, each label separated.
   function strip_status_line_render(status_entries) {
@@ -1565,7 +1656,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
     const entries_by_name = new Map();
     const previous_strip = rendered_strips.get(strip_element);
     const pulldowns_by_name = new Map();
+    const search_texts = new Map();
+    const slider_stops = new Map();
     const cell_markups = [];
+    const kept_focus_name = strip_kept_focus_name(strip_element);
     let strip_line = null;
 
     function strip_cell_named(entry_name) {
@@ -1610,19 +1704,72 @@ window.report_ui_ = window.try_catch_handler_(function () {
           .on_stop_choose,
       );
     }
+    // Searches with a key as typed in a search cell, telling its entry.
+    function entry_search_key(key_event, entry) {
+      const next_text = strip_search_key_text(
+        search_texts.get(entry.name),
+        pulldown_key(key_event),
+      );
+      if (next_text === null) return;
+      key_event.preventDefault();
+      strip_search_text_set(entry, next_text);
+    }
+    // Moves a slider a stop by its key, its entry choosing the stop.
+    function entry_slider_key(key_event, entry) {
+      const next_stop = strip_slider_key_stop(
+        slider_stops.get(entry.name),
+        entry.slider_last_stop,
+        widget_key(key_event),
+      );
+      if (next_stop === null) return;
+      key_event.preventDefault();
+      if (next_stop !== slider_stops.get(entry.name))
+        entry.on_stop_choose(next_stop);
+    }
     function entry_key_handler(key_event) {
       const entry_cell = key_event.target;
-      if (
-        entry_cell.parentElement !== strip_line ||
-        !widget_key_activates(widget_key(key_event))
-      )
-        return;
+      if (entry_cell.parentElement !== strip_line) return;
       const entry = entries_by_name.get(
         entry_cell.getAttribute("data-entry-name-"),
       );
-      if (entry.kind === "pulldown") return;
+      if (entry.kind === "search") {
+        entry_search_key(key_event, entry);
+        return;
+      }
+      if (entry.is_widget) {
+        entry_slider_key(key_event, entry);
+        return;
+      }
+      if (
+        !widget_key_activates(widget_key(key_event)) ||
+        entry.kind === "pulldown"
+      )
+        return;
       key_event.preventDefault();
       if (!key_event.repeat) entry_activate(entry);
+    }
+    // Searches with pasted text in a search cell, as with typed keys.
+    function entry_paste_handler(paste_event) {
+      const entry_cell = paste_event.target;
+      if (entry_cell.parentElement !== strip_line) return;
+      const entry = entries_by_name.get(
+        entry_cell.getAttribute("data-entry-name-"),
+      );
+      const clipboard_text = pasted_text(paste_event);
+      if (entry.kind !== "search" || clipboard_text === null) return;
+      paste_event.preventDefault();
+      strip_search_text_set(
+        entry,
+        search_texts.get(entry.name) + clipboard_text,
+      );
+    }
+    // Shows a search cell's text, then tells its entry the search.
+    function strip_search_text_set(entry, search_text) {
+      search_texts.set(entry.name, search_text);
+      strip_cell_named(entry.name).querySelector(
+        ":scope > .menu-search-text-",
+      ).textContent = strip_search_text(search_text);
+      entry.on_search(search_text);
     }
     function strip_flash(entry_name) {
       const entry_cell = strip_cell_named(entry_name);
@@ -1639,6 +1786,11 @@ window.report_ui_ = window.try_catch_handler_(function () {
       if (!digit_entries.has(key_name)) return false;
       if (!is_repeat) entry_activate(digit_entries.get(key_name));
       return true;
+    }
+    // Focuses a cell by its name, if the strip shows it.
+    function strip_entry_focus(entry_name) {
+      if (cells_by_name.has(entry_name))
+        cells_by_name.get(entry_name).focus({ preventScroll: true });
     }
     // Focuses the entry a digit reaches, opening a pulldown as its key does.
     function strip_numbered_entry_focus(number_text) {
@@ -1658,9 +1810,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
       if (!pulldowns_by_name.has(entry_name))
         window.throw_exception_("str_error_internal");
       return pulldowns_by_name.get(entry_name);
-    }
-    function strip_pulldown_open(entry_name, search_text) {
-      strip_pulldown_named(entry_name).open(search_text);
     }
     // Returns the open pulldown's name and how its list shows, null for none.
     function strip_open_pulldown_state() {
@@ -1684,22 +1833,31 @@ window.report_ui_ = window.try_catch_handler_(function () {
       );
       pulldown.label_set(strip_label_text(labelled_entries, entry_name));
     }
-    function strip_widget_text_set(entry_name, widget_text) {
-      const widget_box = strip_cell_named(entry_name).querySelector(
-        ".menu-button-widget-",
-      );
+    // Shows a slider at a stop without a render, so focus stays where it is.
+    function strip_slider_stop_set(entry_name, stop_index) {
+      const entry_cell = strip_cell_named(entry_name);
+      const widget_box = entry_cell.querySelector(".menu-button-widget-");
       if (!widget_box) window.throw_exception_("str_error_internal");
-      widget_box.innerHTML = strip_widget_cells_markup(widget_text);
+      slider_stops.set(entry_name, stop_index);
+      entry_cell.setAttribute("aria-valuenow", stop_index);
+      widget_box.innerHTML = strip_widget_cells_markup(
+        stop_index,
+        entries_by_name.get(entry_name).slider_last_stop,
+      );
     }
 
     if (previous_strip) previous_strip.reset();
     for (const entry of entries) {
       if (
         entries_by_name.has(entry.name) ||
-        entry.is_widget !== (entry.on_stop_choose !== null)
+        entry.is_widget !== (entry.on_stop_choose !== null) ||
+        (entry.kind === "search") !== (entry.on_search !== null)
       )
         window.throw_exception_("str_error_internal");
       entries_by_name.set(entry.name, entry);
+      if (entry.is_widget) slider_stops.set(entry.name, entry.slider_stop);
+      if (entry.kind === "search")
+        search_texts.set(entry.name, entry.search_text);
       if (!entry.is_available) continue;
       const label_markup =
         entry.label_markup === null
@@ -1739,6 +1897,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
       "keydown",
       window.try_catch_handler_(entry_key_handler),
     );
+    strip_line.addEventListener(
+      "paste",
+      window.try_catch_handler_(entry_paste_handler),
+    );
     for (const entry of entries) {
       if (entry.kind !== "pulldown" || !entry.is_available) continue;
       const pulldown = pulldown_attach(
@@ -1751,15 +1913,17 @@ window.report_ui_ = window.try_catch_handler_(function () {
     rendered_strips.set(strip_element, {
       reset: () => pulldowns_by_name.forEach((pulldown) => pulldown.close()),
     });
+    // An entry cell focused before the render keeps the focus after it.
+    if (kept_focus_name !== null) strip_entry_focus(kept_focus_name);
     return {
+      entry_focus: strip_entry_focus,
       flash: strip_flash,
       key_handler: strip_key_handler,
       numbered_entry_focus: strip_numbered_entry_focus,
       open_pulldown_state: strip_open_pulldown_state,
       pulldown_label_set: strip_pulldown_label_set,
-      pulldown_open: strip_pulldown_open,
       pulldown_reopen: strip_pulldown_reopen,
-      widget_text_set: strip_widget_text_set,
+      slider_stop_set: strip_slider_stop_set,
     };
   }
 
@@ -1868,11 +2032,14 @@ window.report_ui_ = window.try_catch_handler_(function () {
           : label_markup,
       );
     }
-    if (shown_markups.length < list_entries.length)
+    if (shown_markups.length < list_entries.length) {
       shown_markups.push(render_html_escape(CLIP_ELLIPSIS_TEXT));
+      shown_text += DATABASE_CELL_SEPARATOR_TEXT + CLIP_ELLIPSIS_TEXT;
+    }
     return {
       text: entry_labels.join(DATABASE_CELL_SEPARATOR_TEXT),
       html: shown_markups.join(separator_markup),
+      shown_text,
     };
   }
   // Writes a source location as its file and line, a line 0 its file alone.
@@ -1911,35 +2078,67 @@ window.report_ui_ = window.try_catch_handler_(function () {
       return first_node.length;
     return text_element.textContent.length;
   }
+  // Returns a drawn table's deferred chunks, by their chunk's index.
+  function deferred_chunks_of(table_element) {
+    const table_key = table_element.getAttribute("data-key-");
+    // The table drawn after its writing takes the chunks its writing kept.
+    if (written_deferred_chunks.has(table_key)) {
+      table_deferred_chunks.set(
+        table_element,
+        written_deferred_chunks.get(table_key),
+      );
+      written_deferred_chunks.delete(table_key);
+    }
+    return table_deferred_chunks.get(table_element) || [];
+  }
   // Fills each sizer row with each column's widest shown cell, sizes chunks.
   function table_chunks_fit(table_element) {
     if (!table_element.classList.contains("table-chunked-")) return;
     const title_count = table_element.tHead.rows[0].cells.length;
+    const deferred_chunks = deferred_chunks_of(table_element);
+    // A widest cell is a drawn cell or a deferred chunk's markup of one.
     const widest_cells = [],
       widest_lengths = new Array(title_count).fill(-1);
     const row_class_texts = new Set();
-    for (const body_row of table_body_rows(table_element)) {
-      const row_cells = body_row.cells;
-      // A row of another cell count or holding a box's table sizes no column.
-      if (
-        row_cells.length !== title_count ||
-        body_row.getElementsByTagName("table").length
-      )
-        continue;
-      row_class_texts.add(body_row.className);
-      for (let cell_index = 0; cell_index < title_count; cell_index++) {
-        const shown_length = shown_text_length(row_cells[cell_index]);
-        if (shown_length <= widest_lengths[cell_index]) continue;
-        widest_lengths[cell_index] = shown_length;
-        widest_cells[cell_index] = row_cells[cell_index];
+    const widest_cell_take = (cell_index, shown_length, widest_cell) => {
+      if (shown_length <= widest_lengths[cell_index]) return;
+      widest_lengths[cell_index] = shown_length;
+      widest_cells[cell_index] = widest_cell;
+    };
+    [...table_element.tBodies].forEach((table_body, chunk_index) => {
+      for (const body_row of table_body.rows) {
+        const row_cells = body_row.cells;
+        // A sizer, a row of another cell count or a box's row sizes no column.
+        if (
+          body_row.classList.contains("table-sizer-row-") ||
+          row_cells.length !== title_count ||
+          body_row.getElementsByTagName("table").length
+        )
+          continue;
+        row_class_texts.add(body_row.className);
+        for (let cell_index = 0; cell_index < title_count; cell_index++)
+          widest_cell_take(
+            cell_index,
+            shown_text_length(row_cells[cell_index]),
+            row_cells[cell_index],
+          );
       }
-    }
+      const deferred_chunk = deferred_chunks[chunk_index];
+      if (!deferred_chunk) return;
+      for (const row_class_text of deferred_chunk.row_class_texts)
+        row_class_texts.add(row_class_text);
+      deferred_chunk.widest_cells.forEach((widest_cell, cell_index) =>
+        widest_cell_take(cell_index, widest_cell.length, widest_cell.markup),
+      );
+    });
     const row_class_names = new Set(["table-sizer-row-"]);
     for (const row_class_text of row_class_texts)
       for (const class_name of row_class_text.split(" "))
         if (class_name) row_class_names.add(class_name);
     const sizer_cells_markup = widest_cells
-      .map((widest_cell) => widest_cell.outerHTML)
+      .map((widest_cell) =>
+        typeof widest_cell === "string" ? widest_cell : widest_cell.outerHTML,
+      )
       .join("");
     for (const sizer_row of table_element.querySelectorAll(
       ":scope > :is(thead, tbody)" +
@@ -1948,16 +2147,56 @@ window.report_ui_ = window.try_catch_handler_(function () {
       sizer_row.className = [...row_class_names].join(" ");
       sizer_row.innerHTML = sizer_cells_markup;
     }
-    for (const table_body of table_element.tBodies) {
-      const row_count = [...table_body.rows].filter(
-        (body_row) => !body_row.classList.contains("table-sizer-row-"),
-      ).length;
+    // A deferred chunk counts the rows it waits for.
+    [...table_element.tBodies].forEach((table_body, chunk_index) => {
+      const row_count =
+        [...table_body.rows].filter(
+          (body_row) => !body_row.classList.contains("table-sizer-row-"),
+        ).length +
+        (deferred_chunks[chunk_index]
+          ? deferred_chunks[chunk_index].row_count
+          : 0);
       table_body.style.setProperty(
         STYLE_TABLE_CHUNK_ROWS_PROPERTY,
         String(row_count),
       );
       table_body.hidden = !row_count;
-    }
+    });
+  }
+  // Draws the deferred chunks a test picks, then fits and walks the table.
+  function deferred_chunks_draw(table_element, chunk_is_drawn) {
+    const deferred_chunks = deferred_chunks_of(table_element);
+    let drawn_count = 0;
+    [...table_element.tBodies].forEach((table_body, chunk_index) => {
+      const deferred_chunk = deferred_chunks[chunk_index];
+      if (!deferred_chunk || !chunk_is_drawn(table_body)) return;
+      table_body.insertAdjacentHTML("beforeend", deferred_chunk.rows_markup());
+      table_body.classList.remove("table-chunk-deferred-");
+      deferred_chunks[chunk_index] = null;
+      drawn_count++;
+    });
+    if (!drawn_count) return;
+    table_chunks_fit(table_element);
+    table_rows_refresh(table_element);
+  }
+  // Draws the deferred chunks of a table that its scroller shows.
+  function table_chunks_shown_draw(table_element, scroller_element) {
+    const scroller_rect = scroller_element.getBoundingClientRect();
+    deferred_chunks_draw(table_element, (table_body) => {
+      const chunk_rect = table_body.getBoundingClientRect();
+      return (
+        chunk_rect.bottom > scroller_rect.top &&
+        chunk_rect.top < scroller_rect.bottom
+      );
+    });
+  }
+  // Draws every deferred chunk of a table.
+  function table_chunks_rest_draw(table_element) {
+    deferred_chunks_draw(table_element, () => true);
+  }
+  // Returns whether a table holds a chunk not drawn yet.
+  function table_chunks_are_deferred(table_element) {
+    return deferred_chunks_of(table_element).some(Boolean);
   }
   // Gives a column's title, and each copy of it in a chunk, a min width.
   function title_min_width_set(title_cell, min_width_text) {
@@ -1970,15 +2209,24 @@ window.report_ui_ = window.try_catch_handler_(function () {
       .filter(Boolean)
       .join(" ");
   }
+  // Returns a text cell's text clipped at the characters shown.
+  const cell_clipped_text = (cell, clip_chars) =>
+    clip_chars != null ? text_clip(cell.text, clip_chars) : cell.text;
+  // Returns the length of the text a cell shows, a markup cell's as it says.
+  function cell_shown_length(cell, clip_chars) {
+    if (cell.html == null) return cell_clipped_text(cell, clip_chars).length;
+    if (cell.shown_text == null) window.throw_exception_("str_error_internal");
+    return cell.shown_text.length;
+  }
   // Writes a cell, its text clipped at the characters shown, a link plain.
   function table_cell_render(cell, cell_class_text, clip_chars) {
     const cell_attributes = {};
     if (cell_class_text) cell_attributes.class = cell_class_text;
     if (cell.style) cell_attributes.style = cell.style;
-    const shown_text =
-      clip_chars != null ? text_clip(cell.text, clip_chars) : cell.text;
     let inner_markup =
-      cell.html != null ? cell.html : render_html_escape(shown_text);
+      cell.html != null
+        ? cell.html
+        : render_html_escape(cell_clipped_text(cell, clip_chars));
     if (cell.href) {
       if (cell.html != null) window.throw_exception_("str_error_internal");
       inner_markup = render_element("a", { href: cell.href }, inner_markup);
@@ -2137,7 +2385,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
                 ? { "data-column-sized-by-bar-": "" }
                 : {}),
               ...(column.measure && column.measure !== column.label
-                ? { "data-tool-tip-text-": column.measure }
+                ? { "aria-description": column.measure }
                 : {}),
             },
             render_html_escape(column.label),
@@ -2146,34 +2394,33 @@ window.report_ui_ = window.try_catch_handler_(function () {
         .join("");
     const title_cells_markup = title_cells_render(columns, sorted_drawn_index);
     const cell_class_texts = drawn_columns.map(column_cell_class_text);
-    const row_markups = cell_rows.map((row, row_index) => {
-      if (row.title_columns)
-        return render_element(
-          "tr",
-          { class: "table-title-row-" },
-          title_cells_render(row.title_columns, -1),
-        );
+    const row_attributes_of = (row_index) => {
       const row_href =
         table_options.row_href && table_options.row_href[row_index];
-      const row_attributes = row_href
+      return row_href
         ? { class: "row-link-", "data-href-": row_href }
         : table_options.row_attributes
           ? table_options.row_attributes[row_index]
           : {};
-      return render_element(
-        "tr",
-        row_attributes,
-        row
-          .map((cell, drawn_index) =>
-            table_cell_render(
-              cell,
-              cell_class_texts[drawn_index],
-              clip_chars_list[drawn_index],
-            ),
-          )
-          .join(""),
+    };
+    const cell_markup = (cell, drawn_index) =>
+      table_cell_render(
+        cell,
+        cell_class_texts[drawn_index],
+        clip_chars_list[drawn_index],
       );
-    });
+    const row_markup = (row, row_index) =>
+      row.title_columns
+        ? render_element(
+            "tr",
+            { class: "table-title-row-" },
+            title_cells_render(row.title_columns, -1),
+          )
+        : render_element(
+            "tr",
+            row_attributes_of(row_index),
+            row.map(cell_markup).join(""),
+          );
     const table_class_names = ["table-", table_options.cls || ""];
     if (!table_options.is_chunked)
       return render_element(
@@ -2186,8 +2433,42 @@ window.report_ui_ = window.try_catch_handler_(function () {
           "thead",
           {},
           render_element("tr", {}, title_cells_markup),
-        ) + render_element("tbody", {}, row_markups.join("")),
+        ) + render_element("tbody", {}, cell_rows.map(row_markup).join("")),
       );
+    // A chunk away from the drawn row keeps its rows and its widest cells.
+    const deferred_chunk_make = (chunk_start, chunk_rows) => {
+      const row_class_texts = new Set();
+      const widest_cells = drawn_columns.map(() => ({ length: -1 }));
+      chunk_rows.forEach((row, chunk_row_index) => {
+        if (row.title_columns) window.throw_exception_("str_error_internal");
+        const row_class = row_attributes_of(
+          chunk_start + chunk_row_index,
+        ).class;
+        row_class_texts.add(row_class || "");
+        row.forEach((cell, drawn_index) => {
+          const shown_length = cell_shown_length(
+            cell,
+            clip_chars_list[drawn_index],
+          );
+          if (shown_length <= widest_cells[drawn_index].length) return;
+          widest_cells[drawn_index] = { length: shown_length, cell };
+        });
+      });
+      return {
+        row_class_texts,
+        row_count: chunk_rows.length,
+        rows_markup: () =>
+          chunk_rows
+            .map((row, chunk_row_index) =>
+              row_markup(row, chunk_start + chunk_row_index),
+            )
+            .join(""),
+        widest_cells: widest_cells.map((widest_cell, drawn_index) => ({
+          length: widest_cell.length,
+          markup: cell_markup(widest_cell.cell, drawn_index),
+        })),
+      };
+    };
     const sizer_markup = render_element(
       "tr",
       { class: "table-sizer-row-", "aria-hidden": "true" },
@@ -2199,23 +2480,45 @@ window.report_ui_ = window.try_catch_handler_(function () {
       title_cells_markup,
     );
     let chunks_markup = "";
+    const deferred_chunks = [];
     for (
       let chunk_start = 0;
-      chunk_start < Math.max(row_markups.length, 1);
+      chunk_start < Math.max(cell_rows.length, 1);
       chunk_start += TABLE_CHUNK_ROW_COUNT
     ) {
-      const chunk_rows = row_markups.slice(
+      const chunk_rows = cell_rows.slice(
         chunk_start,
         chunk_start + TABLE_CHUNK_ROW_COUNT,
+      );
+      // A table given a drawn row draws that row's chunk alone at first.
+      const is_deferred =
+        table_options.drawn_row_index != null &&
+        (table_options.drawn_row_index < chunk_start ||
+          table_options.drawn_row_index >=
+            chunk_start + TABLE_CHUNK_ROW_COUNT);
+      deferred_chunks.push(
+        is_deferred ? deferred_chunk_make(chunk_start, chunk_rows) : null,
       );
       chunks_markup += render_element(
         "tbody",
         {
+          ...(is_deferred ? { class: "table-chunk-deferred-" } : {}),
           style: `${STYLE_TABLE_CHUNK_ROWS_PROPERTY}: ${chunk_rows.length}`,
         },
-        title_copy_markup + sizer_markup + chunk_rows.join(""),
+        title_copy_markup +
+          sizer_markup +
+          (is_deferred
+            ? ""
+            : chunk_rows
+                .map((row, chunk_row_index) =>
+                  row_markup(row, chunk_start + chunk_row_index),
+                )
+                .join("")),
       );
     }
+    if (deferred_chunks.some(Boolean))
+      written_deferred_chunks.set(table_key, deferred_chunks);
+    else written_deferred_chunks.delete(table_key);
     table_class_names.push("table-chunked-");
     return render_element(
       "table",
@@ -2859,6 +3162,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
   // Replaces the markup under a root, each heading's open pulldown reopened.
   function layout_replace(root_element, markup) {
     const open_pulldown_states = new Map();
+    const kept_focus_names = new Map();
     for (const heading_element of root_element.querySelectorAll(
       ".page-heading-",
     )) {
@@ -2870,6 +3174,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
           attached_heading.table_key,
           open_pulldown_state,
         );
+      const kept_focus_name = strip_kept_focus_name(heading_element);
+      if (kept_focus_name !== null)
+        kept_focus_names.set(attached_heading.table_key, kept_focus_name);
     }
     root_element.innerHTML = markup;
     layout_activate(root_element);
@@ -2882,6 +3189,11 @@ window.report_ui_ = window.try_catch_handler_(function () {
       if (open_pulldown_states.has(attached_heading.table_key))
         attached_heading.pulldown_reopen(
           open_pulldown_states.get(attached_heading.table_key),
+        );
+      // A slider or search keeps the focus, so typing goes on in it.
+      if (kept_focus_names.has(attached_heading.table_key))
+        attached_heading.entry_focus(
+          kept_focus_names.get(attached_heading.table_key),
         );
     }
   }
@@ -2966,13 +3278,15 @@ window.report_ui_ = window.try_catch_handler_(function () {
   }
   function table_row_key_handler(key_event, table_element, row_selector) {
     const key_name = widget_key(key_event);
+    // A key a cell took may have removed its row, so no row is read for it.
+    if (!key_name) return;
     const focused_element = key_event.target;
     const row_element = walked_row(
       focused_element,
       table_element,
       row_selector,
     );
-    if (!key_name || !row_element) return;
+    if (!row_element) return;
     const focused_row_links = row_links(row_element);
     const link_index = focused_row_links.indexOf(focused_element);
     if (link_index >= 0 && widget_key_activates(key_name)) {
@@ -3250,12 +3564,16 @@ window.report_ui_ = window.try_catch_handler_(function () {
       is_numbered: false,
       is_available: true,
       is_widget: false,
-      widget_text: "",
+      slider_stop: 0,
+      slider_last_stop: 0,
+      search_text: "",
+      tool_tip_text: "",
       href: "",
       opens_new_tab: false,
       withholds_tab_stop: false,
       on_activate: null,
       on_stop_choose: null,
+      on_search: null,
       pulldown_options: null,
       ...entry_fields,
     };
@@ -3629,6 +3947,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     }
 
     attached_headings.set(heading_element, {
+      entry_focus: (entry_name) => strip_handle.entry_focus(entry_name),
       open_pulldown_state: () => strip_handle.open_pulldown_state(),
       pulldown_reopen: (open_pulldown_state) =>
         strip_handle.pulldown_reopen(open_pulldown_state),
@@ -4223,14 +4542,37 @@ window.report_ui_ = window.try_catch_handler_(function () {
     resize_settle_callbacks.push(settle_callback);
   }
 
-  // Shows the tool tip of the column title under the pointer, none elsewhere.
-  function title_tool_tip_show(pointer_event) {
-    const title_cell = pointer_event.target.closest("th[data-tool-tip-text-]");
-    title_tool_tip.hidden = !title_cell;
-    if (title_cell)
-      title_tool_tip.textContent = title_cell.getAttribute(
-        "data-tool-tip-text-",
+  // Hides the tool tip as the pointer enters another cell, timing the new one.
+  function tool_tip_pointer_cross(pointer_event) {
+    // A pointer leaving the document enters no element of it.
+    const entered_element =
+      pointer_event.type === "pointerover"
+        ? pointer_event.target
+        : pointer_event.relatedTarget;
+    const entered_cell = entered_element
+      ? entered_element.closest("[aria-description]")
+      : null;
+    if (entered_cell === tool_tip_cell) return;
+    tool_tip_cell = entered_cell;
+    tool_tip_element.hidden = true;
+    clearTimeout(tool_tip_timer);
+    if (tool_tip_cell)
+      tool_tip_timer = setTimeout(
+        window.try_catch_handler_(tool_tip_show),
+        TOOL_TIP_SHOW_DELAY_MS,
       );
+  }
+  // Shows the tool tip of the cell the pointer rests on, timing its hiding.
+  function tool_tip_show() {
+    tool_tip_element.textContent =
+      tool_tip_cell.getAttribute("aria-description");
+    tool_tip_element.hidden = false;
+    tool_tip_timer = setTimeout(
+      window.try_catch_handler_(() => {
+        tool_tip_element.hidden = true;
+      }),
+      TOOL_TIP_HIDE_DELAY_MS,
+    );
   }
 
   window.render_character_cells_ = render_character_cells;
@@ -4239,18 +4581,15 @@ window.report_ui_ = window.try_catch_handler_(function () {
   window.render_html_escape_ = render_html_escape;
   window.render_menu_button_ = render_menu_button;
   window.render_page_emphasis_ = render_page_emphasis;
-  const title_tool_tip = render_element_of(
-    render_element(
-      "div",
-      { class: "menu-button- table-title-tool-tip-", hidden: "" },
-      "",
-    ),
+  const tool_tip_element = render_element_of(
+    render_element("div", { class: "menu-button- tool-tip-", hidden: "" }, ""),
   );
-  document.body.append(title_tool_tip);
-  document.addEventListener(
-    "pointerover",
-    window.try_catch_handler_(title_tool_tip_show),
-  );
+  document.body.append(tool_tip_element);
+  for (const crossing_type of ["pointerover", "pointerout"])
+    document.addEventListener(
+      crossing_type,
+      window.try_catch_handler_(tool_tip_pointer_cross),
+    );
   font_fit_apply();
   dark_mode_show(window.report_dark_mode_.opening_enabled());
   if (is_scaled) design_scale_stop = design_scale_stored_stop();
@@ -4320,6 +4659,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     render_record_table,
     render_table,
     resize_settle_register,
+    search_matcher,
     settings_apply_send,
     settings_debug_toggle_send,
     share_of_test,
@@ -4331,10 +4671,14 @@ window.report_ui_ = window.try_catch_handler_(function () {
       copy_entry_make: strip_copy_entry_make,
       entry_make: strip_entry_make,
       render: strip_render,
-      slider_text: strip_slider_text,
     },
     tab_stop_move,
     table_markdown,
+    table_chunks: {
+      are_deferred: table_chunks_are_deferred,
+      rest_draw: table_chunks_rest_draw,
+      shown_draw: table_chunks_shown_draw,
+    },
     table_rows: {
       attach: table_rows_attach,
       tab_stop_set: table_row_tab_stop_set,
@@ -4350,7 +4694,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
     view_frame,
     view_key: {
       of: pulldown_key,
-      opens_tests_pulldown: view_key_opens_tests_pulldown,
     },
     view_storage,
     widget_key: {

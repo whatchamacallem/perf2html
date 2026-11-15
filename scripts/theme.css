@@ -363,6 +363,10 @@ table.table-chunked- > tbody {
   /* A line's glyphs and frame lines cross its edge, as in a plain table. */
   overflow-clip-margin: 1lh;
 }
+/* A chunk waiting for its rows is skipped, its rows' lines its height. */
+table.table-chunked- > tbody.table-chunk-deferred- {
+  content-visibility: hidden;
+}
 /* A hovered row's frame draws over the chunks it crosses. */
 table.table-chunked-::before {
   z-index: var(--page-table-hover-row-z-index-);
@@ -382,18 +386,26 @@ tr.row-link- {
 .table- :is(th, td).column-edge-grab- * {
   cursor: col-resize;
 }
-/* A title's tool tip hangs under it, flipped to stay in the window. */
-.table- th[data-tool-tip-text-]:hover {
-  anchor-name: --table-title-tool-tip-anchor-;
+/* A tool tip hangs under its cell, wrapped, flipped to stay in the window. */
+[aria-description]:hover {
+  anchor-name: --tool-tip-anchor-;
 }
-.menu-button-.table-title-tool-tip- {
+.menu-button-.tool-tip- {
   position: fixed;
-  position-anchor: --table-title-tool-tip-anchor-;
+  position-anchor: --tool-tip-anchor-;
   position-try-fallbacks: flip-inline;
   top: anchor(bottom);
   right: anchor(right);
-  z-index: var(--page-table-title-tool-tip-z-index-);
+  z-index: var(--page-tool-tip-z-index-);
+  width: max-content;
+  max-width: var(--page-tool-tip-max-width-);
+  height: auto;
+  white-space: normal;
   pointer-events: none;
+}
+/* An open pulldown hides the tool tip, its list shown in its place. */
+body:has(.menu-button-.open-) > .tool-tip- {
+  display: none;
 }
 /* A hovered link, source, box or call graph row anchors its frame. */
 .table- > tbody > :is(tr.row-link-, tr[data-line-number-]):hover,

@@ -23,6 +23,8 @@ window.try_catch_handler_(function () {
       long_frames_handler(entry_list.getEntries()),
     ),
   );
+  // Holds the input a deferred render runs for, null outside one.
+  let deferred_cause_event = null;
   let load_log_kept_line_count = null;
   let page_render_is_logged = false;
   let parsed_script_count = 0;
@@ -153,10 +155,22 @@ window.try_catch_handler_(function () {
   // Logs a render after the page's load, the input log timing clicks and keys.
   function event_render_log() {
     if (!page_render_is_logged) return;
-    if (!window.event) window.throw_exception_("str_error_internal");
-    if (Object.values(LOAD_LOG_INPUT_EVENT_NAMES).includes(window.event.type))
+    const cause_event = deferred_cause_event || window.event;
+    if (!cause_event) window.throw_exception_("str_error_internal");
+    if (Object.values(LOAD_LOG_INPUT_EVENT_NAMES).includes(cause_event.type))
       return;
-    render_log(window.event.type, window.event.timeStamp, () => {});
+    render_log(cause_event.type, cause_event.timeStamp, () => {});
+  }
+  // Runs a render a later frame draws, its log naming the input it is for.
+  function deferred_render_run(cause_event, render_callback) {
+    if (!cause_event || deferred_cause_event)
+      window.throw_exception_("str_error_internal");
+    deferred_cause_event = cause_event;
+    try {
+      render_callback();
+    } finally {
+      deferred_cause_event = null;
+    }
   }
 
   // Names an element by its tag, id and classes.
@@ -263,6 +277,7 @@ window.try_catch_handler_(function () {
   }
 
   window.report_load_log_ = {
+    deferred_render_run,
     event_render_log,
     kept_line_count_set: load_log_kept_line_count_set,
     newest_entries: load_log_newest_entries,

@@ -277,16 +277,6 @@ input_archives_clean() {
     "error: could not remove the extracted input at $EXTRACTED_ROOT"
 }
 
-install_command() {
-  if [ -n "${TOOL_INSTALL_COMMANDS[$1]-}" ]; then
-    echo "${TOOL_INSTALL_COMMANDS[$1]}"
-  elif [ -n "${CONTAINING_PACKAGES[$1]-}" ]; then
-    echo "$PACKAGE_INSTALL_COMMAND ${CONTAINING_PACKAGES[$1]}"
-  else
-    error_exit 1 "error: no install command is recorded for $1"
-  fi
-}
-
 log_verbose() {
   [ "$VERBOSE" -ge 1 ] || return 0
   block_lead other
@@ -455,8 +445,9 @@ raw_data_archive_path() {
 
 # Sets `README_CONVERTER` to the absolute path the freshness check wants.
 readme_converter_resolve() {
+  local admin="$PERF2HTML_DIR_/$ADMIN_INSTRUCTIONS_FILE_NAME"
   README_CONVERTER="$(command -v cmark-gfm)" || error_exit 127 \
-    "error: not found on PATH: cmark-gfm -> $(install_command cmark-gfm)"
+    "error: not found on PATH: cmark-gfm, install commands in $admin"
 }
 
 recorded_time_read() {
@@ -753,19 +744,26 @@ title_print() {
 }
 
 toolchain_check() {
-  local tool missing=''
-  for tool in cmake ninja ccache cc valgrind perf taskset python3 \
-    addr2line readelf speedscope cksum curl tar xz dpkg-query cmark-gfm; do
-    command -v "$tool" >/dev/null 2>&1 \
-      || missing+="${missing:+, }$tool -> $(install_command "$tool")"
-  done
-  [ -z "$missing" ] || error_exit 127 "error: not found on PATH: $missing"
+  local missing=() admin="$PERF2HTML_DIR_/$ADMIN_INSTRUCTIONS_FILE_NAME"
+  toolchain_missing_list missing
+  [ "${#missing[@]}" = 0 ] || error_exit 127 \
+    "error: not found on PATH: ${missing[*]}, install commands in $admin"
   readme_converter_resolve
   SPEEDSCOPE_RELEASE="$(dirname \
     "$(dirname "$(readlink -f "$(command -v speedscope)")")")/dist/release"
   local reason="error: no speedscope bundle at $SPEEDSCOPE_RELEASE/index.html"
   [ -f "$SPEEDSCOPE_RELEASE/index.html" ] || error_exit 1 \
-    "$reason -> $(install_command speedscope)"
+    "$reason, install commands in $admin"
+}
+
+# Appends each toolchain tool missing from PATH to the array named first.
+toolchain_missing_list() {
+  local -n missing_names="$1"
+  local tool
+  for tool in cmake ninja ccache cc valgrind perf taskset python3 \
+    addr2line readelf speedscope cksum curl tar xz dpkg-query cmark-gfm; do
+    command -v "$tool" >/dev/null 2>&1 || missing_names+=("$tool")
+  done
 }
 
 verbose_begin() {

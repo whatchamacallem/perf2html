@@ -130,20 +130,12 @@ window.try_catch_handler_(function () {
       pulldown_link(test_name, test_entry_hash(test_name), "str_menu_test"),
     );
   }
-  function tests_pulldown_closed() {
-    window.report_frame_.view_post("tests_pulldown_closed");
-  }
-  function pulldown_options(
-    entries,
-    entry_count,
-    on_close,
-    reads_line_number,
-  ) {
+  function pulldown_options(entries, entry_count, reads_line_number) {
     return {
       entries,
       entry_count,
       keeps_open: false,
-      on_close,
+      on_close: () => {},
       on_move: null,
       on_select: null,
       reads_line_number,
@@ -274,9 +266,6 @@ window.try_catch_handler_(function () {
     menu_render();
   }
 
-  function scale_text(scale_stop) {
-    return window.report_ui_.strip.slider_text(scale_stop, SCALE_LAST_STOP);
-  }
   function scale_stop_request(scale_stop) {
     if (
       scale_stop < 0 ||
@@ -286,10 +275,7 @@ window.try_catch_handler_(function () {
       return;
     window.report_ui_.design_scale_stop_set(scale_stop);
     window.report_frame_.view_post("layout_reset");
-    menu_strip_handle.widget_text_set(
-      "str_menu_scale",
-      scale_text(scale_stop),
-    );
+    menu_strip_handle.slider_stop_set("str_menu_scale", scale_stop);
   }
   function scale_key_handler(key_name) {
     if (!Object.prototype.hasOwnProperty.call(MENU_SCALE_KEY_STEPS, key_name))
@@ -322,7 +308,14 @@ window.try_catch_handler_(function () {
     });
   }
   // Makes an entry named by its label's ui string, shown as its needs allow.
-  function entry(string_id, kind_name, address, view_key, entry_fields) {
+  function entry(
+    string_id,
+    tool_tip_string_id,
+    kind_name,
+    address,
+    view_key,
+    entry_fields,
+  ) {
     return window.report_ui_.strip.entry_make(
       string_id,
       kind_name,
@@ -330,12 +323,19 @@ window.try_catch_handler_(function () {
       {
         is_available: entry_available(string_id, address, view_key),
         is_numbered: true,
+        tool_tip_text: window.ui_strings_.text(tool_tip_string_id),
         ...entry_fields,
       },
     );
   }
-  function view_entry(string_id, view_hash, address, view_key) {
-    return entry(string_id, "link", address, view_key, {
+  function view_entry(
+    string_id,
+    tool_tip_string_id,
+    view_hash,
+    address,
+    view_key,
+  ) {
+    return entry(string_id, tool_tip_string_id, "link", address, view_key, {
       href: view_hash,
       on_activate: flash_request(string_id),
     });
@@ -345,83 +345,101 @@ window.try_catch_handler_(function () {
     const view_hash = (view_key) =>
       window.report_ui_.address.home_hash(address.test, view_key);
     return [
-      entry("str_report_name", "link", address, null, {
-        is_numbered: false,
-        href: SETTINGS_DEBUG_ENABLED
-          ? view_hash(SETTINGS_VIEW_KEY)
-          : MENU_LOGO_REPOSITORY_URL,
-        label_markup: logo_letters_markup(
-          REPORT_NAME_TEXT,
-          STYLE_MENU_LOGO_START_SHARE,
-        ),
-        opens_new_tab: !SETTINGS_DEBUG_ENABLED,
-        withholds_tab_stop: true,
-      }),
+      entry(
+        "str_report_name",
+        SETTINGS_DEBUG_ENABLED
+          ? "str_tool_tip_settings"
+          : "str_tool_tip_report_name",
+        "link",
+        address,
+        null,
+        {
+          is_numbered: false,
+          href: SETTINGS_DEBUG_ENABLED
+            ? view_hash(SETTINGS_VIEW_KEY)
+            : MENU_LOGO_REPOSITORY_URL,
+          label_markup: logo_letters_markup(
+            REPORT_NAME_TEXT,
+            STYLE_MENU_LOGO_START_SHARE,
+          ),
+          opens_new_tab: !SETTINGS_DEBUG_ENABLED,
+          withholds_tab_stop: true,
+        },
+      ),
       view_entry(
         "str_view_overview",
+        "str_tool_tip_overview",
         window.report_ui_.address.hash({}),
         address,
         null,
       ),
-      entry("str_menu_test", "pulldown", address, null, {
+      entry("str_menu_test", "str_tool_tip_test", "pulldown", address, null, {
         pulldown_options: pulldown_options(
           tests_entries,
           () => window.report_frame_.test_names.length,
-          tests_pulldown_closed,
           false,
         ),
       }),
-      entry("str_menu_file", "pulldown", address, null, {
+      entry("str_menu_file", "str_tool_tip_file", "pulldown", address, null, {
         pulldown_options: pulldown_options(
           files_entries,
           () =>
             heat_map_entry_count(
               window.report_source_database_.filesWithCounters,
             ),
-          () => {},
           true,
         ),
       }),
-      entry("str_menu_function", "pulldown", address, null, {
-        pulldown_options: pulldown_options(
-          functions_entries,
-          () =>
-            heat_map_entry_count(
-              window.report_source_database_.functionsWithCounters,
-            ),
-          () => {},
-          false,
-        ),
-      }),
+      entry(
+        "str_menu_function",
+        "str_tool_tip_function",
+        "pulldown",
+        address,
+        null,
+        {
+          pulldown_options: pulldown_options(
+            functions_entries,
+            () =>
+              heat_map_entry_count(
+                window.report_source_database_.functionsWithCounters,
+              ),
+            false,
+          ),
+        },
+      ),
       view_entry(
         VIEW_STRING_IDS[DATABASE_VIEW_KEY],
+        "str_tool_tip_database",
         view_hash(DATABASE_VIEW_KEY),
         address,
         DATABASE_VIEW_KEY,
       ),
       view_entry(
         VIEW_STRING_IDS[FLAME_GRAPH_VIEW_KEY],
+        "str_tool_tip_flame_graph",
         view_hash(FLAME_GRAPH_VIEW_KEY),
         address,
         FLAME_GRAPH_VIEW_KEY,
       ),
       view_entry(
         VIEW_STRING_IDS[CALL_GRAPH_VIEW_KEY],
+        "str_tool_tip_call_graph",
         view_hash(CALL_GRAPH_VIEW_KEY),
         address,
         CALL_GRAPH_VIEW_KEY,
       ),
-      entry("str_menu_reset", "action", address, null, {
+      entry("str_menu_reset", "str_tool_tip_reset", "action", address, null, {
         on_activate: preferences_reset,
       }),
-      entry("str_menu_help", "link", address, null, {
+      entry("str_menu_help", "str_tool_tip_help", "link", address, null, {
         href: help_href,
         opens_new_tab: true,
       }),
-      entry("str_menu_scale", "action", address, null, {
+      entry("str_menu_scale", "str_tool_tip_scale", "action", address, null, {
         is_numbered: false,
         is_widget: true,
-        widget_text: scale_text(window.report_ui_.design_scale_stop_now()),
+        slider_stop: window.report_ui_.design_scale_stop_now(),
+        slider_last_stop: SCALE_LAST_STOP,
         on_stop_choose: scale_stop_request,
       }),
     ];
@@ -431,6 +449,7 @@ window.try_catch_handler_(function () {
     entry_name,
     address,
     label_text,
+    tool_tip_string_id,
     choices,
     on_select,
     keeps_open,
@@ -442,6 +461,7 @@ window.try_catch_handler_(function () {
       label_text,
       {
         is_available: entry_available(entry_name, address, null),
+        tool_tip_text: window.ui_strings_.text(tool_tip_string_id),
         pulldown_options: {
           entries: () => window.report_ui_.strip.choice_entries(choices()),
           entry_count: () => choices().length,
@@ -461,6 +481,7 @@ window.try_catch_handler_(function () {
       "counters",
       address,
       window.ui_strings_.text("str_menu_counters"),
+      "str_tool_tip_counters",
       () => window.report_preferences_.counter_choices(list_key),
       (line_name) => counter_line_toggle(list_key, line_name),
       true,
@@ -483,6 +504,7 @@ window.try_catch_handler_(function () {
           ...address,
           functions: !address.functions,
         }),
+        tool_tip_text: window.ui_strings_.text("str_tool_tip_counter_source"),
       },
     );
   }
@@ -502,6 +524,7 @@ window.try_catch_handler_(function () {
         choice_label(heat_scale_choices, shown_preferences.heat_scale_value),
         {
           is_available: entry_available("heat_scale", address, null),
+          tool_tip_text: window.ui_strings_.text("str_tool_tip_heat_scale"),
           on_activate: heat_scale_toggle,
         },
       ),
@@ -512,6 +535,7 @@ window.try_catch_handler_(function () {
           call_graph_sort_choices,
           shown_preferences.call_graph_sort_mode,
         ),
+        "str_tool_tip_call_graph_sort",
         () => call_graph_sort_choices,
         call_graph_sort_choose,
         false,
@@ -523,13 +547,21 @@ window.try_catch_handler_(function () {
         choice_label(heat_sort_choices, shown_preferences.heat_sort_mode),
         {
           is_available: entry_available("heat_sort", address, null),
+          tool_tip_text: window.ui_strings_.text("str_tool_tip_heat_sort"),
           on_activate: heat_sort_toggle,
         },
       ),
-      entry(dark_mode_string_id(), "action", address, null, {
-        is_numbered: false,
-        on_activate: dark_mode_toggle,
-      }),
+      entry(
+        dark_mode_string_id(),
+        "str_tool_tip_dark_mode",
+        "action",
+        address,
+        null,
+        {
+          is_numbered: false,
+          on_activate: dark_mode_toggle,
+        },
+      ),
     ];
   }
 
@@ -548,10 +580,7 @@ window.try_catch_handler_(function () {
   }
   // Lists the heat map's status labels: a function after its file and line.
   function heat_map_status_entries(address) {
-    const part_text = heat_map_part_text(
-      address,
-      window.report_ui_.location_text,
-    );
+    const part_text = heat_map_part_text(address, base_name_location_text);
     if (!part_text) return [];
     const shown_location = window.report_frame_.function_location_now();
     // The location shows once the heat map sends the address's own.
@@ -563,10 +592,7 @@ window.try_catch_handler_(function () {
     )
       return [part_text];
     return [
-      window.report_ui_.location_text(
-        shown_location.file,
-        shown_location.line,
-      ),
+      base_name_location_text(shown_location.file, shown_location.line),
       part_text,
     ];
   }
@@ -626,16 +652,11 @@ window.try_catch_handler_(function () {
     flash_entry_name = "";
   }
   function menu_key_handler(key_name, is_repeat) {
-    if (
+    return (
       preference_strip_handle.key_handler(key_name, is_repeat) ||
       menu_strip_handle.key_handler(key_name, is_repeat) ||
       scale_key_handler(key_name)
-    )
-      return true;
-    if (!window.report_ui_.view_key.opens_tests_pulldown(key_name))
-      return false;
-    menu_strip_handle.pulldown_open("str_menu_test", key_name);
-    return true;
+    );
   }
 
   function activate() {

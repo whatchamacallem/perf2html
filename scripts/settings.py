@@ -235,7 +235,6 @@ MENU_PULLDOWN_KEY_NAMES: dict[str, str] = {
     "select": "Enter",
 }
 MENU_PULLDOWN_LINE_NUMBER_PATTERN = "^(.*):([0-9]+)$"
-MENU_PULLDOWN_OPENING_KEY_PATTERN = "^[a-zA-Z]$"
 MENU_PULLDOWN_SKIPPED_KEY_NAMES: tuple[str, ...] = (" ",)
 MENU_PULLDOWN_SMALL_ENTRY_MAX_COUNT = 3
 MENU_SCALE_KEY_STEPS: dict[str, int] = {"+": 1, "=": 1, "-": -1}
@@ -461,10 +460,11 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "page-line-width-": "0.1em",
     "page-table-cell-padding-inline-": "1ch",
     "page-table-hover-row-z-index-": "1",
-    "page-table-title-tool-tip-z-index-": "2",
     "page-table-title-z-index-": "1",
     "page-text-scrollbar-horizontal-height-": "1lh",
     "page-text-scrollbar-vertical-width-": "1ch",
+    "page-tool-tip-max-width-": "60ch",
+    "page-tool-tip-z-index-": "2",
     "screenshot-z-index-": "3",
 }
 
@@ -536,6 +536,10 @@ TIMING_PERF_STAT_UNCOUNTED_VALUES: tuple[str, ...] = (
     "<not counted>",
     "<not supported>",
 )
+# Hides a shown tool tip this long after it shows.
+TOOL_TIP_HIDE_DELAY_MS = 5000
+# Shows a tool tip once the pointer rests this long on its cell.
+TOOL_TIP_SHOW_DELAY_MS = 500
 
 TRACE_ADDR2LINE_COMMAND: tuple[str, ...] = ("addr2line", "-f", "-C", "-e")
 TRACE_ADDR2LINE_UNKNOWN_NAME = "??"

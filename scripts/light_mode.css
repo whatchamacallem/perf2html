@@ -54,7 +54,8 @@ table.heat-map-source-table- > tbody > tr:focus-visible > td {
 .heat-map-tree-node-.selected- {
   background: var(--light-mode-page-bg-);
 }
-.heat-map-tree-node-:focus-visible {
+.heat-map-tree-node-:focus-visible,
+.call-graph-leaf-:focus-visible {
   background: var(--light-mode-menu-focus-bg-) !important;
   color: var(--light-mode-menu-focus-fg-) !important;
 }
@@ -96,9 +97,10 @@ body {
   color: var(--light-mode-status-bar-fg-);
 }
 .menu-button-:focus-visible,
+.menu-button-[role="searchbox"]:focus,
 .menu-button-.flash-,
 .menu-button-.open-,
-.menu-button-.table-title-tool-tip-,
+.menu-button-.tool-tip-,
 .menu-pulldown-entry-list- > .highlighted-entry- {
   background: var(--light-mode-menu-focus-bg-);
   color: var(--light-mode-menu-focus-fg-);
@@ -324,7 +326,15 @@ body {
   .heat-map-tree-node-:not(.cold-):hover::before {
     inset: 0 var(--page-line-width-);
     outline: var(--page-line-width-) solid
-      var(--light-mode-menu-normal-outline-);
+      var(--light-mode-table-hover-outline-);
+  }
+  /* The status bar's line below in its own color, as a button's frame ends. */
+  #menu- .menu-status-bar- {
+    border-bottom: var(--page-line-width-) solid
+      var(--light-mode-status-bar-bg-);
+    margin-bottom: calc(
+      var(--menu-strip-blank-line-height-) - var(--page-line-width-)
+    );
   }
 }
 

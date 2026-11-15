@@ -70,7 +70,8 @@
     background: var(--dark-mode-page-emphasis-bg-);
     color: var(--dark-mode-page-emphasis-fg-);
   }
-  .heat-map-tree-node-:focus-visible {
+  .heat-map-tree-node-:focus-visible,
+  .call-graph-leaf-:focus-visible {
     background: var(--dark-mode-menu-focus-bg-) !important;
     color: var(--dark-mode-menu-focus-fg-) !important;
   }
@@ -144,9 +145,10 @@
     color: var(--dark-mode-status-bar-fg-);
   }
   .menu-button-:focus-visible,
+  .menu-button-[role="searchbox"]:focus,
   .menu-button-.flash-,
   .menu-button-.open-,
-  .menu-button-.table-title-tool-tip-,
+  .menu-button-.tool-tip-,
   .menu-pulldown-entry-list- > .highlighted-entry- {
     background: var(--dark-mode-menu-focus-bg-);
     color: var(--dark-mode-menu-focus-fg-);

@@ -19,19 +19,30 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_settings
 
 
+class KeyWalk(NamedTuple):
+    # The key pressed until the walk reaches its element.
+    key_name: str
+    # The frame the element lies in, the menu's top page or the view.
+    frame_name: str
+    # Selects the elements the focus or an open pulldown's light may reach.
+    element_selector: str
+
+
 class ClickStep(NamedTuple):
     # What the timing calls the click.
     label: str
-    # The frame pressed in, the menu's top page or the view.
+    # The walks taking the focus where the timed key acts, in order.
+    key_walks: tuple[KeyWalk, ...]
+    # The frame holding the focus the timed key acts on.
     frame_name: str
-    # Selects the element pressed, the first match.
-    element_selector: str
+    # The timed key, a name of the key presses the settings hold.
+    key_name: str
     # The frame the state expression runs in.
     state_frame_name: str
     # Evaluates to a value the click must change.
     state_expression: str
-    # How far across the element the press lands, as a share of its width.
-    press_share: float = test_settings.CLICK_PRESS_SHARE_MIDDLE
+    # The text the clipboard holds for the timed key, empty for none.
+    pasted_text: str = ""
 
 
 class ClickSet(NamedTuple):
@@ -72,6 +83,10 @@ class ScreenshotSet(NamedTuple):
     absent_files: tuple[str, ...]
     # First line of the error report the page draws, empty for none.
     error_message: str
+    # The walks taking the focus to the cell the shot types in, in order.
+    key_walks: tuple[KeyWalk, ...] = ()
+    # The text typed where the walks leave the focus, empty for none.
+    typed_text: str = ""
 
     # Returns the view's shots in one dark mode, the views with one in turn.
     def shot_variants(self, view_index: int) -> tuple[ShotVariant, ...]:
@@ -124,8 +139,10 @@ class TimingRow(NamedTuple):
     phase_label: str
     shot: str
 
-    # Returns the limit of the timing, a click's or a golden page load's.
-    def limit_ms(self) -> int:
+    # Returns the limit of the timing, none for a frame after a page's first.
+    def limit_ms(self) -> int | None:
+        if self.phase_label in test_settings.TIMING_FRAME_PHASE_NAMES[1:]:
+            return None
         if (
             self.phase_label.split()[0]
             == test_settings.TIMING_CLICK_PHASE_NAME
@@ -190,11 +207,19 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
     ScreenshotSet(
         test_settings.SHOOT_REGULAR_REPORT,
         "#test=urlparser&view=database",
-        "5",
+        "",
         "database",
         "urlparser",
         (),
         "",
+        (
+            KeyWalk(
+                "Tab",
+                test_settings.CLICK_VIEW_FRAME_NAME,
+                '[data-entry-name-="filter"]',
+            ),
+        ),
+        "urlapi|^curlx",
     ),
     ScreenshotSet(
         _SHOOT_BOTH_REPORTS | test_settings.SHOOT_UNTIMED,
@@ -226,7 +251,7 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         "",
     ),
     ScreenshotSet(
-        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_UNTIMED,
+        _SHOOT_BOTH_REPORTS | test_settings.SHOOT_TWO_FRAMES,
         "#test=urlparser&view=heat-map&function=formatf&functions=1",
         "",
         "heat_map",
@@ -430,64 +455,166 @@ _HASH_STATE = test_settings.CLICK_HASH_STATE
 _CALL_GRAPH_SYMBOL_SELECTOR = (
     "#call-graph-table- > tbody > tr:not(.table-sizer-row-) .menu-button-"
 )
+_CALL_GRAPH_ITEM_SELECTOR = (
+    "#call-graph-table- > tbody > tr:not(.table-sizer-row-) [role='treeitem']"
+)
+_CALL_GRAPH_FOCUS_STATE = (
+    f'[...document.querySelectorAll("{_CALL_GRAPH_ITEM_SELECTOR}")]'
+    ".indexOf(document.activeElement)"
+)
 _CALL_GRAPH_ROWS_STATE = (
     "document.querySelectorAll("
     '"#call-graph-table- > tbody > tr:not(.table-sizer-row-)").length'
+)
+_DATABASE_FIRST_ROW_STATE = (
+    'document.querySelector("tbody > tr:not(.table-sizer-row-)").textContent'
 )
 _DATABASE_ROWS_STATE = (
     'document.querySelectorAll("tbody > tr:not(.table-sizer-row-)").length'
 )
 _DATABASE_TITLES_STATE = 'document.querySelectorAll("thead th").length'
+_FOCUS_TEXT_STATE = "document.activeElement.textContent"
+_HEAT_MAP_BOX_ROWS_STATE = (
+    'document.querySelectorAll("tr.heat-map-source-line-detail-row-").length'
+)
+_HEAT_MAP_SCROLL_STATE = 'document.getElementById("heat-map-main-").scrollTop'
 _HEAT_MAP_TITLES_STATE = (
     'document.querySelectorAll("table.heat-map-source-table- > thead th")'
     ".length"
 )
+_HEAT_MAP_BOX_CLOSE_SELECTOR = (
+    'tr.heat-map-source-line-detail-row- [data-entry-name-="close"]'
+)
+_HEAT_MAP_BOX_COPY_SELECTOR = (
+    'tr.heat-map-source-line-detail-row- [data-entry-name-="copy"]'
+)
+_HEAT_MAP_BOX_LINK_SELECTOR = (
+    "tr.heat-map-source-line-detail-row- .strip-line- > .menu-button-:has(> a)"
+)
+_MENU_ROW_LAST_STOP = (
+    '#menu- > .strip-line- > :nth-last-child(1 of [tabindex="0"])'
+)
+_STATUS_ROW_FIRST_STOP = (
+    '#menu-preference- > .strip-line- > :nth-child(1 of [tabindex="0"])'
+)
+_STATUS_ROW_LAST_STOP = (
+    '#menu-preference- > .strip-line- > :nth-last-child(1 of [tabindex="0"])'
+)
+_TAPE_ENTRY_SELECTOR = ".heat-map-source-ticker-tape-entry-"
 
 
-# Returns the expression of whether a strip entry's pulldown is open.
-def _expanded_state(entry_name: str) -> str:
+# Returns the selector of a strip entry's cell.
+def _entry_cell(entry_name: str) -> str:
+    return f'[data-entry-name-="{entry_name}"]'
+
+
+# Returns the expression of whether a strip cell's pulldown is open.
+def _expanded_state(entry_selector: str) -> str:
     return (
-        f"document.querySelector('[data-entry-name-=\"{entry_name}\"]')"
+        f"document.querySelector('{entry_selector}')"
         '.getAttribute("aria-expanded")'
     )
 
 
-# Returns the expression of a strip entry's text.
+# Returns the expression of a strip cell's text.
 def _entry_text_state(entry_selector: str) -> str:
     return f"document.querySelector('{entry_selector}').textContent"
 
 
-# Returns the steps opening a pulldown, then pressing its option.
+# Returns the expression of whether the focus is on a matching element.
+def _focus_state(element_selector: str) -> str:
+    return f"document.activeElement.matches('{element_selector}')"
+
+
+# Returns the expression of the index of a pulldown's lit option.
+def _lit_option_state(entry_selector: str) -> str:
+    return (
+        f"[...document.querySelectorAll('{entry_selector} [role=option]')]"
+        '.findIndex((option) => option.getAttribute("aria-selected")'
+        ' === "true")'
+    )
+
+
+# Returns the expression of the stop a slider cell shows.
+def _slider_state(entry_selector: str) -> str:
+    return (
+        f"document.querySelector('{entry_selector}')"
+        '.getAttribute("aria-valuenow")'
+    )
+
+
+# Returns the walk tabbing to an element.
+def _tab_to(frame_name: str, element_selector: str) -> KeyWalk:
+    return KeyWalk("Tab", frame_name, element_selector)
+
+
+# Returns the steps opening a pulldown by its key, then lighting its option.
 def _pulldown_steps(
     frame_name: str,
     label: str,
-    entry_name: str,
+    entry_selector: str,
     option_selector: str,
     state_frame_name: str,
     state_expression: str,
 ) -> tuple[ClickStep, ...]:
-    entry_selector = f'[data-entry-name-="{entry_name}"]'
     return (
         ClickStep(
             f"{label} pulldown",
+            (_tab_to(frame_name, entry_selector),),
             frame_name,
-            entry_selector,
+            "Enter",
             frame_name,
-            _expanded_state(entry_name),
+            _expanded_state(entry_selector),
         ),
-        ClickStep(
-            label,
+        _option_step(
             frame_name,
-            f"{entry_selector} {option_selector}",
+            label,
+            entry_selector,
+            option_selector,
             state_frame_name,
             state_expression,
         ),
     )
 
 
-_SCALE_WIDGET_SELECTOR = (
-    '[data-entry-name-="str_menu_scale"] .menu-button-widget-'
-)
+# Returns the step lighting an open pulldown's option, then choosing it.
+def _option_step(
+    frame_name: str,
+    label: str,
+    entry_selector: str,
+    option_selector: str,
+    state_frame_name: str,
+    state_expression: str,
+) -> ClickStep:
+    return ClickStep(
+        label,
+        (
+            KeyWalk(
+                "ArrowDown", frame_name, f"{entry_selector} {option_selector}"
+            ),
+        ),
+        frame_name,
+        "Enter",
+        state_frame_name,
+        state_expression,
+    )
+
+
+# Returns the step pasting into a closed pulldown, which opens searching.
+def _pulldown_paste_step(
+    frame_name: str, label: str, entry_selector: str, pasted_text: str
+) -> ClickStep:
+    return ClickStep(
+        f"{label} paste",
+        (_tab_to(frame_name, entry_selector),),
+        frame_name,
+        "ctrl+v",
+        frame_name,
+        _expanded_state(entry_selector),
+        pasted_text,
+    )
+
+
 _CLICKS: tuple[ClickSet, ...] = (
     ClickSet(
         test_settings.SHOOT_REGULAR_REPORT,
@@ -496,29 +623,52 @@ _CLICKS: tuple[ClickSet, ...] = (
         (
             ClickStep(
                 "overview test",
+                (
+                    _tab_to(_MENU, "tr.row-link-"),
+                    KeyWalk(
+                        "ArrowDown",
+                        _MENU,
+                        'tr.row-link-[data-href-="#test=cookierecv'
+                        '&view=database"]',
+                    ),
+                ),
                 _MENU,
-                'a[href="#test=cookierecv&view=database"]',
+                "Enter",
                 _MENU,
                 _HASH_STATE,
             ),
             ClickStep(
                 "menu call graph",
+                (_tab_to(_MENU, _entry_cell("str_view_call_graph")),),
                 _MENU,
-                '[data-entry-name-="str_view_call_graph"]',
+                "Enter",
                 _MENU,
                 _HASH_STATE,
             ),
             ClickStep(
-                "menu database",
+                "menu digit database", (), _MENU, "5", _MENU, _HASH_STATE
+            ),
+            ClickStep(
+                "menu call graph space",
+                (_tab_to(_MENU, _entry_cell("str_view_call_graph")),),
                 _MENU,
-                '[data-entry-name-="str_view_database"]',
+                "Space",
                 _MENU,
                 _HASH_STATE,
             ),
             ClickStep(
                 "menu overview",
+                (_tab_to(_MENU, _entry_cell("str_view_overview")),),
                 _MENU,
-                '[data-entry-name-="str_view_overview"]',
+                "Enter",
+                _MENU,
+                _HASH_STATE,
+            ),
+            ClickStep(
+                "overview row space",
+                (_tab_to(_MENU, "tr.row-link-"),),
+                _MENU,
+                "Space",
                 _MENU,
                 _HASH_STATE,
             ),
@@ -530,17 +680,57 @@ _CLICKS: tuple[ClickSet, ...] = (
         "#test=cookierecv&view=database",
         (
             ClickStep(
-                "database sort",
+                "tab first menu row to status menu row",
+                (_tab_to(_MENU, _MENU_ROW_LAST_STOP),),
+                _MENU,
+                "Tab",
+                _MENU,
+                _focus_state(_STATUS_ROW_FIRST_STOP),
+            ),
+            ClickStep(
+                "tab status menu row to view",
+                (_tab_to(_MENU, _STATUS_ROW_LAST_STOP),),
+                _MENU,
+                "Tab",
                 _VIEW,
-                "thead th:nth-child(4)",
+                "document.hasFocus()",
+            ),
+            ClickStep(
+                "shift tab view to status menu row",
+                (),
                 _VIEW,
-                "document.querySelector("
-                '"tbody > tr:not(.table-sizer-row-)").textContent',
+                "shift+Tab",
+                _MENU,
+                _focus_state(_STATUS_ROW_LAST_STOP),
+            ),
+            ClickStep(
+                "shift tab status menu row to first menu row",
+                (KeyWalk("shift+Tab", _MENU, _STATUS_ROW_FIRST_STOP),),
+                _MENU,
+                "shift+Tab",
+                _MENU,
+                _focus_state(_MENU_ROW_LAST_STOP),
+            ),
+            *_pulldown_steps(
+                _VIEW,
+                "database sort order",
+                _entry_cell("sort_order"),
+                '[data-entry-value-="function"]',
+                _VIEW,
+                _DATABASE_FIRST_ROW_STATE,
+            ),
+            ClickStep(
+                "database sort direction",
+                (_tab_to(_VIEW, _entry_cell("sort_direction")),),
+                _VIEW,
+                "Enter",
+                _VIEW,
+                _DATABASE_FIRST_ROW_STATE,
             ),
             *_pulldown_steps(
                 _VIEW,
                 "database count",
-                "count",
+                _entry_cell("count"),
                 '[data-entry-value-="1000"]',
                 _VIEW,
                 _DATABASE_ROWS_STATE,
@@ -548,16 +738,141 @@ _CLICKS: tuple[ClickSet, ...] = (
             *_pulldown_steps(
                 _MENU,
                 "counters",
-                "counters",
+                _entry_cell("counters"),
                 '[data-entry-value-="Ir"]',
                 _VIEW,
                 _DATABASE_TITLES_STATE,
             ),
             ClickStep(
-                "database function",
+                "counters close",
+                (),
+                _MENU,
+                "Escape",
+                _MENU,
+                _expanded_state(_entry_cell("counters")),
+            ),
+            ClickStep(
+                "database filter paste",
+                (_tab_to(_VIEW, _entry_cell("filter")),),
                 _VIEW,
-                'a[href="#test=cookierecv&view=heat-map'
-                '&function=Curl_headers_push&functions=1"]',
+                "ctrl+v",
+                _VIEW,
+                _DATABASE_ROWS_STATE,
+                "lib/vtls",
+            ),
+            ClickStep(
+                "database filter erase",
+                (),
+                _VIEW,
+                "Backspace",
+                _VIEW,
+                _entry_text_state(_entry_cell("filter")),
+            ),
+            ClickStep(
+                "database filter type",
+                (),
+                _VIEW,
+                "s",
+                _VIEW,
+                _entry_text_state(_entry_cell("filter")),
+            ),
+            ClickStep(
+                "database filter clear",
+                (),
+                _VIEW,
+                "Escape",
+                _VIEW,
+                _DATABASE_ROWS_STATE,
+            ),
+            ClickStep(
+                "database filter function paste",
+                (_tab_to(_VIEW, _entry_cell("filter")),),
+                _VIEW,
+                "ctrl+v",
+                _VIEW,
+                _DATABASE_ROWS_STATE,
+                "^Curl_headers_push$",
+            ),
+            *_pulldown_steps(
+                _VIEW,
+                "database copy",
+                _entry_cell("copy"),
+                '[data-entry-value-="text"]',
+                _VIEW,
+                _expanded_state(_entry_cell("copy")),
+            ),
+            ClickStep(
+                "database caller",
+                (
+                    _tab_to(_VIEW, "tr.row-link-"),
+                    KeyWalk(
+                        "ArrowRight",
+                        _VIEW,
+                        'tr.row-link- a[href="#test=cookierecv&view=heat-map'
+                        '&function=hds_cw_collect_write&functions=1"]',
+                    ),
+                ),
+                _VIEW,
+                "Enter",
+                _MENU,
+                _HASH_STATE,
+            ),
+            ClickStep(
+                "menu digit database", (), _VIEW, "5", _MENU, _HASH_STATE
+            ),
+            ClickStep(
+                "database row last",
+                (_tab_to(_VIEW, "tr.row-link-"),),
+                _VIEW,
+                "End",
+                _VIEW,
+                _FOCUS_TEXT_STATE,
+            ),
+            ClickStep(
+                "database row first",
+                (),
+                _VIEW,
+                "Home",
+                _VIEW,
+                _FOCUS_TEXT_STATE,
+            ),
+            ClickStep(
+                "database row down",
+                (),
+                _VIEW,
+                "ArrowDown",
+                _VIEW,
+                _FOCUS_TEXT_STATE,
+            ),
+            ClickStep(
+                "database row up",
+                (),
+                _VIEW,
+                "ArrowUp",
+                _VIEW,
+                _FOCUS_TEXT_STATE,
+            ),
+            ClickStep(
+                "database row link",
+                (),
+                _VIEW,
+                "ArrowRight",
+                _VIEW,
+                _FOCUS_TEXT_STATE,
+            ),
+            ClickStep(
+                "database row link left",
+                (),
+                _VIEW,
+                "ArrowLeft",
+                _VIEW,
+                _FOCUS_TEXT_STATE,
+            ),
+            ClickStep(
+                "database function",
+                (_tab_to(_VIEW, "tr.row-link-"),),
+                _VIEW,
+                "Enter",
                 _MENU,
                 _HASH_STATE,
             ),
@@ -569,101 +884,234 @@ _CLICKS: tuple[ClickSet, ...] = (
         "#test=cookierecv&view=heat-map&file=lib/progress.c&functions=0",
         (
             ClickStep(
-                "heat map hottest line",
+                "heat map page down",
+                (_tab_to(_VIEW, "tr[data-line-number-]"),),
                 _VIEW,
-                ".heat-map-source-ticker-tape-entry-",
+                "PageDown",
+                _VIEW,
+                _HEAT_MAP_SCROLL_STATE,
+            ),
+            ClickStep(
+                "heat map hottest line",
+                (_tab_to(_VIEW, _TAPE_ENTRY_SELECTOR),),
+                _VIEW,
+                "Enter",
                 _MENU,
                 _HASH_STATE,
+            ),
+            ClickStep(
+                "heat map tape next",
+                (_tab_to(_VIEW, _TAPE_ENTRY_SELECTOR),),
+                _VIEW,
+                "ArrowRight",
+                _VIEW,
+                _FOCUS_TEXT_STATE,
+            ),
+            ClickStep(
+                "heat map arrow scroll",
+                (_tab_to(_VIEW, _HEAT_MAP_BOX_CLOSE_SELECTOR),),
+                _VIEW,
+                "ArrowDown",
+                _VIEW,
+                _HEAT_MAP_SCROLL_STATE,
             ),
             ClickStep(
                 "heat map line box close",
+                (_tab_to(_VIEW, _HEAT_MAP_BOX_CLOSE_SELECTOR),),
                 _VIEW,
-                "tr.heat-map-source-line-detail-row-"
-                ' [data-entry-name-="close"]',
+                "Enter",
                 _VIEW,
-                "document.querySelectorAll("
-                '"tr.heat-map-source-line-detail-row-").length',
+                _HEAT_MAP_BOX_ROWS_STATE,
+            ),
+            _pulldown_paste_step(
+                _MENU,
+                "file line",
+                _entry_cell("str_menu_file"),
+                "lib/progress.c:660",
+            ),
+            ClickStep("file line", (), _MENU, "Enter", _MENU, _HASH_STATE),
+            ClickStep(
+                "heat map line box escape",
+                (_tab_to(_VIEW, 'tr[data-line-number-="660"]'),),
+                _VIEW,
+                "Escape",
+                _VIEW,
+                _HEAT_MAP_BOX_ROWS_STATE,
             ),
             ClickStep(
                 "heat map line",
+                (),
                 _VIEW,
-                'tr[data-line-number-="660"]'
-                " > td.heat-map-source-table-line-number-cell-",
-                _MENU,
-                _HASH_STATE,
+                "Enter",
+                _VIEW,
+                _HEAT_MAP_BOX_ROWS_STATE,
+            ),
+            ClickStep(
+                "heat map line close",
+                (),
+                _VIEW,
+                "Enter",
+                _VIEW,
+                _HEAT_MAP_BOX_ROWS_STATE,
             ),
             ClickStep(
                 "heat map function line",
+                (
+                    KeyWalk(
+                        "ArrowDown",
+                        _VIEW,
+                        'tr.function-entry-[data-line-number-="708"]',
+                    ),
+                ),
                 _VIEW,
-                'tr.function-entry-[data-line-number-="172"]'
-                " > td.heat-map-source-table-line-number-cell-",
+                "Enter",
+                _MENU,
+                _HASH_STATE,
+            ),
+            *_pulldown_steps(
+                _VIEW,
+                "heat map box copy",
+                _HEAT_MAP_BOX_COPY_SELECTOR,
+                '[data-entry-value-="path"]',
+                _VIEW,
+                _expanded_state(_HEAT_MAP_BOX_COPY_SELECTOR),
+            ),
+            ClickStep(
+                "heat map box function",
+                (KeyWalk("shift+Tab", _VIEW, _HEAT_MAP_BOX_LINK_SELECTOR),),
+                _VIEW,
+                "Enter",
                 _MENU,
                 _HASH_STATE,
             ),
             ClickStep(
-                "heat map minimap",
+                "heat map tree folder",
+                (
+                    _tab_to(_VIEW, ".heat-map-tree-node-"),
+                    KeyWalk("Home", _VIEW, '[data-dir-="lib"]'),
+                    KeyWalk("ArrowDown", _VIEW, '[data-dir-="lib/vtls"]'),
+                ),
                 _VIEW,
-                "#heat-map-minimap-",
+                "Enter",
                 _VIEW,
-                'document.getElementById("heat-map-main-").scrollTop',
+                "document.querySelector('[data-dir-=\"lib/vtls\"]')"
+                '.getAttribute("aria-expanded")',
             ),
             ClickStep(
-                "heat map tree folder",
+                "heat map tree folder close",
+                (),
                 _VIEW,
-                '[data-dir-="lib/vtls"]',
+                "ArrowLeft",
+                _VIEW,
+                "document.querySelector('[data-dir-=\"lib/vtls\"]')"
+                '.getAttribute("aria-expanded")',
+            ),
+            ClickStep(
+                "heat map tree folder open",
+                (),
+                _VIEW,
+                "ArrowRight",
                 _VIEW,
                 "document.querySelector('[data-dir-=\"lib/vtls\"]')"
                 '.getAttribute("aria-expanded")',
             ),
             ClickStep(
                 "heat map tree file",
+                (
+                    KeyWalk(
+                        "ArrowDown",
+                        _VIEW,
+                        '[data-file-="lib/vtls/vtls_config.c"]',
+                    ),
+                ),
                 _VIEW,
-                '[data-file-="lib/vtls/vtls_config.c"]',
+                "Enter",
                 _MENU,
                 _HASH_STATE,
             ),
             ClickStep(
                 "heat scale",
+                (_tab_to(_MENU, _entry_cell("heat_scale")),),
                 _MENU,
-                '[data-entry-name-="heat_scale"]',
+                "Enter",
                 _MENU,
-                _entry_text_state('[data-entry-name-="heat_scale"]'),
+                _entry_text_state(_entry_cell("heat_scale")),
             ),
             ClickStep(
                 "heat sort",
+                (_tab_to(_MENU, _entry_cell("heat_sort")),),
                 _MENU,
-                '[data-entry-name-="heat_sort"]',
+                "Enter",
                 _MENU,
-                _entry_text_state('[data-entry-name-="heat_sort"]'),
+                _entry_text_state(_entry_cell("heat_sort")),
+            ),
+            ClickStep(
+                "heat sort space",
+                (),
+                _MENU,
+                "Space",
+                _MENU,
+                _entry_text_state(_entry_cell("heat_sort")),
             ),
             ClickStep(
                 "heat counter source",
+                (_tab_to(_MENU, _entry_cell("heat_counter_source")),),
                 _MENU,
-                '[data-entry-name-="heat_counter_source"]',
+                "Enter",
                 _MENU,
                 _HASH_STATE,
             ),
-            *_pulldown_steps(
+            _pulldown_paste_step(
+                _MENU, "counters", _entry_cell("counters"), "Ir"
+            ),
+            _option_step(
                 _MENU,
                 "counters",
-                "counters",
+                _entry_cell("counters"),
                 '[data-entry-value-="Ir"]',
                 _VIEW,
                 _HEAT_MAP_TITLES_STATE,
             ),
-            *_pulldown_steps(
+            ClickStep(
+                "counters close",
+                (),
+                _MENU,
+                "Escape",
+                _MENU,
+                _expanded_state(_entry_cell("counters")),
+            ),
+            _pulldown_paste_step(
+                _MENU, "file", _entry_cell("str_menu_file"), "lib/transfer"
+            ),
+            _option_step(
                 _MENU,
                 "file",
-                "str_menu_file",
-                '[href="#test=cookierecv&view=heat-map&file=lib/transfer.c'
-                '&functions=1"]',
+                _entry_cell("str_menu_file"),
+                '[href^="#test=cookierecv&view=heat-map&file=lib/transfer.c"]',
                 _MENU,
                 _HASH_STATE,
             ),
-            *_pulldown_steps(
+            ClickStep(
+                "function pulldown type",
+                (_tab_to(_MENU, _entry_cell("str_menu_function")),),
+                _MENU,
+                "c",
+                _MENU,
+                _expanded_state(_entry_cell("str_menu_function")),
+            ),
+            ClickStep(
+                "function pulldown paste",
+                (),
+                _MENU,
+                "ctrl+v",
+                _MENU,
+                _entry_text_state(_entry_cell("str_menu_function")),
+                "url_headers_push$",
+            ),
+            _option_step(
                 _MENU,
                 "function",
-                "str_menu_function",
+                _entry_cell("str_menu_function"),
                 '[href="#test=cookierecv&view=heat-map'
                 '&function=Curl_headers_push&functions=1"]',
                 _MENU,
@@ -671,33 +1119,130 @@ _CLICKS: tuple[ClickSet, ...] = (
             ),
             ClickStep(
                 "dark mode",
+                (_tab_to(_MENU, _entry_cell("str_menu_dark_mode_enabled")),),
                 _MENU,
-                '[data-entry-name-="str_menu_dark_mode_enabled"]',
+                "Enter",
                 _MENU,
                 "Boolean(document.querySelector("
                 "'[data-entry-name-=\"str_menu_dark_mode_enabled\"]'))",
             ),
             ClickStep(
                 "scale",
+                (_tab_to(_MENU, _entry_cell("str_menu_scale")),),
                 _MENU,
-                f"{_SCALE_WIDGET_SELECTOR} > :first-child",
+                "ArrowLeft",
                 _MENU,
-                _entry_text_state(_SCALE_WIDGET_SELECTOR),
-                0.25,
+                _slider_state(_entry_cell("str_menu_scale")),
+            ),
+            ClickStep(
+                "scale key",
+                (),
+                _MENU,
+                "-",
+                _MENU,
+                _slider_state(_entry_cell("str_menu_scale")),
+            ),
+            ClickStep(
+                "scale key plus",
+                (),
+                _MENU,
+                "+",
+                _MENU,
+                _slider_state(_entry_cell("str_menu_scale")),
+            ),
+            ClickStep(
+                "scale key equals",
+                (),
+                _MENU,
+                "=",
+                _MENU,
+                _slider_state(_entry_cell("str_menu_scale")),
+            ),
+            ClickStep(
+                "scale home",
+                (),
+                _MENU,
+                "Home",
+                _MENU,
+                _slider_state(_entry_cell("str_menu_scale")),
             ),
             ClickStep(
                 "reset",
+                (_tab_to(_MENU, _entry_cell("str_menu_reset")),),
                 _MENU,
-                '[data-entry-name-="str_menu_reset"]',
+                "Enter",
                 _MENU,
-                _entry_text_state(_SCALE_WIDGET_SELECTOR),
+                _slider_state(_entry_cell("str_menu_scale")),
             ),
-            *_pulldown_steps(
+            ClickStep(
+                "test pulldown space",
+                (_tab_to(_MENU, _entry_cell("str_menu_test")),),
+                _MENU,
+                "Space",
+                _MENU,
+                _expanded_state(_entry_cell("str_menu_test")),
+            ),
+            ClickStep(
+                "test pulldown previous",
+                (
+                    KeyWalk(
+                        "ArrowDown",
+                        _MENU,
+                        f"{_entry_cell('str_menu_test')}"
+                        " :nth-child(2 of [role=option])",
+                    ),
+                ),
+                _MENU,
+                "ArrowUp",
+                _MENU,
+                _lit_option_state(_entry_cell("str_menu_test")),
+            ),
+            ClickStep(
+                "test pulldown type",
+                (),
+                _MENU,
+                "r",
+                _MENU,
+                _entry_text_state(_entry_cell("str_menu_test")),
+            ),
+            ClickStep(
+                "test pulldown erase",
+                (),
+                _MENU,
+                "Backspace",
+                _MENU,
+                _entry_text_state(_entry_cell("str_menu_test")),
+            ),
+            ClickStep(
+                "test pulldown close",
+                (),
+                _MENU,
+                "Escape",
+                _MENU,
+                _expanded_state(_entry_cell("str_menu_test")),
+            ),
+            ClickStep(
+                "test pulldown view digit",
+                (_tab_to(_VIEW, _TAPE_ENTRY_SELECTOR),),
+                _VIEW,
+                "2",
+                _MENU,
+                _expanded_state(_entry_cell("str_menu_test")),
+            ),
+            ClickStep(
+                "test pulldown paste",
+                (),
+                _MENU,
+                "ctrl+v",
+                _MENU,
+                _entry_text_state(_entry_cell("str_menu_test")),
+                "resp",
+            ),
+            _option_step(
                 _MENU,
                 "test",
-                "str_menu_test",
-                '[href="#test=respheaders&view=heat-map'
-                '&function=Curl_headers_push&functions=1"]',
+                _entry_cell("str_menu_test"),
+                '[href^="#test=respheaders&view=heat-map"]',
                 _MENU,
                 _HASH_STATE,
             ),
@@ -708,38 +1253,139 @@ _CLICKS: tuple[ClickSet, ...] = (
         "clicks_call_graph",
         "#test=cookierecv&view=call-graph",
         (
-            ClickStep(
-                "call graph cutoff lowest",
-                _VIEW,
-                '[data-entry-name-="cutoff"] .menu-button-widget-'
-                " > :first-child",
-                _VIEW,
-                _CALL_GRAPH_ROWS_STATE,
-                0.25,
-            ),
-            ClickStep(
-                "call graph node close",
-                _VIEW,
-                _CALL_GRAPH_SYMBOL_SELECTOR,
-                _VIEW,
-                _CALL_GRAPH_ROWS_STATE,
-            ),
-            ClickStep(
-                "call graph node open",
-                _VIEW,
-                _CALL_GRAPH_SYMBOL_SELECTOR,
-                _VIEW,
-                _CALL_GRAPH_ROWS_STATE,
-            ),
             *_pulldown_steps(
                 _MENU,
                 "call graph sort",
-                "call_graph_sort",
+                _entry_cell("call_graph_sort"),
                 '[data-entry-value-="name"]',
                 _VIEW,
                 "[...document.querySelectorAll("
                 f'"{_CALL_GRAPH_SYMBOL_SELECTOR}")]'
                 ".map((symbol) => symbol.textContent).join()",
+            ),
+            *_pulldown_steps(
+                _VIEW,
+                "call graph copy",
+                _entry_cell("copy"),
+                '[data-entry-value-="text"]',
+                _VIEW,
+                _expanded_state(_entry_cell("copy")),
+            ),
+            ClickStep(
+                "call graph cutoff highest",
+                (_tab_to(_VIEW, _entry_cell("cutoff")),),
+                _VIEW,
+                "End",
+                _VIEW,
+                _slider_state(_entry_cell("cutoff")),
+            ),
+            ClickStep(
+                "call graph cutoff lowest",
+                (_tab_to(_VIEW, _entry_cell("cutoff")),),
+                _VIEW,
+                "Home",
+                _VIEW,
+                _CALL_GRAPH_ROWS_STATE,
+            ),
+            ClickStep(
+                "call graph cutoff step",
+                (),
+                _VIEW,
+                "ArrowRight",
+                _VIEW,
+                _CALL_GRAPH_ROWS_STATE,
+            ),
+            ClickStep(
+                "call graph node close",
+                (_tab_to(_VIEW, _CALL_GRAPH_ITEM_SELECTOR),),
+                _VIEW,
+                "Enter",
+                _VIEW,
+                _CALL_GRAPH_ROWS_STATE,
+            ),
+            ClickStep(
+                "call graph node open",
+                (),
+                _VIEW,
+                "Enter",
+                _VIEW,
+                _CALL_GRAPH_ROWS_STATE,
+            ),
+            ClickStep(
+                "call graph node child",
+                (),
+                _VIEW,
+                "ArrowRight",
+                _VIEW,
+                _CALL_GRAPH_FOCUS_STATE,
+            ),
+            ClickStep(
+                "call graph node down",
+                (),
+                _VIEW,
+                "ArrowDown",
+                _VIEW,
+                _CALL_GRAPH_FOCUS_STATE,
+            ),
+            ClickStep(
+                "call graph node up",
+                (),
+                _VIEW,
+                "ArrowUp",
+                _VIEW,
+                _CALL_GRAPH_FOCUS_STATE,
+            ),
+            ClickStep(
+                "call graph node parent",
+                (),
+                _VIEW,
+                "ArrowLeft",
+                _VIEW,
+                _CALL_GRAPH_FOCUS_STATE,
+            ),
+            ClickStep(
+                "call graph node shut",
+                (),
+                _VIEW,
+                "ArrowLeft",
+                _VIEW,
+                _CALL_GRAPH_ROWS_STATE,
+            ),
+            ClickStep(
+                "call graph node unshut",
+                (),
+                _VIEW,
+                "ArrowRight",
+                _VIEW,
+                _CALL_GRAPH_ROWS_STATE,
+            ),
+            ClickStep(
+                "call graph node last",
+                (),
+                _VIEW,
+                "End",
+                _VIEW,
+                _CALL_GRAPH_FOCUS_STATE,
+            ),
+            ClickStep(
+                "call graph node first",
+                (),
+                _VIEW,
+                "Home",
+                _VIEW,
+                _CALL_GRAPH_FOCUS_STATE,
+            ),
+            ClickStep(
+                "call graph selected function",
+                (
+                    KeyWalk(
+                        "shift+Tab", _VIEW, _entry_cell("selected_function")
+                    ),
+                ),
+                _VIEW,
+                "Enter",
+                _MENU,
+                _HASH_STATE,
             ),
         ),
     ),
@@ -770,6 +1416,7 @@ class BrowserSession:
         self.browser_process = subprocess.Popen(
             [
                 browser,
+                "--headless",
                 "--disable-gpu",
                 "--no-sandbox",
                 "--incognito",
@@ -995,60 +1642,6 @@ class PageTab:
             method, parameters, self.session_id
         )
 
-    # Returns the top page point a press at a share across an element hits.
-    def element_point(
-        self, frame_name: str, element_selector: str, press_share: float
-    ) -> tuple[float, float]:
-        element_object = self.command(
-            "Runtime.evaluate",
-            {
-                "expression": "document.querySelector("
-                f"{json.dumps(element_selector)})",
-                "contextId": self.frame_context(frame_name),
-            },
-        )["result"]
-        if "objectId" not in element_object:
-            raise RuntimeError(f"{frame_name}: no {element_selector}")
-        frame_x, frame_y, frame_width, is_hit = self.object_call(
-            element_object["objectId"],
-            test_settings.CLICK_POINT_FUNCTION,
-            press_share,
-        )
-        # An element out of view or covered is centred in view, once.
-        if not is_hit:
-            self.object_call(
-                element_object["objectId"],
-                test_settings.CLICK_REVEAL_FUNCTION,
-            )
-            frame_x, frame_y, frame_width, is_hit = self.object_call(
-                element_object["objectId"],
-                test_settings.CLICK_POINT_FUNCTION,
-                press_share,
-            )
-        if not is_hit:
-            raise RuntimeError(f"{frame_name}: {element_selector} is covered")
-        if frame_name == test_settings.CLICK_MENU_FRAME_NAME:
-            return frame_x, frame_y
-        owner_object = self.command(
-            "DOM.resolveNode",
-            {
-                "backendNodeId": self.command(
-                    "DOM.getFrameOwner", {"frameId": self.frame_id(frame_name)}
-                )["backendNodeId"],
-                "executionContextId": self.frame_context(
-                    test_settings.CLICK_MENU_FRAME_NAME
-                ),
-            },
-        )["object"]
-        owner_left, owner_top, owner_width = self.object_call(
-            owner_object["objectId"], test_settings.CLICK_FRAME_BOX_FUNCTION
-        )
-        frame_zoom = owner_width / frame_width
-        return (
-            owner_left + frame_zoom * frame_x,
-            owner_top + frame_zoom * frame_y,
-        )
-
     # Returns the first line of the page's first error report, if any.
     def error_message(self) -> str:
         return next(iter(self.error_reports.values()), "")
@@ -1239,11 +1832,23 @@ class PageTab:
         ]
         return context_id in self.drawn_contexts and all(child_states)
 
-    # Moves the pointer onto a point, returning once each frame drew after.
-    def hover(self, hover_point: tuple[float, float]) -> None:
-        self.input_settle_begin()
-        self.mouse_send("mouseMoved", hover_point)
-        self.browser_session.settled_tab_wait([self])
+    # Writes text to the clipboard from a frame, as a copy there would.
+    def clipboard_write(self, frame_name: str, pasted_text: str) -> None:
+        write_function = test_settings.CLICK_CLIPBOARD_WRITE_FUNCTION
+        clipboard_write = self.command(
+            "Runtime.evaluate",
+            {
+                "expression": f"({write_function})({json.dumps(pasted_text)})",
+                "contextId": self.frame_context(frame_name),
+                "awaitPromise": True,
+                "userGesture": True,
+            },
+        )
+        if "exceptionDetails" in clipboard_write:
+            raise RuntimeError(
+                f"{frame_name}: clipboard write:"
+                f" {clipboard_write['exceptionDetails']['text']}"
+            )
 
     # Writes the page as drawn to an image file.
     def image_write(self, image_path: str) -> None:
@@ -1261,21 +1866,33 @@ class PageTab:
             test_settings.CLICK_MENU_FRAME_NAME, "performance.now()"
         )
 
-    def mouse_send(
-        self, event_type: str, press_point: tuple[float, float]
-    ) -> None:
-        is_moved = event_type == "mouseMoved"
+    # Sends a key's press and release to whatever holds the focus.
+    def key_send(self, key_name: str) -> None:
+        key_press = test_settings.CLICK_KEY_PRESSES[key_name]
         self.command(
-            "Input.dispatchMouseEvent",
+            "Input.dispatchKeyEvent",
             {
-                "type": event_type,
-                "x": press_point[0],
-                "y": press_point[1],
-                "button": "none" if is_moved else "left",
-                "buttons": int(event_type == "mousePressed"),
-                "clickCount": int(not is_moved),
+                "type": "keyDown" if "text" in key_press else "rawKeyDown",
+                **key_press,
             },
         )
+        self.command(
+            "Input.dispatchKeyEvent",
+            {
+                "type": "keyUp",
+                **{
+                    part_name: part_value
+                    for part_name, part_value in key_press.items()
+                    if part_name not in ("commands", "text")
+                },
+            },
+        )
+
+    # Presses a key, returning once each frame drew after it.
+    def key_settle(self, key_name: str) -> None:
+        self.input_settle_begin()
+        self.key_send(key_name)
+        self.browser_session.settled_tab_wait([self])
 
     # Returns what a function returns called on an object with arguments.
     def object_call(
@@ -1308,18 +1925,17 @@ class PageTab:
         self.page_navigate(page_url)
         self.browser_session.settled_tab_wait([self])
 
-    # Presses at a point, returning once the state changed and each frame drew.
+    # Presses a key, returning once the state changed and each frame drew.
     def press(
         self,
-        press_point: tuple[float, float],
+        key_name: str,
         state_frame_name: str,
         state_expression: str,
         state_before: str,
     ) -> None:
         state_context = self.frame_context(state_frame_name)
         self.input_settle_begin()
-        self.mouse_send("mousePressed", press_point)
-        self.mouse_send("mouseReleased", press_point)
+        self.key_send(key_name)
         try:
             state_change = self.command(
                 "Runtime.evaluate",
@@ -1391,12 +2007,30 @@ class PageTab:
             )
         )
 
+    # Types text a key per character, returning once each frame drew after it.
+    def text_type(self, typed_text: str) -> None:
+        self.input_settle_begin()
+        for typed_character in typed_text:
+            self.command(
+                "Input.dispatchKeyEvent",
+                {
+                    "type": "keyDown",
+                    "key": typed_character,
+                    "text": typed_character,
+                },
+            )
+            self.command(
+                "Input.dispatchKeyEvent",
+                {"type": "keyUp", "key": typed_character},
+            )
+        self.browser_session.settled_tab_wait([self])
+
     def trace_begin(self) -> None:
         self.command(
             "Tracing.start",
             {
                 "traceConfig": {
-                    "includedCategories": [test_settings.TRACE_CATEGORIES]
+                    "includedCategories": list(test_settings.TRACE_CATEGORIES)
                 },
                 "transferMode": "ReturnAsStream",
             },
@@ -1425,6 +2059,28 @@ class PageTab:
         self.command("IO.close", {"handle": trace_stream})
         return json.loads(b"".join(trace_chunks))["traceEvents"]
 
+    # Presses each walk's key until the walk reaches its element.
+    def walks_take(
+        self, fault_label: str, key_walks: tuple[KeyWalk, ...]
+    ) -> None:
+        for key_walk in key_walks:
+            reached_expression = (
+                f"({test_settings.CLICK_WALK_REACHED_FUNCTION})"
+                f"({json.dumps(key_walk.element_selector)})"
+            )
+            press_count = 0
+            while not self.frame_evaluate(
+                key_walk.frame_name, reached_expression
+            ):
+                if press_count == test_settings.CLICK_WALK_PRESS_LIMIT:
+                    raise RuntimeError(
+                        f"{fault_label}: {press_count} {key_walk.key_name}"
+                        f" presses reach no {key_walk.element_selector}"
+                    )
+                self.key_settle(key_walk.key_name)
+                self.errors_refuse(fault_label)
+                press_count += 1
+
     # Returns an expression calling a waiting function, named in a trace.
     def wait_expression(self, function_text: str, *argument_texts: str) -> str:
         return (
@@ -1452,22 +2108,25 @@ class Screenshots:
         self.scratch_dir = scratch_dir
         self.report_views = self.report_views_select()
         self.click_timings: list[PageTiming] = []
+        # The timings of each page drawn in two frames, every one kept.
+        self.frame_timings: list[PageTiming] = []
         self.page_timings: list[PageTiming] = []
 
-    # Presses a step's element, returning the time the press took to settle.
+    # Walks to a step's element, returning the time its key took to settle.
     def click_time(
         self,
         page_tab: PageTab,
         set_name: str,
         click_step: ClickStep,
     ) -> PageTiming:
-        press_point = page_tab.element_point(
-            click_step.frame_name,
-            click_step.element_selector,
-            click_step.press_share,
-        )
-        page_tab.hover(press_point)
-        page_tab.errors_refuse(f"{set_name}: {click_step.label}")
+        fault_label = f"{set_name}: {click_step.label}"
+        page_tab.walks_take(fault_label, click_step.key_walks)
+        if not page_tab.frame_evaluate(
+            click_step.frame_name, "document.hasFocus()"
+        ):
+            raise RuntimeError(
+                f"{fault_label}: {click_step.frame_name} holds no focus"
+            )
         page_file = self.relative_file_of(
             page_tab.frame_evaluate(click_step.frame_name, "location.href"),
             self.file_url(self.report),
@@ -1475,6 +2134,10 @@ class Screenshots:
         if not page_file:
             raise RuntimeError(
                 f"{set_name}: {click_step.label} presses outside {self.report}"
+            )
+        if click_step.pasted_text:
+            page_tab.clipboard_write(
+                click_step.frame_name, click_step.pasted_text
             )
         # The page writes the state as the press wait compares it.
         state_text_expression = (
@@ -1488,7 +2151,7 @@ class Screenshots:
         )
         page_tab.trace_begin()
         page_tab.press(
-            press_point,
+            click_step.key_name,
             click_step.state_frame_name,
             click_step.state_expression,
             state_before,
@@ -2297,19 +2960,20 @@ class Screenshots:
                     + f"  {file_row[-1]}\n"
                 )
         slow_rows = [
-            timing_row
+            (timing_row, limit_ms)
             for timing_row in timing_rows
-            if float(timing_row.duration_ms) > timing_row.limit_ms()
+            if (limit_ms := timing_row.limit_ms()) is not None
+            and float(timing_row.duration_ms) > limit_ms
         ]
         if not slow_rows:
             return 0
-        slowest_row = max(
-            slow_rows, key=lambda timing_row: float(timing_row.duration_ms)
+        slowest_row, slowest_limit_ms = max(
+            slow_rows, key=lambda slow_row: float(slow_row[0].duration_ms)
         )
         print(
             f"error: {slowest_row.page_file}: {slowest_row.phase_label} took"
             f" {slowest_row.duration_ms} ms in {slowest_row.shot}, over"
-            f" {slowest_row.limit_ms()} ms, listed in {timing_path}",
+            f" {slowest_limit_ms} ms, listed in {timing_path}",
             file=sys.stderr,
         )
         return 1
@@ -2339,7 +3003,9 @@ class Screenshots:
                 : test_settings.TIMING_FILE_LINES_MAX
             ]
         kept_rows: list[TimingRow] = []
-        for kept_timing in kept_timings + self.click_timings:
+        for kept_timing in (
+            kept_timings + self.frame_timings + self.click_timings
+        ):
             duration_ms = (
                 kept_timing.duration_us
                 / test_settings.TIMING_MICROSECONDS_PER_MILLISECOND
@@ -2353,6 +3019,111 @@ class Screenshots:
                 )
             )
         return kept_rows
+
+    # Returns each frame a view page drew, the first timed from its commit.
+    def trace_frame_timings(
+        self,
+        trace_events: list[Any],
+        trace_name: str,
+        page_dir: str,
+        shot: str,
+    ) -> list[PageTiming]:
+        root_url = self.file_url(page_dir)
+        view_commits = [
+            (trace_event, page_file)
+            for trace_event in trace_events
+            if trace_event["name"] == test_settings.TRACE_COMMIT_NAME
+            and (
+                page_file := self.relative_file_of(
+                    trace_event["args"]["data"]["url"], root_url
+                )
+            )
+            not in ("", test_settings.ENTRY_PAGE)
+        ]
+        if len(view_commits) != 1:
+            raise RuntimeError(
+                f"{trace_name}: {len(view_commits)} view page commits, not 1"
+            )
+        ((view_commit, page_file),) = view_commits
+        view_frame = view_commit["args"]["data"]["frame"]
+
+        # Lists the instant events of a name, in the order they happened.
+        def instants_named(event_name: str) -> list[Any]:
+            return sorted(
+                (
+                    trace_event
+                    for trace_event in trace_events
+                    if trace_event["name"] == event_name
+                    and trace_event["ph"] == test_settings.TRACE_INSTANT_TYPE
+                ),
+                key=lambda trace_event: trace_event["ts"],
+            )
+
+        frame_begins = instants_named(test_settings.TRACE_FRAME_BEGIN_NAME)
+        activations = instants_named(test_settings.TRACE_ACTIVATE_NAME)
+        screen_draws = instants_named(test_settings.TRACE_DRAW_NAME)
+        view_paints = sorted(
+            (
+                trace_event
+                for trace_event in trace_events
+                if trace_event["name"] == test_settings.TRACE_PAINT_NAME
+                and trace_event["ph"] == test_settings.TRACE_COMPLETE_TYPE
+                and trace_event["args"]["data"]["frame"] == view_frame
+                and trace_event["ts"] > view_commit["ts"]
+            ),
+            key=lambda trace_event: trace_event["ts"],
+        )
+        # Each main thread frame painting the view, by its process and number.
+        painted_frames: list[tuple[int, int, int]] = []
+        for view_paint in view_paints:
+            frame_begin = [
+                frame_begin
+                for frame_begin in frame_begins
+                if (frame_begin["pid"], frame_begin["tid"])
+                == (view_paint["pid"], view_paint["tid"])
+                and frame_begin["ts"] <= view_paint["ts"]
+            ][-1]
+            painted_frame = (
+                frame_begin["pid"],
+                frame_begin["args"]["layerTreeId"],
+                frame_begin["args"]["data"]["frameId"],
+            )
+            if painted_frame not in painted_frames:
+                painted_frames.append(painted_frame)
+        # A frame shows once the compositor draws after taking it.
+        draw_times: list[float] = []
+        for process_id, layer_tree_id, frame_number in painted_frames:
+            activation = next(
+                activation
+                for activation in activations
+                if activation["pid"] == process_id
+                and activation["args"]["layerTreeId"] == layer_tree_id
+                and activation["args"]["frameId"] == frame_number
+            )
+            screen_draw = next(
+                screen_draw
+                for screen_draw in screen_draws
+                if screen_draw["pid"] == process_id
+                and screen_draw["args"]["layerTreeId"] == layer_tree_id
+                and screen_draw["ts"] >= activation["ts"]
+            )
+            draw_times.append(screen_draw["ts"])
+        if len(draw_times) != len(test_settings.TIMING_FRAME_PHASE_NAMES):
+            raise RuntimeError(
+                f"{trace_name}: {page_file} drew {len(draw_times)} frames,"
+                f" not {len(test_settings.TIMING_FRAME_PHASE_NAMES)}"
+            )
+        return [
+            PageTiming(
+                page_file, phase_name, phase_name, draw_time - start_time, shot
+            )
+            for phase_name, start_time, draw_time in zip(
+                test_settings.TIMING_FRAME_PHASE_NAMES,
+                [view_commit["ts"], *draw_times[:-1]],
+                draw_times,
+                strict=True,
+            )
+        ]
 
     # Returns the longest load and phase slice of each page file a trace shows.
     def trace_page_timings(
@@ -2561,6 +3332,8 @@ class Screenshots:
         is_traced = not view.shot_flags & (
             test_settings.SHOOT_INDEX_PAGE | test_settings.SHOOT_UNTIMED
         )
+        # Every shot of a page drawn in two frames is taken after its second.
+        is_drawn_twice = bool(view.shot_flags & test_settings.SHOOT_TWO_FRAMES)
         for variant in shot_variants:
             shot = self.shot_name(
                 view_index,
@@ -2572,7 +3345,7 @@ class Screenshots:
             with browser_session.tab(
                 variant.width_px, variant.height_px
             ) as page_tab:
-                if is_traced:
+                if is_traced or is_drawn_twice:
                     page_tab.trace_begin()
                 page_tab.page_open(
                     self.page_url(
@@ -2582,10 +3355,22 @@ class Screenshots:
                         variant.toggle_dark_value,
                     )
                 )
-                if is_traced:
+                if is_drawn_twice:
+                    try:
+                        frame_timings = self.trace_frame_timings(
+                            page_tab.trace_end(), shot, page_dir, shot
+                        )
+                    except (IndexError, KeyError, StopIteration) as error:
+                        raise RuntimeError(f"{shot}: {error!r}") from error
+                    if is_traced:
+                        self.frame_timings += frame_timings
+                elif is_traced:
                     self.page_timings += self.trace_timings(
                         page_tab.trace_end(), shot, page_dir, shot
                     )
+                page_tab.walks_take(shot, view.key_walks)
+                if view.typed_text:
+                    page_tab.text_type(view.typed_text)
                 # The index page frames error pages, so it draws reports.
                 if not view.shot_flags & test_settings.SHOOT_INDEX_PAGE:
                     self.error_page_check(shot, view, page_tab.error_message())

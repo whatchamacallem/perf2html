@@ -62,7 +62,10 @@ window.try_catch_handler_(function () {
     rendered_preferences_text = null,
     chosen_sort_name = "",
     chosen_sort_direction = "",
-    pressed_sort_name = null;
+    pressed_sort_name = null,
+    // Holds the filter's text, matched with each function and its file path.
+    search_text = "",
+    is_search_render_pending = false;
 
   // Returns a function the model names, with its heat map address or none.
   function function_link(function_index) {
@@ -240,12 +243,45 @@ window.try_catch_handler_(function () {
     chosen_sort_direction = first_column.first_direction;
     return first_column;
   }
+  // Returns the records whose function or whole file path the filter matches.
+  function searched_records() {
+    const text_matches = window.report_ui_.search_matcher(search_text);
+    return function_records.filter(
+      (record) => text_matches(record.file) || text_matches(record.name),
+    );
+  }
+  // Keeps the filter's text, drawing once in the next frame for all typed.
+  function search_choose(typed_text) {
+    search_text = typed_text;
+    if (is_search_render_pending) return;
+    is_search_render_pending = true;
+    const cause_event = window.event;
+    requestAnimationFrame(
+      window.try_catch_handler_(() => {
+        is_search_render_pending = false;
+        window.report_load_log_.deferred_render_run(cause_event, page_render);
+      }),
+    );
+  }
+  // Makes the heading's filter, a search entry matching functions and files.
+  function search_entry() {
+    return window.report_ui_.strip.entry_make(
+      "filter",
+      "search",
+      text("str_table_heading_filter"),
+      {
+        search_text,
+        tool_tip_text: text("str_tool_tip_search"),
+        on_search: search_choose,
+      },
+    );
+  }
   // Draws the table under its heading by its sort, each row linked.
   function page_render() {
     const sort_columns = [...FIXED_COLUMNS, ...shown_line_columns];
     const sorted_column = sorted_column_find(sort_columns);
     const shown_records = table_sort_records(
-      function_records,
+      searched_records(),
       sorted_column,
       chosen_sort_direction,
     ).slice(0, RENDERED_ROW_COUNT);
@@ -266,16 +302,19 @@ window.try_catch_handler_(function () {
       {
         counter_list_key: DATABASE_VIEW_KEY,
         is_chunked: true,
-        heading_entries: window.report_ui_.table_sort.heading_entries({
-          table_key: FUNCTIONS_TABLE_KEY,
-          sort_columns,
-          sorted_column,
-          sort_direction: chosen_sort_direction,
-          is_diff,
-          on_column_choose: column_choose,
-          on_direction_choose: (sort_direction) =>
-            sort_choose(sorted_column.sort_name, sort_direction),
-        }),
+        heading_entries: [
+          ...window.report_ui_.table_sort.heading_entries({
+            table_key: FUNCTIONS_TABLE_KEY,
+            sort_columns,
+            sorted_column,
+            sort_direction: chosen_sort_direction,
+            is_diff,
+            on_column_choose: column_choose,
+            on_direction_choose: (sort_direction) =>
+              sort_choose(sorted_column.sort_name, sort_direction),
+          }),
+          search_entry(),
+        ],
         on_redraw: page_render,
         on_sort: (column_index) => title_press(sort_columns[column_index]),
         row_href: shown_records.map((record) => record.href),

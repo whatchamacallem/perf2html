@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import html.entities, re
 
 # Holds an error report's text, the first line of its message a group.
@@ -22,29 +24,93 @@ BROWSER_PIPE_REPLY_FD = 4
 # Lies above every descriptor a child holds while its pipe ends move.
 BROWSER_PIPE_SPARE_FD = 10
 
-# Returns a frame's left, top and width on the page inside its scaled border.
-CLICK_FRAME_BOX_FUNCTION = (
-    "function () { const box = this.getBoundingClientRect();"
-    " const scale = box.width / this.offsetWidth;"
-    " return [box.left + scale * this.clientLeft,"
-    " box.top + scale * this.clientTop, scale * this.clientWidth]; }"
+# Writes a timed paste's text to the clipboard, as a copy before it did.
+CLICK_CLIPBOARD_WRITE_FUNCTION = (
+    "(pasted_text) => navigator.clipboard.writeText(pasted_text)"
 )
 CLICK_HASH_STATE = "location.hash"
+# Holds each key a step presses, as the DevTools key input takes it.
+CLICK_KEY_PRESSES: dict[str, dict[str, Any]] = {
+    "+": {
+        "key": "+",
+        "code": "Equal",
+        "windowsVirtualKeyCode": 187,
+        "modifiers": 8,
+    },
+    "-": {"key": "-", "code": "Minus", "windowsVirtualKeyCode": 189},
+    "1": {"key": "1", "code": "Digit1", "windowsVirtualKeyCode": 49},
+    "2": {"key": "2", "code": "Digit2", "windowsVirtualKeyCode": 50},
+    "5": {"key": "5", "code": "Digit5", "windowsVirtualKeyCode": 53},
+    "=": {"key": "=", "code": "Equal", "windowsVirtualKeyCode": 187},
+    "ArrowDown": {
+        "key": "ArrowDown",
+        "code": "ArrowDown",
+        "windowsVirtualKeyCode": 40,
+    },
+    "ArrowLeft": {
+        "key": "ArrowLeft",
+        "code": "ArrowLeft",
+        "windowsVirtualKeyCode": 37,
+    },
+    "ArrowRight": {
+        "key": "ArrowRight",
+        "code": "ArrowRight",
+        "windowsVirtualKeyCode": 39,
+    },
+    "ArrowUp": {
+        "key": "ArrowUp",
+        "code": "ArrowUp",
+        "windowsVirtualKeyCode": 38,
+    },
+    "Backspace": {
+        "key": "Backspace",
+        "code": "Backspace",
+        "windowsVirtualKeyCode": 8,
+    },
+    "End": {"key": "End", "code": "End", "windowsVirtualKeyCode": 35},
+    "Enter": {
+        "key": "Enter",
+        "code": "Enter",
+        "windowsVirtualKeyCode": 13,
+        "text": "\r",
+    },
+    "Escape": {"key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27},
+    "Home": {"key": "Home", "code": "Home", "windowsVirtualKeyCode": 36},
+    "PageDown": {
+        "key": "PageDown",
+        "code": "PageDown",
+        "windowsVirtualKeyCode": 34,
+    },
+    "Space": {"key": " ", "code": "Space", "windowsVirtualKeyCode": 32},
+    "Tab": {"key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9},
+    "c": {"key": "c", "code": "KeyC", "windowsVirtualKeyCode": 67},
+    "ctrl+v": {
+        "key": "v",
+        "code": "KeyV",
+        "windowsVirtualKeyCode": 86,
+        "modifiers": 2,
+        "commands": ["paste"],
+    },
+    "r": {"key": "r", "code": "KeyR", "windowsVirtualKeyCode": 82},
+    "s": {"key": "s", "code": "KeyS", "windowsVirtualKeyCode": 83},
+    "shift+Tab": {
+        "key": "Tab",
+        "code": "Tab",
+        "windowsVirtualKeyCode": 9,
+        "modifiers": 8,
+    },
+}
 CLICK_MENU_FRAME_NAME = "menu"
-CLICK_PRESS_SHARE_MIDDLE = 0.5
-# Returns a press point a share across the element, the frame width, a hit.
-CLICK_POINT_FUNCTION = (
-    "function (press_share) { const box = this.getBoundingClientRect();"
-    " const x = box.left + press_share * box.width;"
-    " const y = box.top + box.height / 2;"
-    " return [x, y, innerWidth,"
-    " this.contains(document.elementFromPoint(x, y))]; }"
-)
-CLICK_REVEAL_FUNCTION = (
-    "function () {"
-    " this.scrollIntoView({block: 'center', inline: 'nearest'}); }"
-)
 CLICK_VIEW_FRAME_NAME = "view"
+# Bounds the presses of one walk, so a walk reaching nothing fails.
+CLICK_WALK_PRESS_LIMIT = 60
+# Returns whether the focus, or an open pulldown's light, is on a match.
+CLICK_WALK_REACHED_FUNCTION = (
+    "(element_selector) => document.hasFocus() && [...document"
+    ".querySelectorAll(element_selector)].some((element) =>"
+    " element === document.activeElement"
+    ' || element.matches(\'[role="option"][aria-selected="true"]\'))'
+)
 
 COMMENT_BLOCK_MAX_LINES = 1
 COMMENT_FIRST_WORD_REPLACEMENTS = {"Answers": "Returns"}
@@ -176,7 +242,9 @@ SHOOT_LIGHT_DEFAULT = 1 << 6
 # Shoots 720p alone, not 4k too.
 SHOOT_ONE_VARIANT = 1 << 1
 SHOOT_REGULAR_REPORT = 1 << 2
-# Leaves untimed the flame graph, a large heat map file or test, settings.
+# Times a page drawn in two frames by its draws, its first frame bound alone.
+SHOOT_TWO_FRAMES = 1 << 5
+# Leaves untimed the flame graph, a large test's heat map, settings.
 SHOOT_UNTIMED = 1 << 4
 # Lists the address parts of each view a test opens, by the report offering it.
 SHOOT_TEST_VIEW_PARTS: dict[int, tuple[str, ...]] = {
@@ -704,6 +772,8 @@ TIMING_CLICK_LIMIT_MS = 300
 TIMING_CLICK_PHASE_NAME = "click"
 TIMING_FILE_LINES_MAX = 3
 TIMING_FILE_NAME = "timing.txt"
+# Names a page's frames in the order drawn, the first bound as a page load.
+TIMING_FRAME_PHASE_NAMES: tuple[str, ...] = ("first frame", "second frame")
 # A load counts from a commit to its load event or its last phase, the later.
 TIMING_LOAD_PHASE_NAME = "load"
 TIMING_MICROSECONDS_PER_MILLISECOND = 1000
@@ -711,28 +781,39 @@ TIMING_MICROSECONDS_PER_MILLISECOND = 1000
 TIMING_PAGE_LOAD_LIMIT_MS = 200
 TIMING_SCRIPT_PHASE_NAME = "script"
 
+# Marks the compositor taking a main thread frame, by that frame's number.
+TRACE_ACTIVATE_NAME = "ActivateLayerTree"
 TRACE_BEGIN_TYPE = "B"
-TRACE_CATEGORIES = "devtools.timeline"
+TRACE_CATEGORIES: tuple[str, ...] = (
+    "devtools.timeline",
+    "disabled-by-default-devtools.timeline.frame",
+)
 # Marks a page's commit, where its load is counted from.
 TRACE_COMMIT_NAME = "CommitLoad"
 TRACE_COMPLETE_TYPE = "X"
 TRACE_DISPATCH_NAME = "EventDispatch"
+# Marks the compositor drawing its frame on the screen.
+TRACE_DRAW_NAME = "DrawFrame"
 TRACE_END_TYPE = "E"
+# Marks a main thread frame's start, numbering it for its activation.
+TRACE_FRAME_BEGIN_NAME = "BeginMainThreadFrame"
 TRACE_FUNCTION_CALL_NAME = "FunctionCall"
+TRACE_INSTANT_TYPE = "I"
 TRACE_LOAD_NAME = "MarkLoad"
 TRACE_MARK_NAMES: tuple[str, ...] = (TRACE_COMMIT_NAME, TRACE_LOAD_NAME)
 # A function call of this script id runs no page script, so no file owns it.
 TRACE_NO_SCRIPT_ID = "0"
+TRACE_PAINT_NAME = "Paint"
 # The phase each traced slice counts to and the argument naming its frame.
 TRACE_PHASES: dict[str, tuple[str, str]] = {
     "EvaluateScript": (TIMING_SCRIPT_PHASE_NAME, "data"),
     TRACE_FUNCTION_CALL_NAME: (TIMING_SCRIPT_PHASE_NAME, "data"),
     "Layout": ("layout", "beginData"),
-    "Paint": ("paint", "data"),
+    TRACE_PAINT_NAME: ("paint", "data"),
     "UpdateLayoutTree": ("style", "beginData"),
 }
 # The dispatches a press starts with, its click timed from the first.
-TRACE_PRESS_EVENT_TYPES: tuple[str, ...] = ("pointerdown", "mousedown")
+TRACE_PRESS_EVENT_TYPES: tuple[str, ...] = ("keydown",)
 TRACE_READ_BYTES = 1 << 22
 TRACE_SLICE_TYPES: tuple[str, ...] = (
     TRACE_BEGIN_TYPE,

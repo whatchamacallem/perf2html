@@ -94,6 +94,8 @@ window.try_catch_handler_(function () {
     "heat-map-minimap-viewport-",
   );
   let current_file_path = null;
+  // Holds the source rows of the drawn file, in the order they are drawn.
+  let shown_source_rows = [];
   tree_panel.setAttribute(
     "aria-label",
     window.ui_strings_.text("str_heat_map_tree_label"),
@@ -968,8 +970,9 @@ window.try_catch_handler_(function () {
             counter !== ranking_counter &&
             counter.get(counter_source.cost_vector),
         )
+        // Code unit order keeps the first frame free of the collator's start.
         .sort((counter_a, counter_b) =>
-          counter_a.key.localeCompare(counter_b.key),
+          counter_a.key < counter_b.key ? -1 : 1,
         ),
     ];
     const rows = listed_counters.map((counter, row_index) => {
@@ -1058,17 +1061,25 @@ window.try_catch_handler_(function () {
           last: line_run.last_line,
         });
   // Lists the titles of a calls table part, the caller's or the callee's.
-  const calls_columns = (function_label_id) => [
+  const calls_columns = (function_label_id, site_label_id) => [
     { label: text("str_column_calls"), numeric: true },
     { label: text(function_label_id) },
-    { label: text("str_column_call_site") },
+    { label: text(site_label_id) },
   ];
   // Renders a box's calls as one table: its callers, then its callees.
-  function calls_table_render(caller_rows, callee_rows) {
-    const callee_columns = calls_columns("str_column_callee");
+  function calls_table_render(
+    caller_rows,
+    callee_rows,
+    caller_site_label_id,
+    callee_site_label_id,
+  ) {
+    const callee_columns = calls_columns(
+      "str_column_callee",
+      callee_site_label_id,
+    );
     // Each part's titles lead its rows, a part with no rows left out.
     const columns = caller_rows.length
-      ? calls_columns("str_column_caller")
+      ? calls_columns("str_column_caller", caller_site_label_id)
       : callee_columns;
     const rows = [
       ...caller_rows,
@@ -1154,6 +1165,8 @@ window.try_catch_handler_(function () {
       const calls_table = calls_table_render(
         callers.map(call_row_cells),
         callees.map(call_row_cells),
+        "str_column_location",
+        "str_column_location",
       );
       markup += calls_table.markup;
       text_parts.push(calls_table.text);
@@ -1238,7 +1251,12 @@ window.try_catch_handler_(function () {
       body_markup += function_part.markup;
       text_parts.push(...function_part.text_parts);
     }
-    // The calls a line's box shows end it, each row linking its callee's line.
+    // The calls a line's box shows end it, each row linking its call's line.
+    const callers = line_costs
+      ? call_rows_merge(
+          declared_indexes.flatMap((index) => function_table[index].callers),
+        )
+      : [];
     const callees = line_costs
       ? (file.callees[line_number] || [])
           .slice()
@@ -1247,7 +1265,16 @@ window.try_catch_handler_(function () {
               ranking_value(callee_b[3]) - ranking_value(callee_a[3]),
           )
       : [];
-    if (callees.length) {
+    if (callers.length || callees.length) {
+      const caller_rows = callers.map((call_row) => [
+        call_count_cell(call_row.call_count),
+        { text: function_name(call_row.function_index) },
+        line_link_cell(
+          call_row.call_file,
+          call_row.call_line,
+          report_ui_.location_text(call_row.call_file, call_row.call_line),
+        ),
+      ]);
       const callee_rows = callees.map(
         ([callee_index, call_file, call_line, , call_count]) => [
           call_count_cell(call_count),
@@ -1259,7 +1286,12 @@ window.try_catch_handler_(function () {
           ),
         ],
       );
-      const calls_table = calls_table_render([], callee_rows);
+      const calls_table = calls_table_render(
+        caller_rows,
+        callee_rows,
+        "str_column_call_site",
+        "str_column_jump_target",
+      );
       body_markup += calls_table.markup;
       text_parts.push(calls_table.text);
     }
@@ -1414,7 +1446,8 @@ window.try_catch_handler_(function () {
     if (room_px) room_set(room_px + "px");
   }
 
-  function file_render(file_path) {
+  // Draws a file's source, the first frame drawing the chunk of its line.
+  function file_render(file_path, line) {
     const file = file_table[file_path];
     if (!file) window.throw_exception_("str_error_internal");
     const is_first_view = current_file_path !== file_path,
@@ -1650,6 +1683,11 @@ window.try_catch_handler_(function () {
       },
     ];
     const column_parts = [...fixed_parts, ...line_parts];
+    shown_source_rows = source_rows;
+    // The first frame draws the line's chunk, or the first chunk for none.
+    const line_row_index = source_rows.findIndex(
+      (source_row) => source_row.line_number === line,
+    );
     const markup = report_ui_.render_record_table(
       "heat.src",
       column_parts,
@@ -1658,6 +1696,7 @@ window.try_catch_handler_(function () {
         row_attributes: attrs,
         cls: "heat-map-source-table-",
         counter_list_key: HEAT_MAP_VIEW_ENTRY[0],
+        drawn_row_index: Math.max(line_row_index, 0),
         is_chunked: true,
         on_redraw: source_redraw,
         on_sort: (column_index) =>
@@ -1773,52 +1812,59 @@ window.try_catch_handler_(function () {
     source_resize_observer.observe(table_element);
     minimap_fill_request();
   }
+  const minimap_is_shown = () => !minimap_panel.classList.contains("empty-");
   // Fills a shown minimap before the paint, a later request replacing it.
   function minimap_fill_request() {
-    if (minimap_panel.classList.contains("empty-")) return;
+    if (!minimap_is_shown()) return;
     const build_number = ++minimap_build_number;
     requestAnimationFrame(
       window.try_catch_handler_(() => {
-        if (build_number === minimap_build_number)
-          minimap_fill(
-            main_panel.querySelector("table.heat-map-source-table-"),
-          );
+        if (build_number === minimap_build_number) minimap_fill();
       }),
     );
   }
   // Writes the source's lines as one block, a colored line its band.
-  function minimap_fill(table_element) {
+  function minimap_fill() {
     const line_markups = [];
     let box_row = null;
-    for (const source_row of table_element.querySelectorAll(
-      ":scope > tbody > :is(tr[data-line-number-]," +
-        " tr.heat-map-source-line-detail-row-)",
-    )) {
-      // A line's open box is a gap in the minimap, sized once it is drawn.
-      if (!source_row.hasAttribute("data-line-number-")) {
-        box_row = source_row;
-        line_markups.push(
-          render_element("span", { class: "heat-map-minimap-box-gap-" }, ""),
-        );
+    for (const source_row of shown_source_rows) {
+      const row_element = document.getElementById(
+        "L" + source_row.line_number + "-",
+      );
+      // A line not drawn yet holds its place as a blank line.
+      if (!row_element) {
+        if (source_row.text) line_markups.push(" ");
         continue;
       }
-      const code_cell = source_row.querySelector(
+      const code_cell = row_element.querySelector(
         ":scope > td.heat-map-source-table-code-cell-",
       );
       // An empty line draws no line box, as an empty cell has no height.
-      if (!code_cell.textContent) continue;
-      const line_markup = render_html_escape(code_cell.textContent);
-      const cell_style = code_cell.getAttribute("style");
-      const band_attributes = cell_style
-        ? { class: "heat-map-minimap-band-", style: cell_style }
-        : code_cell.parentElement.classList.contains("other-counter-source-")
-          ? { class: "heat-map-minimap-band- other-counter-source-" }
-          : null;
-      line_markups.push(
-        band_attributes
-          ? render_element("span", band_attributes, line_markup)
-          : line_markup,
-      );
+      if (code_cell.textContent) {
+        const line_markup = render_html_escape(code_cell.textContent);
+        const cell_style = code_cell.getAttribute("style");
+        const band_attributes = cell_style
+          ? { class: "heat-map-minimap-band-", style: cell_style }
+          : row_element.classList.contains("other-counter-source-")
+            ? { class: "heat-map-minimap-band- other-counter-source-" }
+            : null;
+        line_markups.push(
+          band_attributes
+            ? render_element("span", band_attributes, line_markup)
+            : line_markup,
+        );
+      }
+      // A line's open box is a gap in the minimap, sized once it is drawn.
+      const next_row = row_element.nextElementSibling;
+      if (
+        next_row &&
+        next_row.classList.contains("heat-map-source-line-detail-row-")
+      ) {
+        box_row = next_row;
+        line_markups.push(
+          render_element("span", { class: "heat-map-minimap-box-gap-" }, ""),
+        );
+      }
     }
     minimap_box.innerHTML = render_element("pre", {}, line_markups.join("\n"));
     clone_line_count = line_markups.length;
@@ -2307,8 +2353,8 @@ window.try_catch_handler_(function () {
     const is_drawn = key !== rendered_key;
     if (is_drawn) {
       rendered_key = key;
-      file_render(file);
-    }
+      file_render(file, line);
+    } else source_rest_draw();
     if (line && !main_panel.querySelector(`tr[data-line-number-="${line}"]`))
       window.throw_exception_("str_error_hash_line_unknown", file, line);
     // A new line box fits the boxes' room, else a drawn source fits it here.
@@ -2329,12 +2375,50 @@ window.try_catch_handler_(function () {
     if (is_new_address && !line) file_box_show();
     rendered_line = line;
     main_focus_restore(main_had_focus);
-    load_render_finish();
+    // The first frame draws the chunks in view, the second frame the rest.
+    const table_element = main_panel.querySelector(
+      "table.heat-map-source-table-",
+    );
+    report_ui_.table_chunks.shown_draw(table_element, main_panel);
+    if (report_ui_.table_chunks.are_deferred(table_element))
+      source_rest_draw_request(table_element);
+    else load_render_finish();
   }
   // Draws the source again for a new clip or column place, its open line kept.
   function source_redraw() {
     rendered_key = "";
     route_render();
+  }
+  // Draws the source's deferred chunks and its minimap's every line.
+  function source_rest_draw() {
+    const table_element = main_panel.querySelector(
+      "table.heat-map-source-table-",
+    );
+    // A source the second frame or a route drew whole has nothing to draw.
+    if (!report_ui_.table_chunks.are_deferred(table_element)) return;
+    report_ui_.table_chunks.rest_draw(table_element);
+    // A source with no line open keeps its first line the tab stop.
+    if (!rendered_line)
+      report_ui_.table_rows.tab_stop_set(
+        table_element.querySelector("tr[data-line-number-]"),
+        false,
+      );
+    if (minimap_is_shown()) minimap_fill();
+  }
+  // Draws the rest of the source in the frame after the first frame's.
+  function source_rest_draw_request(table_element) {
+    requestAnimationFrame(
+      window.try_catch_handler_(() =>
+        requestAnimationFrame(
+          window.try_catch_handler_(() => {
+            // A later route drew or replaced the source meanwhile.
+            if (!table_element.isConnected) return;
+            source_rest_draw();
+            load_render_finish();
+          }),
+        ),
+      ),
+    );
   }
   // Logs the view's load render once the first route has drawn.
   function load_render_finish() {

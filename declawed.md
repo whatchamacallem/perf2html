@@ -45,8 +45,8 @@ scripts too."""
   writes the frame query as `1` or `0` and the stored preference is cast to
   `1` or `0`, a query's text read through `Number`.
 - Linux perf counting is the other exception to fail fast validation, and
-  `perf` (the `linux-perf` package, named by the toolchain check through
-  `CONTAINING_PACKAGES`) is a required tool all the same. `perf_measure.py
+  `perf` (the `linux-perf` package, named by the toolchain check) is a
+  required tool all the same. `perf_measure.py
   timing` runs `perf stat -j -r TIMING_PERF_STAT_RUNS -o
   <test>.perf-stat.json -e '{TIMING_PERF_STAT_EVENTS}' --` over the pinned
   curl perf tool command. A count perf writes as one of
@@ -503,11 +503,22 @@ The single function/check owning each concern - never bypass or duplicate:
   plain label there, the preference strip, the settings view's load log
   strip, each table heading, each heat map info box's controls (theme.js);
   `report_ui_.strip.copy_entry_make()` every copy pulldown, its lines as
-  text or as an SVG image; `report_ui_.strip.slider_text()` every
-  slider's cells, the menu's scale and the call graph's cutoff;
+  text or as an SVG image; an entry's `slider_stop` and
+  `slider_last_stop` every slider's cells, the menu's scale and the call
+  graph's cutoff, each a tab stop taking arrow, Home and End keys;
   `strip_slider_drag()` every press and drag on a slider's cells, each
   stop the pointer reaches the one whose cell edge lies nearest it, the
-  edges measured at the press, handed to the entry's `on_stop_choose`.
+  edges measured at the press, handed to the entry's `on_stop_choose`;
+  an entry cell focused before a render, a pulldown after its choice or
+  its Escape too, focused again after it, as the WAI-ARIA combobox
+  pattern keeps the focus.
+- `report_ui_.search_matcher()` - every search pattern, a pulldown's and
+  the database's `filter` search entry's, case blind, a bad pattern
+  matching nothing (theme.js).
+- The call graph's table is a WAI-ARIA tree, every drawn node a treeitem,
+  one roving tab stop; the arrow keys walk it in its depth first drawing
+  order, as `tree_key_handler()` (call_graph.js) and the heat map tree's
+  do.
 - `report_ui_.resize_settle_register(callback)` - every window resize
   settle: the one animation frame per rendering update,
   runs `layout_refresh`, then each callback in registration order; a scale
@@ -555,7 +566,10 @@ The single function/check owning each concern - never bypass or duplicate:
   navigation started, a framed page posting it up (utility.js);
   `report_load_log_.page_render_log()` and `.event_render_log()` every
   render entry, a view drawing after its own loads calling its load render
-  log once drawn through `view_activate`'s `load_render_defer`.
+  log once drawn through `view_activate`'s `load_render_defer`;
+  `report_load_log_.deferred_render_run()` every render a later animation
+  frame draws, logged against the input that asked for it, the database's
+  search redraw.
 
 ### Working agreement
 
@@ -619,6 +633,8 @@ The single function/check owning each concern - never bypass or duplicate:
 - `scripts/publish.sh` is not part of normal testing and runs only when the
   maintainer decides to use it. No other script calls it, no test and no agent
   runs it, and no source stage touches it, so that it holds up no run.
+- Spell check is never run as part of the project and is not run by agents;
+  monitoring and fixing what it finds is the maintainer's responsibility.
 - More than one goal in a response ends with a done/not-done checklist.
 - Numbering of multi-item communication in summaries follows ISO 2145.
 - Don't update usage text, tell the user to do that.
@@ -662,7 +678,8 @@ The single function/check owning each concern - never bypass or duplicate:
   dir that can be debugged.
 - No news is good news: nothing prints a success line unless `--verbose`, and
   when it does print, a success line goes to stdout and failures go to stderr -
-  not the other way round.
+  not the other way round. The GitHub Pages address `scripts/publish.sh`
+  prints on stdout is its output, not a success line.
 - Every ok/success line a script of ours controls (including our Python tools'
   ok lines) is gated behind `--verbose`; an outside tool's own quiet switch is
   passed unless `--verbose` (e.g. `ruff --quiet`), curl's `--silent` unless
@@ -680,10 +697,14 @@ The single function/check owning each concern - never bypass or duplicate:
   reach the terminal verbatim; a non-zero exit is `error_exit`, the gold
   comparison's `SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE` aside. The one
   exception is `pyright_filtered_run` at level 1.
-- `tools_resolve` (or equivalent) must find every formatter/linter and the
-  screenshot browser before anything is deleted, naming every missing tool
-  with its install command - never discover a missing tool mid-run after
-  damage is done.
+- `tools_resolve` (or equivalent) must find every formatter/linter, the
+  screenshot browser, Pillow and the `toolchain_missing_list` toolchain
+  before anything is deleted, naming every missing tool in one line that
+  points to `packages.md` (`ADMIN_INSTRUCTIONS_FILE_NAME`) - never discover a
+  missing tool mid-run after damage is done.
+- `packages.md` holds every install command, a section for the perf2html*.sh
+  scripts and one for developers running `test_all.sh`; no script prints
+  an install command.
 - An install command names a package as this machine's release names it;
   package name compatibility with other releases is ignored, never reported.
 - `test_all.sh` captures nothing and makes no temp file - refusals stream live
@@ -745,11 +766,10 @@ The single function/check owning each concern - never bypass or duplicate:
   from the shipping scripts to compare against - not a bug to flag on sight.
 - One line helper functions in `.sh` are discouraged and require approval.
 - `error_exit` calls and other error messages must be only one line while
-  printing relevant variables too. `tools_resolve`'s missing tools error is
-  the single exception, a line per install command.
+  printing relevant variables too.
 - An error message states what failed and carries no advice: no fix, no next
-  step, no command to run. A missing tool named with its install command
-  (`tools_resolve` or equivalent) is the one exception.
+  step, no command to run. A missing tool's pointer to `packages.md`
+  (`tools_resolve`, `toolchain_check`) is the one exception.
 - `test_all.sh` should print significant run times, it is not "no news is good
   news".
 - Don't change code when unable to implement a request as specified. Do not

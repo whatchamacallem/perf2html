@@ -42,6 +42,17 @@ args_parse() {
     "$REPORT_MANIFEST_VERSION_DIFF"
 }
 
+# Force pushes the report as one commit with no parent, replacing the branch.
+branch_force_push() {
+  _INDEX_FILE="$(mktemp -u)"
+  trap 'rm -f -- "$_INDEX_FILE"' EXIT
+  export GIT_INDEX_FILE="$_INDEX_FILE"
+  commit_write
+  git push -q --force "$PUBLISH_REMOTE_NAME" \
+    "$_COMMIT_OBJECT:refs/heads/$PUBLISH_BRANCH_NAME"
+  unset GIT_INDEX_FILE
+}
+
 # Writes the report as a commit with no parent, through a temporary index.
 commit_write() {
   local _empty_file _message _checksum
@@ -56,6 +67,16 @@ commit_write() {
   git update-index --add --cacheinfo "$PUBLISH_JEKYLL_DISABLE_FILE_MODE" \
     "$_empty_file" "$PUBLISH_JEKYLL_DISABLE_FILE_NAME"
   _COMMIT_OBJECT="$(git commit-tree "$(git write-tree)" -m "$_message")"
+}
+
+# Composes the GitHub Pages address from the remote's owner and repository.
+page_url_compose() {
+  local _remote_url
+  _remote_url="$(git remote get-url "$PUBLISH_REMOTE_NAME")"
+  [[ "$_remote_url" =~ $PUBLISH_REMOTE_URL_PATTERN ]] || error_exit 2 \
+    "error: remote URL $_remote_url unlike $PUBLISH_REMOTE_URL_PATTERN"
+  printf -v _PAGE_URL "$PUBLISH_PAGE_URL_FORMAT" "${BASH_REMATCH[1]}" \
+    "${BASH_REMATCH[2]}"
 }
 
 # Refuses an archive unlike its report, by a file's name or by a file's bytes.
@@ -84,19 +105,20 @@ report_make() {
   fi >/dev/null
 }
 
-args_parse "$@"
+# Purges the pushed commit and every other unreachable object.
+unreachable_objects_purge() {
+  git update-ref -d "refs/remotes/$PUBLISH_REMOTE_NAME/$PUBLISH_BRANCH_NAME"
+  git prune --expire=now
+}
 
-report_make
-report_archive_check
+main() {
+  args_parse "$@"
+  page_url_compose
+  report_make
+  report_archive_check
+  branch_force_push
+  unreachable_objects_purge
+  printf '%s\n' "$_PAGE_URL"
+}
 
-_INDEX_FILE="$(mktemp -u)"
-trap 'rm -f -- "$_INDEX_FILE"' EXIT
-
-export GIT_INDEX_FILE="$_INDEX_FILE"
-commit_write
-git push -q --force "$PUBLISH_REMOTE_NAME" \
-  "$_COMMIT_OBJECT:refs/heads/$PUBLISH_BRANCH_NAME"
-unset GIT_INDEX_FILE
-
-git update-ref -d "refs/remotes/$PUBLISH_REMOTE_NAME/$PUBLISH_BRANCH_NAME"
-git prune --expire=now
+main "$@"

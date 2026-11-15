@@ -1,5 +1,7 @@
 # perf2html README.md
 
+## Introduction
+
 `perf2html` is a collection of scripts that profile `perf` and generate html
 reports about the results.
 
@@ -11,7 +13,7 @@ The latest version and an example report can be found here:
 ## Table Of Contents
 
 - [Using A Report](#using-a-report)
-- [Buttons](#buttons)
+- [Menu And Keyboard](#menu-and-keyboard)
 - [Running The Generator Scripts](#running-the-generator-scripts)
 - [Callgrind Counters](#callgrind-counters)
 - [Reading A Diff Report](#reading-a-diff-report)
@@ -35,51 +37,76 @@ are immutable (so bookmarks work) and the module URLs used by JavaScript on the
 back end are also immutable (so no server is needed and perfect caching is
 possible).
 
-## Menu
+A report can also be served from an Ubuntu container with:
+`python3 -m http.server 8000`.
+
+## Menu And Keyboard
 
 Some of the settings are stored in the browser and may be reset with the reset
 button. Pull-down buttons often support searching by typing or pasting text.
 
-### First Row Menu
+### First menu row
 
-The first row of buttons will have the same number on on every page. The number
+The first row of buttons will have the same number on every page. The number
 can be used to select them, and some of them support searching within their
-pull-downs by typing or pasting test.
+pull-downs by typing or pasting text.
 
-- `perf2html`: Opens the perf2html repository in a new tab, or the settings
-  page in debug mode.
-- `overview`: Shows the overview page.
-- `test`: A pulldown of the report's tests. It will transition from the
-  overview to the database page automatically.
-- `file`: A pulldown of the files the current test recorded samples in. Typing
-  `name:line` opens the file at that line.
-- `function`: A pulldown of the functions the test recorded samples in.
-- `database`: Shows the test's table of functions.
-- `flame graph`: Shows the test's flame graph.
-- `call graph`: Shows the test's call graph.
-- `reset`: Returns every preference except dark mode.
-- `help`: Opens this README in a new tab.
-- `scale`: A slider scaling the whole report. Use `+`, `=` and `-` too.
-- `dark` / `light`: Toggles the dark mode.
+- `perf2html`: Opens the project repository.
+- `overview`: Opens a catalogue of tests and the manifest.
+- `test`: Selects the test shown.
+- `file`: Opens a file. Typing file:line opens that line.
+- `function`: Opens the file containing a function. Searchable.
+- `database`: Opens a page with a database of functions.
+- `flame graph`: Open this test's live call trace.
+- `call graph`: Opens a page with a call graph and costs.
+- `reset`: Restores default preferences.
+- `help`: Opens the help page in a new tab.
+- `scale`: Scales the whole report, as do `+`, `-` and `=`.
+- `dark` / `light`: Toggles between the light and dark themes.
 
-### Status Row Menu
+### Status menu row
 
 These settings may be unique to a given page or shared.
 
-- `lines` / `functions`, on the heat map: Toggles the counter data view mode.
-- `counters`, on the heat map and the database: A pulldown of every counter and
-  of `calls`, `callers` and `callees`, the shown ones marked `◼`. Choosing one
-  shows or hides its column, and dragging one moves its column. Each of the two
-  pages keeps its own list.
+- `lines` / `functions`, on the heat map: Toggles between per line and per
+  function counters.
+- `counters`, on the heat map and the database: Selects the columns shown.
+  Dragging moves them.
 - `log scale` / `linear scale`, on the heat map, the database and the call
-  graph: This is the color curve the heat colors use.
-- `hottest first` / `alphabetical`, on the heat map: Toggles the sort order of
-  the files tree.
-- `cumulative first` / `hottest first` / `alphabetical`, on the call graph: A
-  pulldown ordering each function's callees by the cost of the calls, by each
-  callee's own cost, or by name.
+  graph: Toggles heat colors between a log and linear curve.
+- `hottest first` / `alphabetical`, on the heat map: Toggles the file tree's
+  sort order.
+- `cumulative first` / `hottest first` / `alphabetical`, on the call graph:
+  Orders callees by their inclusive cost, their own cost or name.
+- `filter`, on the database: Filter the rows with a pattern. Esc clears it.
+
+### Keyboard
+
+Tab moves forward through the first menu row, then the status menu row, then
+the page below them, and Shift+Tab moves backward. Tables, trees and the source
+code can be navigated with the arrow keys.
+
+- The number keys select the numbered buttons of the first menu row.
+- Enter or Space presses the focused button or link.
+- A pulldown opens with Enter, Space or typing. The up and down arrow keys move
+  through its entries, Enter picks one, Backspace erases the last search
+  character and Escape closes it.
+- Sliders move with the arrow keys, and Home and End go to their ends.
+- `+` or `=` and `-` change the scale.
+- Tables can be navigated with the arrow keys. Up and down move between rows,
+  left and right between the links of a row, and Home and End go to the first
+  and last row. Enter or Space on a row follows its first link.
+- Trees can be navigated with the arrow keys. Right opens a branch and left
+  closes it.
+- The hottest lines can be navigated with the arrow keys.
+- On the heat map, Enter on a source line opens or closes its information box,
+  and Escape closes it.
+- The arrow keys scroll a page when nothing focused uses them.
 
 ## Running The Generator Scripts
+
+See `packages.md` for the Ubuntu administrator commands needed to install the
+packages required to use the command line tools.
 
 These are the scripts for using `perf2html`. While the scripts directory does
 contain a few more interesting files, none of them should be needed to use the

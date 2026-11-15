@@ -24,6 +24,7 @@ window.try_catch_handler_(function () {
     "STYLE_TABLE_CHUNK_ROWS_PROPERTY",
   );
   const TABLE_CHUNK_ROW_COUNT = settings_("TABLE_CHUNK_ROW_COUNT");
+  const WIDGET_KEY_NAMES = settings_("WIDGET_KEY_NAMES");
 
   const render_character_cells = window.render_character_cells_;
   const render_element = window.render_element_;
@@ -74,7 +75,7 @@ window.try_catch_handler_(function () {
   const sizer_row_markup = (sizer_cells_markup) =>
     render_element(
       "tr",
-      { class: "table-sizer-row-", "aria-hidden": "true" },
+      { class: "table-sizer-row-", "aria-hidden": "true", inert: "" },
       sizer_cells_markup,
     );
 
@@ -240,16 +241,19 @@ window.try_catch_handler_(function () {
         .map((call_branch) => path_key(call_branch.node_path)),
     );
   }
-  let button_graph_nodes = new WeakMap(),
-    cell_symbol_buttons = new WeakMap(),
+  let cell_symbol_buttons = new WeakMap(),
     cutoff_root = null,
+    drawn_path_keys = [],
     drawn_rows = new Map(),
     heat_curve_name = null,
+    item_graph_nodes = new WeakMap(),
     open_path_keys = null,
-    path_symbol_buttons = new Map(),
+    path_tree_items = new Map(),
     rendered_preferences_text = null,
     selected_function = null,
-    sort_mode = null;
+    sort_mode = null,
+    tab_stop_item = null,
+    tab_stop_key = null;
 
   // Lists a path's shown children by the chosen sort, each with its branch.
   function path_children(node_path) {
@@ -258,6 +262,8 @@ window.try_catch_handler_(function () {
     return shown_edges.map((call_edge, child_index) => ({
       node_path: [...node_path, call_edge.callee_index],
       call_edge,
+      sibling_count: shown_edges.length,
+      sibling_place: child_index + 1,
       branch_text:
         child_index === 0
           ? last_index === 0
@@ -284,6 +290,7 @@ window.try_catch_handler_(function () {
   function graph_layout() {
     const layout_rows = [];
     const next_free_rows = [];
+    drawn_path_keys = [];
     let placed_node_count = 0;
     // Places a path's children from a row, their branch passing between them.
     function children_place(node_path, least_row) {
@@ -301,6 +308,7 @@ window.try_catch_handler_(function () {
     // Places a node, then its children when open, and returns its row.
     function node_place(graph_node, least_row) {
       placed_node_count++;
+      drawn_path_keys.push(path_key(graph_node.node_path));
       // A count refuses the draw alike at any speed, before the page stalls.
       if (placed_node_count > CALL_GRAPH_MOST_DRAWN_NODES)
         window.throw_exception_(
@@ -398,17 +406,36 @@ window.try_catch_handler_(function () {
       });
     return column_widths;
   }
-  // Writes a node's symbol, a button if it toggles, its bars to the width.
+  // Writes a node's tree item, a button if it toggles, its bars to the width.
   function symbol_markup(layout_row, group_index, symbol_width) {
     const graph_node = layout_row[group_index];
     const symbol_part = symbol_parts(layout_row, group_index);
     const name_markup = render_html_escape(symbol_part.name_text);
+    // A root draws no node, so its calls are the tree's first level.
+    const tree_attributes = {
+      "aria-level": graph_node.node_path.length - 1,
+      "aria-posinset": graph_node.sibling_place,
+      "aria-setsize": graph_node.sibling_count,
+    };
     const shown_name_markup =
       shown_callee_edges(graph_node.node_path).length > 0
-        ? window.render_menu_button_("action", name_markup, {
+        ? window.render_menu_button_("treeitem", name_markup, {
+            attributes: {
+              ...tree_attributes,
+              "aria-expanded": String(node_is_open(graph_node)),
+            },
             tag_name: "span",
           })
-        : name_markup;
+        : render_element(
+            "span",
+            {
+              class: "call-graph-leaf-",
+              role: "treeitem",
+              tabindex: -1,
+              ...tree_attributes,
+            },
+            name_markup,
+          );
     if (!symbol_part.has_bars) return shown_name_markup;
     const bar_width =
       symbol_width -
@@ -582,9 +609,10 @@ window.try_catch_handler_(function () {
   }
   // Draws every layout row, making only a row whose markup changed.
   function graph_render() {
-    button_graph_nodes = new WeakMap();
+    const had_focus = graph_table.contains(document.activeElement);
     cell_symbol_buttons = new WeakMap();
-    path_symbol_buttons = new Map();
+    item_graph_nodes = new WeakMap();
+    path_tree_items = new Map();
     const layout_rows = graph_layout();
     const symbol_widths = symbol_column_widths(layout_rows);
     const stale_rows = drawn_rows;
@@ -619,19 +647,16 @@ window.try_catch_handler_(function () {
           (group_index + 1) * GROUP_COLUMNS.length +
             (mark_fits_right(layout_row, group_index) ? 1 : 0),
         );
-        const symbol_button = node_cells
-          .map((node_cell) => node_cell.querySelector(".menu-button-"))
-          .find((found_button) => found_button);
-        if (!symbol_button) return;
-        path_symbol_buttons.set(
-          path_key(layout_place.node_path),
-          symbol_button,
-        );
-        button_graph_nodes.set(symbol_button, layout_place);
+        const tree_item = node_cells
+          .map((node_cell) => node_cell.querySelector('[role="treeitem"]'))
+          .find((found_item) => found_item);
+        path_tree_items.set(path_key(layout_place.node_path), tree_item);
+        item_graph_nodes.set(tree_item, layout_place);
+        if (!tree_item.classList.contains("menu-button-")) return;
         // Each of a symbol's cells takes the click its button takes.
         for (const node_cell of node_cells) {
           node_cell.classList.add("clickable-");
-          cell_symbol_buttons.set(node_cell, symbol_button);
+          cell_symbol_buttons.set(node_cell, tree_item);
         }
       });
       column_cells.forEach((column_cell, column_index) => {
@@ -651,7 +676,73 @@ window.try_catch_handler_(function () {
     head_draw(group_count);
     rows_place(graph_rows);
     sizer_rows_draw(sizer_cells_markup(widest_cells, group_count));
+    tab_stop_place(had_focus);
     window.report_ui_.layout_activate();
+  }
+  // Puts the tree's one tab stop on its kept node, else on its first node.
+  function tab_stop_place(takes_focus) {
+    const next_key = path_tree_items.has(tab_stop_key)
+      ? tab_stop_key
+      : drawn_path_keys[0];
+    const next_item = path_tree_items.get(next_key);
+    // A kept row's item keeps the tab stop the last draw gave it.
+    if (tab_stop_item && tab_stop_item !== next_item)
+      tab_stop_item.tabIndex = -1;
+    tab_stop_key = next_key;
+    tab_stop_item = next_item;
+    window.report_ui_.tab_stop_move(null, next_item, takes_focus);
+  }
+  // Moves the tab stop and the focus to the node of a path's key.
+  function tree_item_focus(node_key) {
+    tab_stop_key = node_key;
+    tab_stop_place(true);
+  }
+  // Walks the tree by a key, in the order a depth first walk draws it.
+  function tree_key_handler(key_event, key_name, tree_item) {
+    const graph_node = item_graph_nodes.get(tree_item);
+    const node_key = path_key(graph_node.node_path);
+    const drawn_index = drawn_path_keys.indexOf(node_key);
+    const is_open = tree_item.getAttribute("aria-expanded") === "true";
+    const is_closed = tree_item.getAttribute("aria-expanded") === "false";
+    // A top level node's parent is a root, which draws no node.
+    const parent_key =
+      graph_node.node_path.length > 2
+        ? path_key(graph_node.node_path.slice(0, -1))
+        : null;
+    let next_key = null;
+    switch (key_name) {
+      case WIDGET_KEY_NAMES.activate:
+      case WIDGET_KEY_NAMES.click:
+        if (is_open || is_closed) node_toggle(tree_item);
+        break;
+      case WIDGET_KEY_NAMES.down:
+        next_key = drawn_path_keys[drawn_index + 1] ?? null;
+        break;
+      case WIDGET_KEY_NAMES.first:
+        next_key = drawn_path_keys[0];
+        break;
+      case WIDGET_KEY_NAMES.last:
+        next_key = drawn_path_keys.at(-1);
+        break;
+      case WIDGET_KEY_NAMES.left:
+        if (is_open) node_toggle(tree_item);
+        else next_key = parent_key;
+        break;
+      case WIDGET_KEY_NAMES.right:
+        if (is_closed) node_toggle(tree_item);
+        else if (is_open)
+          next_key = path_key(
+            path_children(graph_node.node_path)[0].node_path,
+          );
+        break;
+      case WIDGET_KEY_NAMES.up:
+        next_key = drawn_path_keys[drawn_index - 1] ?? null;
+        break;
+      default:
+        return;
+    }
+    key_event.preventDefault();
+    if (next_key !== null) tree_item_focus(next_key);
   }
 
   // Asks the top page for the cutoff of the stop the slider reaches.
@@ -668,10 +759,8 @@ window.try_catch_handler_(function () {
       window.ui_strings_.text("str_call_graph_cutoff"),
       {
         is_widget: true,
-        widget_text: window.report_ui_.strip.slider_text(
-          CALL_GRAPH_CUTOFF_STOP_ROOTS.indexOf(cutoff_root),
-          CALL_GRAPH_CUTOFF_STOP_ROOTS.length - 1,
-        ),
+        slider_stop: CALL_GRAPH_CUTOFF_STOP_ROOTS.indexOf(cutoff_root),
+        slider_last_stop: CALL_GRAPH_CUTOFF_STOP_ROOTS.length - 1,
         on_stop_choose: cutoff_stop_choose,
       },
     );
@@ -702,17 +791,14 @@ window.try_catch_handler_(function () {
   }
   // Opens or closes a symbol's node, draws again and selects it.
   function node_toggle(symbol_button) {
-    const graph_node = button_graph_nodes.get(symbol_button);
+    const graph_node = item_graph_nodes.get(symbol_button);
     selected_function = path_function(graph_node.node_path);
     heading_tail_show();
     const node_key = path_key(graph_node.node_path);
     if (open_path_keys.has(node_key)) open_path_keys.delete(node_key);
     else open_path_keys.add(node_key);
-    const had_focus = document.activeElement === symbol_button;
+    tab_stop_key = node_key;
     graph_render();
-    // The redraw replaced the button, so its new one takes the focus.
-    if (had_focus)
-      path_symbol_buttons.get(node_key).focus({ preventScroll: true });
     window.report_ui_.focused_path_send([selected_function.name]);
   }
   // Returns the symbol button of the cell an input reached, if any.
@@ -789,19 +875,30 @@ window.try_catch_handler_(function () {
       if (symbol_button) node_toggle(symbol_button);
     }),
   );
+  graph_table.setAttribute("role", "tree");
+  graph_table.setAttribute(
+    "aria-label",
+    window.ui_strings_.text("str_view_call_graph"),
+  );
+  graph_table.addEventListener(
+    "focusin",
+    window.try_catch_handler_((focus_event) => {
+      const tree_item = focus_event.target.closest('[role="treeitem"]');
+      if (!item_graph_nodes.has(tree_item)) return;
+      tab_stop_key = path_key(item_graph_nodes.get(tree_item).node_path);
+      tab_stop_place(false);
+    }),
+  );
   graph_table.addEventListener(
     "keydown",
     window.try_catch_handler_((key_event) => {
-      const symbol_button = symbol_button_of(key_event);
-      if (
-        !symbol_button ||
-        !window.report_ui_.widget_key.activates(
-          window.report_ui_.widget_key.of(key_event),
-        )
-      )
-        return;
-      key_event.preventDefault();
-      if (!key_event.repeat) node_toggle(symbol_button);
+      const key_name = window.report_ui_.widget_key.of(key_event);
+      const tree_item = key_event.target.closest('[role="treeitem"]');
+      if (!key_name || !item_graph_nodes.has(tree_item)) return;
+      // A held key walks the tree but toggles a node once.
+      if (key_event.repeat && window.report_ui_.widget_key.activates(key_name))
+        key_event.preventDefault();
+      else tree_key_handler(key_event, key_name, tree_item);
     }),
   );
   window.report_ui_.view_activate({
