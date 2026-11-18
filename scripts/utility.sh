@@ -770,12 +770,15 @@ toolchain_missing_list() {
 }
 
 verbose_begin() {
-  local flag_count
+  local flag_count build_directory
   export PERF2HTML_HEADER_DEPTH=$((${PERF2HTML_HEADER_DEPTH:-0} + 1))
   PERF2HTML_CLOCK_START_US="${PERF2HTML_CLOCK_START_US:-$(clock_microseconds)}"
   export PERF2HTML_CLOCK_START_US
   # Holds `build/`, the outermost script's invocation directory.
   export PERF2HTML_BUILD_ROOT="${PERF2HTML_BUILD_ROOT:-$INVOKED_FROM}"
+  build_directory="$PERF2HTML_BUILD_ROOT/$BUILD_OUTPUT_DIR_NAME"
+  # Python writes its bytecode cache under the build directory.
+  export PYTHONPYCACHEPREFIX="$build_directory/$BUILD_PYCACHE_DIR_NAME"
   export PERF2HTML_STEP_NUMBER="${PERF2HTML_STEP_NUMBER-}"
   shopt -s lastpipe
   VERBOSE_COMMAND_NUMBER=1

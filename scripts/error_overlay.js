@@ -11,8 +11,8 @@
   const OVERLAY_TEXT_COLOR = "#f2f4f6";
   const OVERLAY_LINK_COLOR = "#ff4427";
   const OVERLAY_TITLE_TEXT = "perf2html error";
-  const OVERLAY_COPY_LINK_TEXT = "copy";
-  const OVERLAY_BACK_LINK_TEXT = "back";
+  const OVERLAY_COPY_LINK_TEXT = "[copy]";
+  const OVERLAY_BACK_LINK_TEXT = "[back]";
   const OVERLAY_NO_MANIFEST_TEXT = "Report has no scripts/debug.js";
   const UI_ERROR_TEXT = "ui error";
   const DESIGN_COORDINATES_WIDTH_PX = 1920;
@@ -147,7 +147,7 @@
     const copy_script =
       "navigator.clipboard.writeText(" + JSON.stringify(copy_text) + ")";
     const links_line =
-      `${link_render_(copy_script, OVERLAY_COPY_LINK_TEXT)} | ` +
+      `${link_render_(copy_script, OVERLAY_COPY_LINK_TEXT)} ` +
       `${link_render_("history.back()", OVERLAY_BACK_LINK_TEXT)}`;
     document.open();
     document.write(

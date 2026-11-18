@@ -45,6 +45,28 @@
   .heat-map-source-information-box- .table- {
     background: var(--dark-mode-page-bg-);
   }
+  /* The source lines' columns stripe from the line column, past the tree's. */
+  .heat-map-source-table-
+    > tbody
+    > tr:where([data-line-number-])
+    > td:nth-child(odd) {
+    background: none;
+  }
+  .heat-map-source-table-
+    > tbody
+    > tr:where([data-line-number-])
+    > td:nth-child(even) {
+    background: var(--dark-mode-panel-bg-);
+  }
+  /* The source lines' column text colors, which a row color rule overrides. */
+  :where(.heat-map-source-table- > tbody > tr[data-line-number-])
+    > td:nth-child(odd) {
+    color: inherit;
+  }
+  :where(.heat-map-source-table- > tbody > tr[data-line-number-])
+    > td:nth-child(even) {
+    color: var(--dark-mode-page-fg-);
+  }
   /* A row of hidden costs alone and its band, in the menu's colors. */
   table.heat-map-source-table- > tbody > tr.other-counter-source- > td,
   .heat-map-minimap-band-.other-counter-source- {

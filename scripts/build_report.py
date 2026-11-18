@@ -66,7 +66,6 @@ class BuildReport:
     class CallGraphBranch(NamedTuple):
         parent: int | None
         function: int
-        inclusive_value: int | None
 
     class CallGraphEdge(NamedTuple):
         caller: int
@@ -264,18 +263,9 @@ class BuildReport:
                 )
                 for (caller_name, callee_name), tally in sorted(edges.items())
             ],
-            # A root branch draws no node, so it holds no cost of its own.
             "branches": [
                 BuildReport.CallGraphBranch(
-                    call_branch.parent,
-                    index_by_name[call_branch.function],
-                    None
-                    if call_branch.costs is None
-                    else callgrind.counter_value(
-                        profile.counters,
-                        call_branch.costs,
-                        _RANKING_COUNTER_NAME,
-                    ),
+                    call_branch.parent, index_by_name[call_branch.function]
                 )
                 for call_branch in callgrind.call_branches(
                     profile, root_names, path

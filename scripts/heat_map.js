@@ -2408,8 +2408,9 @@ window.try_catch_handler_(function () {
     const is_mode_toggle =
       is_new_address &&
       report_ui_.address.hash(page_address) === view_mode_link.link_hash;
-    const is_detail_closed =
-        (!is_new_address || is_mode_toggle) && !detail_line(),
+    // A redraw of the drawn address, a column drag's too, keeps the view.
+    const keeps_view = !is_new_address || is_mode_toggle;
+    const is_detail_closed = keeps_view && !detail_line(),
       previous_file_path = current_file_path;
     let file = page_address.file,
       line = page_address.line === null ? 0 : page_address.line,
@@ -2473,7 +2474,7 @@ window.try_catch_handler_(function () {
     // A new file draws its source and the tree, so its tree node opens first.
     const moves_tree = is_new_address && file !== previous_file_path;
     if (moves_tree) tree_reveal(file);
-    const kept_view_line = is_mode_toggle ? view_line_read() : null;
+    const kept_view_line = keeps_view ? view_line_read() : null;
     const key = [
       file,
       active_scale.value,
@@ -2491,7 +2492,7 @@ window.try_catch_handler_(function () {
     if (!is_detail_closed && line !== detail_line())
       detail_set(
         line,
-        is_mode_toggle
+        keeps_view
           ? design_rect(document.getElementById("L" + line + "-")).top
           : is_pressed
             ? pressed_place.top

@@ -63,11 +63,10 @@ def external_source_roots() -> tuple[str, ...]:
     return tuple(found)
 
 
-# Holds a call graph branch: the branch it hangs from, its function and costs.
+# Holds a call graph branch: the branch it hangs from and its function.
 class CallBranch(NamedTuple):
     parent: int | None
     function: str
-    costs: Costs | None
 
 
 class Caller(NamedTuple):
@@ -854,7 +853,7 @@ def build_output_strip(text: str, build_output_dir: str) -> str:
     return text.replace(f"{build_output_dir}/", "")
 
 
-# Returns each call graph branch from the roots, its own calls' costs summed.
+# Returns each call graph branch from the roots, a path the recording called.
 def call_branches(
     profile: Profile, root_names: Collection[str], path: str
 ) -> list[CallBranch]:
@@ -901,7 +900,7 @@ def call_branches(
         return branch_paths[context]
 
     root_paths: set[tuple[str, ...]] = set()
-    branch_costs: dict[tuple[str, ...], Costs] = {}
+    callee_paths: set[tuple[str, ...]] = set()
     for context_call in profile.context_calls:
         caller_path = branch_path(context_call.caller)
         if caller_path is not None and len(caller_path) == 1:
@@ -910,21 +909,17 @@ def call_branches(
             continue
         callee_path = branch_path(context_call.callee)
         if callee_path is not None:
-            costs_accumulate(branch_costs, callee_path, context_call.costs)
+            callee_paths.add(callee_path)
     # Sorts each branch after the branch it hangs from.
-    sorted_paths = sorted(root_paths | branch_costs.keys())
+    sorted_paths = sorted(root_paths | callee_paths)
     path_rows = {
         sorted_path: row_index
         for row_index, sorted_path in enumerate(sorted_paths)
     }
     return [
-        CallBranch(None, sorted_path[0], None)
+        CallBranch(None, sorted_path[0])
         if len(sorted_path) == 1
-        else CallBranch(
-            path_rows[sorted_path[:-1]],
-            sorted_path[-1],
-            branch_costs[sorted_path],
-        )
+        else CallBranch(path_rows[sorted_path[:-1]], sorted_path[-1])
         for sorted_path in sorted_paths
     ]
 

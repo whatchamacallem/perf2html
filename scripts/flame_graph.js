@@ -49,6 +49,22 @@ window.try_catch_handler_(function () {
     );
   }
 
+  // Plays a key the menu hands down to speedscope as the browser plays one.
+  function view_key_pressed(key_press) {
+    const event_fields = { ...key_press, bubbles: true, cancelable: true };
+    const key_target = document.activeElement;
+    const key_down = new KeyboardEvent("keydown", event_fields);
+    key_target.dispatchEvent(key_down);
+    if (
+      key_down.defaultPrevented ||
+      key_press.ctrlKey ||
+      key_press.metaKey ||
+      key_press.key.length !== 1
+    )
+      return;
+    key_target.dispatchEvent(new KeyboardEvent("keypress", event_fields));
+  }
+
   if (_FORWARDED_ADDRESS.view !== FLAME_GRAPH_VIEW_ENTRY[0])
     window.throw_exception_("str_error_internal");
   if (_FORWARDED_ADDRESS.localProfilePath === null)
@@ -69,6 +85,7 @@ window.try_catch_handler_(function () {
   window.report_ui_.view_activate({
     forwards_input: false,
     recenter: () => location.reload(),
+    view_key_pressed,
   });
   const script_name = encodeURIComponent(_FORWARDED_ADDRESS.test) + ".js";
   _profile_script.src = FLAME_GRAPH_PROFILE_DIR_NAME + "/" + script_name;

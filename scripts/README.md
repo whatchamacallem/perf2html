@@ -411,8 +411,7 @@ A diff report's run keeps these.
 | --------------------------- | -------------------------------------------- |
 | `test_all.sh`               | Runs `test_expected_behavior.sh` with kept   |
 |                             | artifacts, then `test_error_handling.sh`.    |
-| `test_error_handling.sh`    | Proves the cached and regenerated runs, then |
-|                             | checks the exit code of each failure mode.   |
+| `test_error_handling.sh`    | Checks the exit code of each failure mode.   |
 | `test_expected_behavior.sh` | Formats, lints and scans the sources, runs   |
 |                             | the batch, checks the reports, then takes    |
 |                             | screenshots.                                 |

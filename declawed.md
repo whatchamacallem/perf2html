@@ -436,35 +436,37 @@ The single function/check owning each concern - never bypass or duplicate:
   (call_graph.js); `call_graph_roots()` every uncalled caller a root, a call
   graph with none or with a called function none of them reaches refused
   (build_report.py).
-- `call_branches()` - every call graph branch and its cost, the inclusive
-  CEst of the calls made along exactly that path from its root, summed from
-  the recording's call contexts; every other view reads each context folded
+- `call_branches()` - every call graph branch, a path of calls the
+  recording made from its root, read from the recording's call contexts;
+  every other view reads each context folded
   into its function, the name before its first caller; a call whose
   callee's chain is not its caller's chain plus one is refused, so a
   recording without chains or with a chain cut at
   `CALLGRIND_SEPARATE_CALLERS` fails (callgrind.py).
-- `call_graph_open_set()` - the one open set of a fresh call graph view,
-  at its first render, every `view_reset`, every cutoff change while the
-  filter is empty and the filter's clearing: each
-  function opens only at its costliest branch over the whole graph, by the
-  branch costs of `call_branches()`, never shown, a tie the earliest by its
-  path's names, and there only when the node has a shown child and its
+- `fresh_view_opens()` - whether a node opens in a fresh call graph view,
+  the view at its first render, every `view_reset`, every cutoff change
+  while the filter is empty and every typed change of the filter, its
+  clearing too; the cutoff and the filter alone decide it, and a press of
+  a node flips that node's state until the view is fresh again. With the
+  filter empty a node opens when it has a shown child and its
   depth, a root's calls depth 1, is at most the cutoff depth, the heading's
   cutoff slider's chosen stop, one of `CALL_GRAPH_CUTOFF_STOP_COUNT`
   depths, the first `CALL_GRAPH_CUTOFF_LEAST_DEPTH` and each later one a
   level deeper, the stop `CALL_GRAPH_CUTOFF_DEFAULT_STOP` levels deeper
   than the first the default (`call_graph_cutoff_stop_depths()`,
-  preferences.js), every other node
-  closed; a function whose costliest branch lies under a closed node stays
-  closed wherever it is shown; a shown child is a callee not already on the
-  node's path; the `cumulative first` sort still orders by a caller and
-  callee pair's inclusive CEst summed over every branch (call_graph.js).
-  The heat map tree shares none of it. `filter_open_set()` the open set
-  of a non-empty filter, each typed change opening it again over any
-  pressed node: every node on a branch of `call_branches()` to a function
-  whose name the filter matches open, every other node closed; a filter
-  matching no drawn function draws "Nothing matches filter..." in place
-  of the graph (call_graph.js).
+  preferences.js), a chosen stop past the test's last stop held to it,
+  every other node closed; a shown child is a callee not
+  already on the node's path; `cutoff_last_stop_find()` each test's last
+  stop, the slider's end: the deepest stop whose fresh view draws at most
+  `CALL_GRAPH_CUTOFF_MOST_DRAWN_NODES` nodes, a draw holding every level
+  to one past the stop's depth, the first stop always offered; the
+  `cumulative first` sort orders by a
+  caller and callee pair's inclusive CEst, every call of the pair summed
+  (call_graph.js). The heat map tree shares none of it.
+  `filter_open_set()` the open set of a non-empty filter: every node on a
+  branch of `call_branches()` to a function whose name the filter matches
+  open, every other node closed; a filter matching no drawn function
+  draws "Nothing matches filter..." in place of the graph (call_graph.js).
 - `design_scale_stop_set()` - every scale change; `menu.js` then posts
   `layout_reset`, which resets column widths and heading row counts.
 - `information_box_render(file_path, line_number)` - every file, function

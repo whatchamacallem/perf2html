@@ -84,6 +84,8 @@ BUILD_DIR=build-relwithdebinfo
 
 BUILD_OUTPUT_DIR_NAME=build
 
+BUILD_PYCACHE_DIR_NAME=__pycache__
+
 CACHE_EXTERNAL_PACKAGE=libc6
 
 CACHE_ROOT_DIR=~/.cache/perf2html

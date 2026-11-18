@@ -41,6 +41,9 @@ window.try_catch_handler_(function () {
   let current_address = null;
   let focused_path_entries = [];
   let function_location = null;
+  // The loaded page's dark mode query, which that page's new hashes keep.
+  let loaded_mode_query = "";
+  let loaded_page_href = "";
   let loaded_view_href = "";
   let view_mode_link = null;
 
@@ -131,18 +134,34 @@ window.try_catch_handler_(function () {
     const page_href = window.report_ui_.address.page_href(shown_address);
     const view_href = page_href + location.hash;
     if (view_href === loaded_view_href) return;
-    // The view opens in the dark mode shown, before its first paint.
-    const mode_query = new URLSearchParams({
-      [DARK_MODE_FRAME_QUERY_KEY_NAME]: Number(
-        Boolean(window.report_ui_.dark_mode_enabled_now_()),
-      ),
-    });
-    const frame_page_href = page_href + "?" + mode_query;
-    view_frame.contentWindow.location.replace(frame_page_href + location.hash);
+    const is_new_page = page_href !== loaded_page_href;
+    // A new page opens in the dark mode shown, before its first paint.
+    if (is_new_page)
+      loaded_mode_query = new URLSearchParams({
+        [DARK_MODE_FRAME_QUERY_KEY_NAME]: Number(
+          Boolean(window.report_ui_.dark_mode_enabled_now_()),
+        ),
+      }).toString();
+    // The loaded page takes a new hash in place, its query kept as loaded.
+    view_frame.contentWindow.location.replace(
+      page_href + "?" + loaded_mode_query + location.hash,
+    );
+    loaded_page_href = page_href;
     loaded_view_href = view_href;
     focused_path_entries = [];
     // The new page claims the top page's sideways scroll at its first draw.
-    window.report_ui_.page_scroll.claim_set("frame", false);
+    if (is_new_page) window.report_ui_.page_scroll.claim_set("frame", false);
+  }
+  // Drops the hidden frame's page, which no later view shows again.
+  function view_page_unload() {
+    if (!loaded_view_href) return;
+    // A frame put back holds the empty page a frame opens with, painting none.
+    const frame_parent = view_frame.parentNode,
+      frame_next_sibling = view_frame.nextSibling;
+    view_frame.remove();
+    frame_parent.insertBefore(view_frame, frame_next_sibling);
+    loaded_page_href = "";
+    loaded_view_href = "";
   }
   // Shows the address a hash change brings, the toggle query dropped first.
   function hash_change_show() {
@@ -167,6 +186,7 @@ window.try_catch_handler_(function () {
     if (shown_address.view === null) {
       const frame_had_focus = document.activeElement === view_frame;
       view_frame.hidden = true;
+      view_page_unload();
       window.report_overview_.heat_colors_apply();
       home_panel.hidden = false;
       window.report_ui_.page_scroll.lend_show();

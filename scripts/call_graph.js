@@ -15,6 +15,9 @@ window.try_catch_handler_(function () {
   const CALL_GRAPH_BRANCH_ONLY_TEXT = settings_("CALL_GRAPH_BRANCH_ONLY_TEXT");
   const CALL_GRAPH_BRANCH_PASS_TEXT = settings_("CALL_GRAPH_BRANCH_PASS_TEXT");
   const CALL_GRAPH_CLOSED_TEXT = settings_("CALL_GRAPH_CLOSED_TEXT");
+  const CALL_GRAPH_CUTOFF_MOST_DRAWN_NODES = settings_(
+    "CALL_GRAPH_CUTOFF_MOST_DRAWN_NODES",
+  );
   const CALL_GRAPH_LINE_TEXT = settings_("CALL_GRAPH_LINE_TEXT");
   const CALL_GRAPH_MOST_DRAWN_NODES = settings_("CALL_GRAPH_MOST_DRAWN_NODES");
   const CALL_GRAPH_PAD_TEXT = settings_("CALL_GRAPH_PAD_TEXT");
@@ -111,7 +114,6 @@ window.try_catch_handler_(function () {
         parent_index === null
           ? [branch_row[1]]
           : [...read_branches[parent_index].node_path, branch_row[1]],
-      inclusive_cost: branch_row[2],
     };
   }
   const function_records = call_graph_model.functions.map(
@@ -197,32 +199,46 @@ window.try_catch_handler_(function () {
       (call_edge) => !node_path.includes(call_edge.callee_index),
     );
   }
-  // Returns whether a node has shown children and lies within the cutoff.
-  function branch_opens(node_path) {
+  // Returns whether a fresh view opens a node, by the filter, else the cutoff.
+  function fresh_view_opens(node_path) {
+    if (filter_path_keys) return filter_path_keys.has(path_key(node_path));
     return (
       shown_callee_edges(node_path).length > 0 &&
       node_path.length - 1 <= cutoff_depth
     );
   }
-  // Returns a fresh open set, each function open only at its costliest branch.
-  function call_graph_open_set() {
-    const costliest_branches = new Map();
-    for (const call_branch of node_branches) {
-      const function_index = call_branch.node_path.at(-1);
-      const known_branch = costliest_branches.get(function_index);
-      // A tie keeps the first branch, the earliest by its path's names.
-      if (
-        !known_branch ||
-        call_branch.inclusive_cost > known_branch.inclusive_cost
-      )
-        costliest_branches.set(function_index, call_branch);
+  // Returns the deepest cutoff stop whose fresh view draws few enough nodes.
+  function cutoff_last_stop_find() {
+    let level_paths = call_roots.map((call_root) => [
+      call_root.function_index,
+    ]);
+    let drawn_node_count = 0;
+    let last_stop = 0;
+    // A cutoff opens the nodes at its depth, so its draw ends a level deeper.
+    for (
+      let node_level = 1;
+      node_level <= CALL_GRAPH_CUTOFF_STOP_DEPTHS.at(-1) + 1;
+      node_level++
+    ) {
+      level_paths = level_paths.flatMap((node_path) =>
+        shown_callee_edges(node_path).map((call_edge) => [
+          ...node_path,
+          call_edge.callee_index,
+        ]),
+      );
+      drawn_node_count += level_paths.length;
+      const cutoff_stop = CALL_GRAPH_CUTOFF_STOP_DEPTHS.indexOf(
+        node_level - 1,
+      );
+      // The first stop is always offered, a level above it no stop at all.
+      if (cutoff_stop < 1) continue;
+      if (drawn_node_count > CALL_GRAPH_CUTOFF_MOST_DRAWN_NODES) break;
+      last_stop = cutoff_stop;
     }
-    return new Set(
-      [...costliest_branches.values()]
-        .filter((call_branch) => branch_opens(call_branch.node_path))
-        .map((call_branch) => path_key(call_branch.node_path)),
-    );
+    return last_stop;
   }
+  // Holds the test's last cutoff stop, the slider offering none deeper.
+  const cutoff_last_stop = cutoff_last_stop_find();
   // Returns the open set of a filter: each node on a branch to a match open.
   function filter_open_set(matched_branches) {
     const open_keys = new Set();
@@ -247,11 +263,14 @@ window.try_catch_handler_(function () {
     drawn_path_keys = [],
     drawn_rows = new Map(),
     filter_matches_nothing = false,
+    // Holds the filter's open set, null while the filter is empty.
+    filter_path_keys = null,
     heat_curve_name = null,
     is_search_render_pending = false,
     item_graph_nodes = new WeakMap(),
-    open_path_keys = null,
     path_tree_items = new Map(),
+    // Holds each node pressed since the view was fresh, its state flipped.
+    pressed_path_keys = new Set(),
     rendered_preferences_text = null,
     // Holds the filter's text, matched with each drawn function's name.
     search_text = "",
@@ -279,9 +298,12 @@ window.try_catch_handler_(function () {
             : CALL_GRAPH_BRANCH_LAST_TEXT,
     }));
   }
-  // Returns whether a node is open.
+  // Returns whether a node is open, its fresh state flipped if pressed.
   function node_is_open(graph_node) {
-    return open_path_keys.has(path_key(graph_node.node_path));
+    return (
+      fresh_view_opens(graph_node.node_path) !==
+      pressed_path_keys.has(path_key(graph_node.node_path))
+    );
   }
   // Returns whether a node is closed and has shown children to open.
   function node_is_closed(graph_node) {
@@ -788,13 +810,12 @@ window.try_catch_handler_(function () {
       CALL_GRAPH_CUTOFF_STOP_DEPTHS[cutoff_stop],
     );
   }
-  // Opens the filter's open set, or the fresh one for none, then draws.
+  // Opens the filter's open set, or the cutoff's for none, then draws.
   function filter_apply() {
     const matched_branches = search_text ? filter_matched_branches() : [];
     filter_matches_nothing = Boolean(search_text) && !matched_branches.length;
-    open_path_keys = search_text
-      ? filter_open_set(matched_branches)
-      : call_graph_open_set();
+    filter_path_keys = search_text ? filter_open_set(matched_branches) : null;
+    pressed_path_keys = new Set();
     graph_render();
   }
   // Keeps the filter's text, drawing once in the next frame for all typed.
@@ -818,7 +839,7 @@ window.try_catch_handler_(function () {
       {
         is_widget: true,
         slider_stop: CALL_GRAPH_CUTOFF_STOP_DEPTHS.indexOf(cutoff_depth),
-        slider_last_stop: CALL_GRAPH_CUTOFF_STOP_DEPTHS.length - 1,
+        slider_last_stop: cutoff_last_stop,
         on_stop_choose: cutoff_stop_choose,
       },
     );
@@ -868,8 +889,9 @@ window.try_catch_handler_(function () {
   // Opens or closes a symbol's node, selects it and draws again.
   function node_toggle(tree_item) {
     node_select(tree_item);
-    if (open_path_keys.has(tab_stop_key)) open_path_keys.delete(tab_stop_key);
-    else open_path_keys.add(tab_stop_key);
+    if (pressed_path_keys.has(tab_stop_key))
+      pressed_path_keys.delete(tab_stop_key);
+    else pressed_path_keys.add(tab_stop_key);
     graph_render();
   }
   // Selects a leaf, opening nothing, the tab stop moved onto it.
@@ -895,7 +917,11 @@ window.try_catch_handler_(function () {
     heat_curve_name = scale_choice.curve;
     sort_mode = view_preferences.call_graph_sort_mode;
     const taken_cutoff_depth = cutoff_depth;
-    cutoff_depth = view_preferences.call_graph_cutoff_depth;
+    // A cutoff preference deeper than the test's last stop takes that stop.
+    cutoff_depth = Math.min(
+      view_preferences.call_graph_cutoff_depth,
+      CALL_GRAPH_CUTOFF_STOP_DEPTHS[cutoff_last_stop],
+    );
     // Logs each cutoff the view takes, the first at page load included.
     if (cutoff_depth !== taken_cutoff_depth)
       console.log(
@@ -908,9 +934,9 @@ window.try_catch_handler_(function () {
   function preferences_apply() {
     const opened_cutoff_depth = cutoff_depth;
     preferences_handler();
-    // A new cutoff, the page's first included, opens a fresh open set.
+    // A new cutoff, the page's first included, makes the view fresh.
     if (cutoff_depth !== opened_cutoff_depth && !search_text)
-      open_path_keys = call_graph_open_set();
+      pressed_path_keys = new Set();
     const preferences_text = JSON.stringify([
       heat_curve_name,
       sort_mode,
@@ -921,12 +947,13 @@ window.try_catch_handler_(function () {
     graph_render();
     heading_tail_show();
   }
-  // Opens a fresh open set, draws every row, clears filter and selection.
+  // Makes the view fresh, draws every row, clears filter and selection.
   function view_reset() {
     preferences_handler();
     search_text = "";
     filter_matches_nothing = false;
-    open_path_keys = call_graph_open_set();
+    filter_path_keys = null;
+    pressed_path_keys = new Set();
     selected_function = null;
     // Forgets the drawn preferences, so the graph draws again.
     rendered_preferences_text = null;

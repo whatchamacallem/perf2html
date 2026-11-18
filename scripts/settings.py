@@ -44,6 +44,7 @@ CALL_GRAPH_BRANCH_PASS_TEXT = "┃"
 CALL_GRAPH_CLOSED_TEXT = "⊞"
 CALL_GRAPH_CUTOFF_DEFAULT_STOP = 4
 CALL_GRAPH_CUTOFF_LEAST_DEPTH = 3
+CALL_GRAPH_CUTOFF_MOST_DRAWN_NODES = 1000
 CALL_GRAPH_CUTOFF_STOP_COUNT = 19
 CALL_GRAPH_DOWNLOAD_FILE_NAME_SUFFIX = "_call_graph.svg"
 CALL_GRAPH_LINE_TEXT = "━"
@@ -162,6 +163,8 @@ DWARF_SUBPROGRAM_TAG = "DW_TAG_subprogram"
 
 FLAME_GRAPH_ADDRESS_FRAME_NAME_FORMAT = "%s+%#x"
 FLAME_GRAPH_COLOR_SCHEME_KEY_NAME = "speedscope-color-scheme"
+# Keys the flame graph view takes from the menu with Ctrl or Cmd held.
+FLAME_GRAPH_CONTROL_KEY_NAMES: tuple[str, ...] = ("f", "o", "s")
 FLAME_GRAPH_EXPORTER_NAME = "tests/perf2html/scripts/trace_to_speedscope.py"
 FLAME_GRAPH_FILE_FORMAT_CLOSE_EVENT_TYPE = "C"
 FLAME_GRAPH_FILE_FORMAT_OPEN_EVENT_TYPE = "O"
@@ -173,6 +176,25 @@ FLAME_GRAPH_FILE_FORMAT_SCHEMA_URL = (
 FLAME_GRAPH_LOCAL_PROFILE_PATH = "profile"
 FLAME_GRAPH_LOCAL_PROFILE_URL_PREFIX = "file:///"
 FLAME_GRAPH_MAX_RECORDED_CALLS = 200
+# Keys the flame graph view takes from the menu with no Ctrl, Cmd or Alt.
+FLAME_GRAPH_PLAIN_KEY_NAMES: tuple[str, ...] = (
+    "+",
+    "-",
+    "0",
+    "=",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowUp",
+    "a",
+    "d",
+    "n",
+    "p",
+    "r",
+    "s",
+    "t",
+    "w",
+)
 FLAME_GRAPH_PROFILE_DIR_NAME = "profiles"
 FLAME_GRAPH_PROFILE_NAME_FORMAT = "%s (loops=%s)"
 FLAME_GRAPH_STARTUP_POLL_DELAY_MS = 50

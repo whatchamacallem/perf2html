@@ -200,8 +200,7 @@ body {
     right: 0;
     border-right: var(--page-line-width-) solid var(--light-mode-page-fg-);
   }
-  /* A box's tables take the source line as left. */
-  .heat-map-source-information-box- .table- th:first-child::before,
+  /* A box's body cells take the source line as left, its titles their own. */
   .heat-map-source-information-box- .table- td:first-child::after {
     border-left: 0;
   }

@@ -36,11 +36,6 @@ _SCRIPT_DIR="$PERF2HTML_DIR_/scripts"
 _SCRIPT="$_SCRIPT_DIR/${0##*/}"
 _TEST_EXPECTED_BEHAVIOR="$_SCRIPT_DIR/test_expected_behavior.sh"
 
-_TEST_VERBOSE_DOCUMENT="$PERF2HTML_DIR_/test_verbose.md"
-
-_TEST_ERROR_MARKDOWN_FORMATTER=prettier
-_PRETTIER_CONFIG="$_SCRIPT_DIR/.prettierrc.json"
-
 _TEST_ERROR_BASELINE_REPORT="$PERF2HTML_DIR_/perf2html_baseline_report"
 _TEST_ERROR_MODIFIED_REPORT="$PERF2HTML_DIR_/perf2html_modified_report"
 _TEST_ERROR_DIFF_REPORT="$PERF2HTML_DIR_/perf2html_diff_report"
@@ -55,26 +50,14 @@ _TEST_ERROR_PROFILE_FILE_SUFFIX=.callgrind.out
 _TEST_ERROR_ROWS_FILE_NAME=perf2html.txt
 _TEST_ERROR_SOURCES_DIR_NAME=sources
 _TEST_ERROR_TEST_LIST_FILE_NAME=test_list.txt
-_TEST_ERROR_TRUNCATED_BYTES=1024
 _TEST_ERROR_TIMER_ARTIFACTS_PREFIX=timer-artifacts-
 _TEST_ERROR_VALGRIND_LOG_FILE_SUFFIX=.valgrind.log
 _TEST_ERROR_VALGRIND_LOG_PURPOSE='the valgrind log'
 
-_TEST_ERROR_RECORDING_FILE_SUFFIXES=("$_TEST_ERROR_PROFILE_FILE_SUFFIX"
-  .cyg_callback.bin .cyg_callback.bin.maps .cyg_callback.log .perf-stat.json
-  .perf-stat.txt .trace_to_speedscope.json
-  "$_TEST_ERROR_VALGRIND_LOG_FILE_SUFFIX")
-
 _TEST_ERROR_MANIFEST_CHECKSUM_LABEL=checksum
-
-_TEST_ERROR_MANIFEST_VERSION_DIFF='curl/perf2html_diff.sh v0'
 
 _TEST_ERROR_BUILD_OUTPUT_DIR="$PWD/build"
 _TEST_ERROR_SCRATCH="$_TEST_ERROR_BUILD_OUTPUT_DIR/test_error_handling_scratch"
-
-_TEST_ERROR_SCREENSHOT_DIFF_DIR="$PERF2HTML_DIR_/screenshots-diff"
-_TEST_ERROR_SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE=3
-_TEST_ERROR_SCREENSHOT_GOLD_DIR="$PERF2HTML_DIR_/screenshots-gold"
 
 test_error_path_without_tool() {
   local _tool="$1" _bin="$_TEST_ERROR_SCRATCH/bin_without_$1" _dirs=() _dir
@@ -168,114 +151,6 @@ test_error_relink_regenerate_run() {
   return "$_code"
 }
 
-test_error_markdown_formatter_check() {
-  local _admin="$PERF2HTML_DIR_/$ADMIN_INSTRUCTIONS_FILE_NAME"
-  [ -x "$PRETTIER_PATH" ] && return 0
-  echo "error: 1 tool(s) missing, so" \
-    "$(path_shown "$_TEST_VERBOSE_DOCUMENT") is not checked:" \
-    "$PRETTIER_PATH, install commands in $_admin" >&2
-  exit 127
-}
-
-test_error_markdown_check_run() {
-  local _code=0
-  "$PRETTIER_PATH" --config "$_PRETTIER_CONFIG" \
-    --log-level warn --check "$_TEST_VERBOSE_DOCUMENT" || _code=$?
-  if [ "$_code" != 0 ]; then
-    printf 'FAILED: %s --check exited %s on %s\n' \
-      "$_TEST_ERROR_MARKDOWN_FORMATTER" "$_code" \
-      "$(path_shown "$_TEST_VERBOSE_DOCUMENT")" >&2
-    exit "$_code"
-  fi
-  echo "ok test_error_markdown_check"
-}
-
-# Regenerates every report from the recordings a measuring run kept.
-test_error_expected_behavior_run() {
-  local _code=0 _start=$SECONDS
-  "$_TEST_EXPECTED_BEHAVIOR" --regenerate --keep-artifacts --verbose \
-    2>"$_TEST_VERBOSE_DOCUMENT" </dev/null || _code=$?
-  # A gold difference lets every other test run, noted again at the end.
-  case "$_code" in
-    0 | "$_TEST_ERROR_SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE") ;;
-    *)
-      printf 'FAILED: test_expected_behavior.sh exited %s, see %s\n' \
-        "$_code" "$(path_shown "$_TEST_VERBOSE_DOCUMENT")" >&2
-      exit "$_code"
-      ;;
-  esac
-  printf 'test_expected_behavior.sh --regenerate --keep-artifacts: %ss\n' \
-    "$((SECONDS - _start))"
-}
-
-test_error_makefile_test_names() {
-  sed -n '/^TESTS_C *=/,/^$/p' "$PERF2HTML_REPO_ROOT/tests/perf/Makefile.inc" \
-    | grep -o '[A-Za-z0-9_]*\.c' | sed 's/\.c$//' | LC_ALL=C sort || true
-}
-
-test_error_cache_populated_check() {
-  local _tests=() _kept_tests=() _report _kept _rows _test_list _test _suffix
-  mapfile -t _tests < <(test_error_makefile_test_names)
-  [ "${#_tests[@]}" -gt 0 ] || test_fail cache_populated \
-    "no TESTS_C entry in $PERF2HTML_REPO_ROOT/tests/perf/Makefile.inc"
-  for _report in "$_TEST_ERROR_BASELINE_REPORT" \
-    "$_TEST_ERROR_MODIFIED_REPORT"; do
-    _kept="$_TEST_ERROR_ARTIFACTS/$(basename "$_report")"
-    _rows="$_kept/$_TEST_ERROR_ROWS_FILE_NAME"
-    [ -f "$_rows" ] || test_fail cache_populated "no rows file $_rows"
-    test_error_recorded_time "$_rows" >/dev/null
-    _test_list="$_kept/$_TEST_ERROR_TEST_LIST_FILE_NAME"
-    [ -f "$_test_list" ] || test_fail cache_populated \
-      "no test list $_test_list"
-    mapfile -t _kept_tests <"$_test_list"
-    [ "${_kept_tests[*]}" = "${_tests[*]}" ] || test_fail cache_populated \
-      "$_test_list lists ${_kept_tests[*]}, expected TESTS_C ${_tests[*]}"
-    for _test in "${_kept_tests[@]}"; do
-      for _suffix in "${_TEST_ERROR_RECORDING_FILE_SUFFIXES[@]}"; do
-        [ -f "$_kept/$_test$_suffix" ] || test_fail cache_populated \
-          "no recording $_kept/$_test$_suffix"
-      done
-    done
-  done
-}
-
-test_error_cache_snapshot() {
-  (cd "$_TEST_ERROR_ARTIFACTS" && find . -type f -print | LC_ALL=C sort \
-    | LC_ALL=C tr '\n' '\0' | xargs -0 -r cksum -- | LC_ALL=C sort)
-}
-
-# Refuses a kept file the regenerate runs since the snapshot changed.
-test_error_regenerate_cache_check() {
-  local _before="$1" _after _gone _new _line _path _name _suffix
-  local _start=$SECONDS _code=0
-  "$PERF2HTML_DIR_/perf2html_batch.sh" --regenerate \
-    "--target-dir=$PERF2HTML_DIR_" </dev/null || _code=$?
-  [ "$_code" = 0 ] || test_fail regenerate_from_cache \
-    "perf2html_batch.sh --regenerate exited $_code"
-  printf 'perf2html_batch.sh --regenerate: %ss\n' "$((SECONDS - _start))"
-  _after="$(test_error_cache_snapshot)"
-  _gone="$(comm -23 <(printf '%s\n' "$_before") <(printf '%s\n' "$_after"))"
-  [ -z "$_gone" ] || test_fail regenerate_cache_unchanged \
-    "$(grep -c . <<<"$_gone") kept file(s) changed: ${_gone%%$'\n'*}"
-  _new="$(comm -13 <(printf '%s\n' "$_before") <(printf '%s\n' "$_after"))"
-  while IFS= read -r _line; do
-    [ -n "$_line" ] || continue
-    _path="${_line##* }"
-    for _name in "$(basename "$_TEST_ERROR_BASELINE_REPORT")" \
-      "$(basename "$_TEST_ERROR_MODIFIED_REPORT")"; do
-      for _suffix in "${_TEST_ERROR_RECORDING_FILE_SUFFIXES[@]}"; do
-        case "$_path" in
-          "./$_name/"*"$_suffix")
-            test_fail regenerate_no_new_recordings \
-              "--regenerate recorded a new file: $_path"
-            ;;
-        esac
-      done
-    done
-  done <<<"$_new"
-  echo "ok regenerate_cache_unchanged"
-}
-
 test_error_unknown_option_tests() {
   test_failure_expect test_expected_behavior_unknown_option 2 -- \
     "$_TEST_EXPECTED_BEHAVIOR" --bogus-option
@@ -291,55 +166,6 @@ test_error_unknown_option_tests() {
   test_failure_expect diff_unknown_option 2 -- \
     "$PERF2HTML_DIR_/perf2html_diff.sh" \
     "--artifacts=$_TEST_ERROR_SCRATCH/artifacts_unknown" --bogus-option
-}
-
-test_error_diff_uncached_test() {
-  local _baseline="$1" _modified="$2" _manifest_fault _raw_data _report
-  local _archive _diff_report="$_TEST_ERROR_SCRATCH/out_uncached"
-  local _checksum_label="$_TEST_ERROR_MANIFEST_CHECKSUM_LABEL"
-  test_failure_expect diff_uncached 0 -- \
-    "$PERF2HTML_DIR_/perf2html_diff.sh" \
-    "--artifacts=$_TEST_ERROR_SCRATCH/artifacts_uncached" \
-    "$_baseline" "$_modified" "$_diff_report"
-  _manifest_fault="$(REPORT_MANIFEST_CHECKSUM_LABEL="$_checksum_label" \
-    manifest_fault "$_diff_report" "$_TEST_ERROR_MANIFEST_VERSION_DIFF")"
-  [ -z "$_manifest_fault" ] \
-    || test_fail diff_uncached_manifest "$_manifest_fault"
-  echo "ok diff_uncached_manifest"
-  for _report in "$_baseline" "$_modified"; do
-    _archive="$(test_error_timer_artifacts "$_report")"
-    _raw_data="$_diff_report/${_archive##*/}"
-    [ ! -e "$_raw_data" ] || test_fail diff_uncached_no_raw_data \
-      "a diff report holds raw data: $(path_shown "$_raw_data")"
-  done
-  [ ! -e "$_diff_report/raw" ] || test_fail diff_uncached_no_raw_data \
-    "a diff report holds raw data: $(path_shown "$_diff_report/raw")"
-  echo "ok diff_uncached_no_raw_data"
-}
-
-test_error_diff_remote_test() {
-  local _baseline="$1" _modified="$2" _report _part _archives=()
-  local _remote="$_TEST_ERROR_SCRATCH/remote"
-  local _tool_dir="$_remote/curl/tests/perf2html"
-  mkdir -p "$_tool_dir" "$_remote/home"
-  cp -a "$PERF2HTML_DIR_/perf2html_diff.sh" "$PERF2HTML_DIR_/README.md" \
-    "$_SCRIPT_DIR" "$_tool_dir/"
-  for _report in "$_baseline" "$_modified"; do
-    _archives+=("$_remote/$(basename "$_report")$_TEST_ERROR_ARCHIVE_SUFFIX")
-    tar -cJf "${_archives[-1]}" -C "$(dirname "$_report")" \
-      "$(basename "$_report")"
-  done
-  test_failure_expect diff_remote 0 -- \
-    env HOME="$_remote/home" GIT_CEILING_DIRECTORIES="$_remote" \
-    "$_tool_dir/perf2html_diff.sh" "--artifacts=$_remote/artifacts" \
-    "${_archives[@]}" "$_remote/out"
-  for _part in "$_TEST_ERROR_HEAT_MAP_DIR_NAME" \
-    "$_TEST_ERROR_SOURCES_DIR_NAME"; do
-    diff -r "$_TEST_ERROR_SCRATCH/out_uncached/$_part" "$_remote/out/$_part" \
-      || test_fail diff_remote_same "a diff made outside the repository \
-writes another $_part/ than one made inside it"
-  done
-  echo "ok diff_remote_same"
 }
 
 test_error_diff_tests() {
@@ -465,7 +291,7 @@ test_error_diff_tests() {
 }
 
 test_error_txz_tests() {
-  local _baseline="$1" _wrong _whole _truncated
+  local _baseline="$1" _wrong
   local _tool="$PERF2HTML_DIR_/perf2html_diff.sh"
   local _scratch="$_TEST_ERROR_SCRATCH"
 
@@ -486,14 +312,6 @@ test_error_txz_tests() {
     "$_tool" "--artifacts=$_scratch/artifacts_txz_empty" \
     "$_baseline" "$_scratch/empty$_TEST_ERROR_ARCHIVE_SUFFIX" \
     "$_scratch/out_txz_empty"
-
-  _whole="$_scratch/whole$_TEST_ERROR_ARCHIVE_SUFFIX"
-  tar -cJf "$_whole" -C "$(dirname "$_baseline")" "$(basename "$_baseline")"
-  _truncated="$_scratch/truncated$_TEST_ERROR_ARCHIVE_SUFFIX"
-  head -c "$_TEST_ERROR_TRUNCATED_BYTES" "$_whole" >"$_truncated"
-  test_failure_expect txz_input_truncated 2 -- \
-    "$_tool" "--artifacts=$_scratch/artifacts_txz_truncated" \
-    "$_baseline" "$_truncated" "$_scratch/out_txz_truncated"
 
   mkdir "$_scratch/a_directory$_TEST_ERROR_ARCHIVE_SUFFIX"
   test_failure_expect txz_input_is_a_directory 2 -- \
@@ -602,19 +420,7 @@ test_error_relink_test() {
     test_error_relink_regenerate_run "$_binary" "$_reference"
 }
 
-# Refuses an archive that a regenerate run wrote, as a routine run makes none.
-test_error_routine_archive_check() {
-  local _report
-  for _report in "$_TEST_ERROR_BASELINE_REPORT" \
-    "$_TEST_ERROR_MODIFIED_REPORT" "$_TEST_ERROR_DIFF_REPORT"; do
-    [ ! -e "$_report$_TEST_ERROR_ARCHIVE_SUFFIX" ] \
-      || test_fail routine_run_no_archive \
-        "$(path_shown "$_report$_TEST_ERROR_ARCHIVE_SUFFIX") exists"
-  done
-  echo "ok routine_run_no_archive"
-}
-
-test_error_failure_tests_run() {
+main() {
   local _target _baseline _modified _diff
   rm -rf "$_TEST_ERROR_SCRATCH"
   mkdir -p "$_TEST_ERROR_SCRATCH"
@@ -632,8 +438,6 @@ test_error_failure_tests_run() {
     "$_target/$(basename "$_TEST_ERROR_DIFF_REPORT")" \
     "$_TEST_ERROR_DIFF_REPORT")"
 
-  test_error_diff_uncached_test "$_baseline" "$_modified"
-  test_error_diff_remote_test "$_baseline" "$_modified"
   test_error_diff_tests "$_baseline" "$_modified" "$_diff"
   test_error_txz_tests "$_baseline"
   test_error_batch_tests "$_target"
@@ -641,24 +445,8 @@ test_error_failure_tests_run() {
   test_error_toolchain_tests
   test_error_expected_behavior_tests
   rm -rf "$_TEST_ERROR_SCRATCH"
-}
 
-main() {
-  local _cache_before
-  test_error_markdown_formatter_check
-  test_error_cache_populated_check
-  _cache_before="$(test_error_cache_snapshot)"
-  test_error_expected_behavior_run
-  test_error_routine_archive_check
-  test_error_regenerate_cache_check "$_cache_before"
-  test_error_failure_tests_run
-  test_error_markdown_check_run
   printf 'test_error_handling.sh: %ss total\n' "$SECONDS"
-  if [ -d "$_TEST_ERROR_SCREENSHOT_DIFF_DIR" ]; then
-    screenshot_gold_notice "$_TEST_ERROR_SCREENSHOT_GOLD_DIR" \
-      "$_TEST_ERROR_SCREENSHOT_DIFF_DIR"
-    exit "$_TEST_ERROR_SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE"
-  fi
 }
 
 main

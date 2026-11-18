@@ -997,6 +997,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
         dark_mode_show(message_data.dark_mode_enabled);
       else if (message_name === "recenter") {
         if (view_options.recenter) view_options.recenter();
+      } else if (message_name === "view_key_pressed") {
+        if (!view_options.view_key_pressed)
+          window.throw_exception_("str_error_internal");
+        view_options.view_key_pressed(message_data.key_press);
       } else if (
         message_name !== "preferences_apply" &&
         message_name !== "view_reset"

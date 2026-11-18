@@ -7,6 +7,10 @@ window.try_catch_handler_(function () {
 
   const CALL_GRAPH_VIEW_KEY = settings_("CALL_GRAPH_VIEW_KEY");
   const DATABASE_VIEW_KEY = settings_("DATABASE_VIEW_KEY");
+  const FLAME_GRAPH_CONTROL_KEY_NAMES = settings_(
+    "FLAME_GRAPH_CONTROL_KEY_NAMES",
+  );
+  const FLAME_GRAPH_PLAIN_KEY_NAMES = settings_("FLAME_GRAPH_PLAIN_KEY_NAMES");
   const FLAME_GRAPH_VIEW_ENTRY = settings_("FLAME_GRAPH_VIEW_ENTRY");
   const HEAT_MAP_VIEW_ENTRY = settings_("HEAT_MAP_VIEW_ENTRY");
   const MENU_ENTRY_NEEDS = settings_("MENU_ENTRY_NEEDS");
@@ -651,6 +655,35 @@ window.try_catch_handler_(function () {
     menu_strip_handle.flash(flash_entry_name);
     flash_entry_name = "";
   }
+  // Hands a key speedscope takes to the flame graph view, its frame focused.
+  function flame_graph_key_handler(key_event) {
+    if (
+      window.report_frame_.address_now().view !== FLAME_GRAPH_VIEW_KEY ||
+      key_event.defaultPrevented ||
+      key_event.isComposing ||
+      key_event.altKey ||
+      menu_strip_handle.open_pulldown_state() !== null ||
+      preference_strip_handle.open_pulldown_state() !== null
+    )
+      return;
+    const taken_key_names =
+      key_event.ctrlKey || key_event.metaKey
+        ? FLAME_GRAPH_CONTROL_KEY_NAMES
+        : FLAME_GRAPH_PLAIN_KEY_NAMES;
+    if (!taken_key_names.includes(key_event.key)) return;
+    key_event.preventDefault();
+    window.report_ui_.view_frame.focus();
+    window.report_frame_.view_post("view_key_pressed", {
+      key_press: {
+        code: key_event.code,
+        ctrlKey: key_event.ctrlKey,
+        key: key_event.key,
+        metaKey: key_event.metaKey,
+        repeat: key_event.repeat,
+        shiftKey: key_event.shiftKey,
+      },
+    });
+  }
   function menu_key_handler(key_name, is_repeat) {
     return (
       preference_strip_handle.key_handler(key_name, is_repeat) ||
@@ -661,6 +694,12 @@ window.try_catch_handler_(function () {
 
   function activate() {
     window.report_preferences_.activate(window.report_frame_.counter_names);
+    // Runs ahead of every menu cell, so that no menu control takes the key.
+    document.addEventListener(
+      "keydown",
+      window.try_catch_handler_(flame_graph_key_handler),
+      true,
+    );
     document.addEventListener(
       "keydown",
       window.try_catch_handler_((key_event) => {
