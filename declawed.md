@@ -48,8 +48,10 @@ scripts too."""
   `perf` (the `linux-perf` package, named by the toolchain check) is a
   required tool all the same. `perf_measure.py
   timing` runs `perf stat -j -r TIMING_PERF_STAT_RUNS -o
-  <test>.perf-stat.json -e '{TIMING_PERF_STAT_EVENTS}' --` over the pinned
-  curl perf tool command. A count perf writes as one of
+  <test>.perf-stat.json --all-user -M <TIMING_PERF_STAT_METRICS perf metric
+  names> --` over the pinned curl perf tool command, perf 7 writing a metric
+  only for one named with `-M`; the JSON holds exactly the
+  `TIMING_PERF_STAT_EVENTS` lines, one each. A count perf writes as one of
   `TIMING_PERF_STAT_UNCOUNTED_VALUES` (`<not counted>`, `<not supported>`)
   reads 0. A perf run its permissions refuse exits non-zero with its JSON
   empty and the curl perf tool never run: that is not a failure, only less
@@ -64,8 +66,11 @@ scripts too."""
   rows such as `16 100 frames, 282 usecs`, each divided by its own count, then
   `TIMING_PERF_STAT_METRICS`, perf stat's own `metric-value` texts as perf
   writes them, full precision and unchanged, each on its event's line under
-  its `metric-unit`: instructions/cycle (`insn per cycle`), branch miss %
-  (`of all branches`), L1D miss % (`of all L1-dcache accesses`); then the
+  its `metric-unit`, `TIMING_PERF_STAT_METRIC_UNIT_FORMAT` of its unit and
+  its perf metric name: instructions/cycle (`insn_per_cycle` on
+  `cpu-cycles`, `instructions  insn_per_cycle`), branch miss %
+  (`branch_miss_rate` on `branch-misses`, `%  branch_miss_rate`), L1D miss %
+  (`l1d_miss_rate` on `L1-dcache-load-misses`, `%  l1d_miss_rate`); then the
   `TIMING_COUNTER_RATIOS` perf reports no metric for, derived from its
   counters: loads / instruction, printed at perf's own metric precision,
   `TIMING_PERF_STAT_METRIC_FRACTION_DIGITS`. A value perf reports itself is
@@ -109,6 +114,10 @@ scripts too."""
 - `--regenerate` refuses (hard error, exit 2) rather than silently measuring
   when recordings are stale. Any silent downgrade to the more expensive path
   is the same class of bug.
+- `--regenerate` and `--keep-artifacts` are never a backwards compatibility
+  concern: the artifacts can be expunged at any time, so a format change needs
+  no reader of older artifacts, and a `--regenerate` run checks no checkout
+  against the recordings it reads.
 - An unexpected change in a file is probably the user's own edit - never
   revert it, never clobber it; finish it the way it points if it is in the
   way, or stop and ask if needed when it makes no sense.
@@ -366,10 +375,21 @@ The single function/check owning each concern - never bypass or duplicate:
   overview ratio, one over a 0 being 0; `timing_texts()` every timing value
   printed, the overview's row and the log's summary rows, a 0 printed empty
   (perf_measure.py).
-- `function_line()` - the one line a function is addressed at: the line before
-  its callgrind entry line when that line carries no counter and the
-  function's counters span more than one line, else the entry line
-  (callgrind_to_heatmap.py).
+- `function_line()` - the one line a function is addressed at, decided once
+  by the measuring run's tables step, after its last test, and written to the
+  function table, `0_function_data.json`: the line its declaration names when
+  `declarations_read()` (function_declarations.py) finds that declaration by
+  the function's address alone, through the symbol table `objdump` reads of
+  the file `readelf` read the debug information from, and the declared file
+  is the file of its callgrind entry line through `path_canonical()`; any other
+  function's, an assembler compile unit's among them, its callgrind entry
+  line; no function is found by its name (callgrind_to_heatmap.py);
+  `function_table_places()` every page builder's place of a function, the
+  table's file and line by its name and image (callgrind.py).
+- `path_canonical()` - every path a report writes or compares, relative to
+  the repo root, no `.` or `..` that is not required, a declaration's too;
+  `build_output_strip()` the build output dir cut a recording and a
+  declaration share (callgrind.py).
 - `line_is_shown()` - whether the heat map shows a line, a line number of a
   file with source, so that only such a line, or a function declared at
   one, is linked or addressed, any other one's name plain text and its
@@ -424,35 +444,45 @@ The single function/check owning each concern - never bypass or duplicate:
   recording without chains or with a chain cut at
   `CALLGRIND_SEPARATE_CALLERS` fails (callgrind.py).
 - `call_graph_open_set()` - the one open set of a fresh call graph view,
-  at its first render, every `view_reset` and every cutoff change: each
-  function opens only at its costliest branch over the whole graph, a tie
-  the earliest by its path's names, and there only when a shown child's
-  branch cost from `call_branches()`, never shown, is at least the cutoff
-  percent of the test's total CEst through `share_of_test()`, the cutoff
-  the square of the heading's cutoff slider's chosen stop root, one of
-  `CALL_GRAPH_CUTOFF_STOP_COUNT` roots evenly spaced from the root of the
-  smallest printed percent to that of `CALL_GRAPH_CUTOFF_LARGEST_PERCENT`,
-  the halfway stop the default (`call_graph_cutoff_stop_roots()`,
-  preferences.js), every other node closed; a function whose
-  costliest branch lies under a closed node stays closed wherever it is
-  shown; a call a branch never made costs zero there; a shown child is a
-  callee not already on the node's path; the `cumulative first` sort still
-  orders by a caller and callee pair's inclusive CEst summed over every
-  branch (call_graph.js). The heat map tree shares none of it.
+  at its first render, every `view_reset`, every cutoff change while the
+  filter is empty and the filter's clearing: each
+  function opens only at its costliest branch over the whole graph, by the
+  branch costs of `call_branches()`, never shown, a tie the earliest by its
+  path's names, and there only when the node has a shown child and its
+  depth, a root's calls depth 1, is at most the cutoff depth, the heading's
+  cutoff slider's chosen stop, one of `CALL_GRAPH_CUTOFF_STOP_COUNT`
+  depths, the first `CALL_GRAPH_CUTOFF_LEAST_DEPTH` and each later one a
+  level deeper, the stop `CALL_GRAPH_CUTOFF_DEFAULT_STOP` levels deeper
+  than the first the default (`call_graph_cutoff_stop_depths()`,
+  preferences.js), every other node
+  closed; a function whose costliest branch lies under a closed node stays
+  closed wherever it is shown; a shown child is a callee not already on the
+  node's path; the `cumulative first` sort still orders by a caller and
+  callee pair's inclusive CEst summed over every branch (call_graph.js).
+  The heat map tree shares none of it. `filter_open_set()` the open set
+  of a non-empty filter, each typed change opening it again over any
+  pressed node: every node on a branch of `call_branches()` to a function
+  whose name the filter matches open, every other node closed; a filter
+  matching no drawn function draws "Nothing matches filter..." in place
+  of the graph (call_graph.js).
 - `design_scale_stop_set()` - every scale change; `menu.js` then posts
   `layout_reset`, which resets column widths and heading row counts.
 - `information_box_render(file_path, line_number)` - every file, function
-  and line info box, answering `{markup, copy_text, heading_entries}`, line
+  and line info box, answering `{markup, copy_text, heading_text,
+  heading_entries}`, `heading_text` the test, the view, the box's kind
+  ("file info box", "function info box", "line info box") and its title
+  heading the box's copied text and image, line
   0 the file's, which is part of the page: the first row of the source
   table, closed by no control; a file with no source draws no source
   table, only the tree's column, titled, and beside it, level with the
   title, the file's box, a blank line and the box's notes, in no cell and
   with no title of its own, light mode drawing the top and bottom lines
   that part a box from the source code only for a box in a cell; a line
-  holding both its own costs and a
-  function declared on it shows the line's box while the address's
-  `functions` is `0` and the function's while it is `1`, a line holding
-  one of the two that one's; the heading is the title, then a line's box's
+  declaring a function shows the function's box while the address's
+  `functions` is `1` and the line's own box while it is `0`, a line with
+  no costs of its own too; a line's box's calls tables list each call's
+  line, its function too only while `functions` is `1`; the heading is
+  the title, then a line's box's
   links to the functions of its line, a line in more than one function
   titled by those links alone; every box's cell spans each column after
   the tree; `information_box_place()` puts a box in its cell and draws its
@@ -468,30 +498,34 @@ The single function/check owning each concern - never bypass or duplicate:
   otherwise a node with no samples is closed, a "no samples" group too, 3
   otherwise a top level node is open and every other node closed
   (heat_map.js).
-- `hash_for_location()` - the address a press on a source line asks for,
-  and a hottest lines tape entry's while functions are shown, a function's
-  line written as the function's hash, each in the view mode shown; a box
-  table's line link and a tape entry while lines are shown write the
-  line's own address through `hash_for_line()`, `functions=0`
-  (heat_map.js);
-  `report_ui_.address.function_hash(test_name, function_name,
-  shows_functions)` every function's hash a page script writes, the
+- `hash_for_location()` - the address of a line in a view mode, a
+  function's line written as its costliest function's hash in functions
+  mode alone: a source line press's and a hottest lines tape entry's in
+  the mode shown, the menu's "lines" / "functions" entry's in the other
+  mode; a box table's line link writes the line's own address through
+  `hash_for_line()`, `functions=0` (heat_map.js);
+  `report_ui_.address.function_hash(test_name, function_name)` every
+  function's hash a page script writes, the
   menu's function pulldown, the heat map's function links and the call
   graph heading's selected function link, each `functions=1`, the
-  function of the symbol button last pressed, none at first and after a
-  `view_reset`, shown after the heading's copy entry and cutoff slider
-  through `report_ui_.page_heading_tail_set()` (theme.js);
+  function of the tree item last pressed, a menu button or a plain tree
+  item, none at first and after a `view_reset`, shown after the heading's
+  copy entry, cutoff slider and filter through
+  `report_ui_.page_heading_tail_set()` (theme.js);
   `BuildReport.address()` every address a page builder writes, the
   database page's function links `functions=1` (build_report.py).
 - `address_parts_check()` - every address's parts, among them the heat
   map's view mode `functions`, which every heat map address names: `1`
   shows the costs of the functions a line declares, `0` the line's own,
-  any other value or none refused (theme.js); the mode is the address's,
+  any other value or none refused, a function named with `0` too
+  (theme.js); the mode is the address's,
   never a preference: a function link writes `1`, a line link `0`, a
   source line or tree press and the menu's file pulldown the mode shown,
   `0` from another view or with a typed line, and the menu's "lines" /
-  "functions" entry links the address shown in the other mode
-  (heat_map.js, menu.js).
+  "functions" entry links the place the heat map drew in the other mode,
+  which the view sends through `report_ui_.view_mode_link_send()`, a
+  plain label before it arrives and for a function with no samples
+  (heat_map.js, frame.js, menu.js).
 - `report_ui_.function_location_send()` - the file and line the menu's
   status line shows before a heat map function: the heat map view sends
   the test, function, file and line it drew, and the menu shows them only
@@ -500,21 +534,38 @@ The single function/check owning each concern - never bypass or duplicate:
   menu.js).
 - `report_ui_.strip.render(strip_element, entries, status_entries)` - every
   strip cell: the menu and its status bar, an entry with an empty href a
-  plain label there, the preference strip, the settings view's load log
-  strip, each table heading, each heat map info box's controls (theme.js);
+  plain label there, the preference strip, each table heading, the
+  database's titled by its test, each heat
+  map info box's controls (theme.js); a `label` entry, one following no
+  link, plain page text in every strip, no menu button; a `search` entry,
+  the database's and the call graph's `filter`, drawn in a pulldown's
+  text box, its search over its label while focused or holding one,
+  bracketed as `str_search_text` ("[...]") as a pulldown's search is,
+  `str_search_placeholder` ("[search]") for none, a focused one showing
+  no tool tip;
   `report_ui_.strip.copy_entry_make()` every copy pulldown, its lines as
-  text or as an SVG image; an entry's `slider_stop` and
+  text under a markdown heading line and a blank line or as an SVG image
+  under a heading line in the status bar's colors, one space each side,
+  the heading the menu's status bar text (`status_bar_text_now()`,
+  relayed down on every message) but an info box's own `heading_text`;
+  an entry's `slider_stop` and
   `slider_last_stop` every slider's cells, the menu's scale and the call
-  graph's cutoff, each a tab stop taking arrow, Home and End keys;
+  graph's cutoff, one cell per stop, a stop at each cell's right edge, the
+  cells before it `str_slider_cell_before_stop` (the text scrollbar's
+  thumb, "▓"), the others `str_slider_cell_after_stop` (its gutter, "▒"),
+  each slider a tab stop taking arrow, Home and End keys;
   `strip_slider_drag()` every press and drag on a slider's cells, each
-  stop the pointer reaches the one whose cell edge lies nearest it, the
-  edges measured at the press, handed to the entry's `on_stop_choose`;
+  stop the pointer reaches the one of the cell under it, left of the
+  cells the first, right of them the last, the cells measured at the
+  press, handed to the entry's `on_stop_choose`;
   an entry cell focused before a render, a pulldown after its choice or
   its Escape too, focused again after it, as the WAI-ARIA combobox
   pattern keeps the focus.
 - `report_ui_.search_matcher()` - every search pattern, a pulldown's and
-  the database's `filter` search entry's, case blind, a bad pattern
-  matching nothing (theme.js).
+  the database's and the call graph's `filter` search entry's, case
+  blind, a bad pattern matching nothing (theme.js); a database filter
+  matching no row draws "Nothing matches filter..." in place of the
+  table, and the menu's reset clears both filters.
 - The call graph's table is a WAI-ARIA tree, every drawn node a treeitem,
   one roving tab stop; the arrow keys walk it in its depth first drawing
   order, as `tree_key_handler()` (call_graph.js) and the heat map tree's
@@ -534,9 +585,15 @@ The single function/check owning each concern - never bypass or duplicate:
   table not one (theme.js),
   `window.render_element_of_` every element made from markup.
 - `window.render_menu_button_`/`render_menu_button()` - every menu
-  button: a strip cell, a control, a ticker tape entry, a call graph
-  symbol with shown children (theme.js); a link in a table or a page is a
-  plain anchor from `render_element()`.
+  button: a strip cell but a title or a label, a control, a ticker tape
+  entry, a call graph symbol of a function the heading links (theme.js),
+  any other symbol a plain tree item; a press or Enter opens or closes a
+  node with shown children and selects any other; a link in a table or a
+  page is a plain anchor from `render_element()`.
+- `menu_button_pointer_blur()` - a pointer's click, or a pulldown line
+  dragged out of its list, unfocuses the focused menu button, an open
+  pulldown and a search cell aside; a key's click never does, and every
+  focused menu button shows its focus colors (theme.js).
 - `window.render_page_emphasis_` - every page emphasis, called by
   the strip for a heading title (theme.js).
 - `heat_cell_style(percent, curve, is_diff)` - every heat color, JS
@@ -558,18 +615,21 @@ The single function/check owning each concern - never bypass or duplicate:
 - `report_preferences_.counter_readers()` - every counter's reader for the
   database and the heat map, a recorded counter's value by its index, a
   derived one's its terms summed (preferences.js).
+- `report_ui_.view_storage.value_read(storage_key, value_is_offered)` -
+  every stored preference read, null for one the user never chose; a
+  value its reader does not offer, or stored text that is no JSON, the
+  dark mode's too, clears every stored preference, so that the next load
+  opens, then is refused naming its key and value (settings.js).
 - `report_dark_mode_.opening_enabled()` - the dark mode a page opens in: a
   framed view's the `dark-mode` query the top page writes into its
   address, the top page's the `toggle-dark` query, else the stored choice,
   else `DARK_MODE_ENABLED_DEFAULT` (settings.js).
-- `load_log_append()` - every load log entry, on the clock the top page's
-  navigation started, a framed page posting it up (utility.js);
-  `report_load_log_.page_render_log()` and `.event_render_log()` every
-  render entry, a view drawing after its own loads calling its load render
-  log once drawn through `view_activate`'s `load_render_defer`;
-  `report_load_log_.deferred_render_run()` every render a later animation
-  frame draws, logged against the input that asked for it, the database's
-  search redraw.
+- `page_drawn_mark_()` - every page's one drawn mark,
+  `window.page_is_drawn_`, set in a task after the paint of the page's
+  first draw, a view drawing after its own loads marking itself once
+  drawn through `view_activate`'s `drawn_mark_defer` (utility.js); the
+  screenshot tool's `PAGE_DRAWN_FUNCTION` waits on it in every frame
+  (test_settings.py).
 
 ### Working agreement
 
@@ -625,6 +685,41 @@ The single function/check owning each concern - never bypass or duplicate:
   `compare_` image in `screenshots-diff/` not already inspected and reports
   what each shows. It never deletes or moves the gold shots and never
   challenges the maintainer over a difference.
+- When only one file reasonably needs to be checked, the check is a single
+  shot run of the screenshot tool, `test_screenshot.py --shot=<name>`, the
+  name a shot's file name in `screenshots/` without `.png`; the changes an
+  edit makes to the other pages are caught later by the gold screenshot
+  comparison of `test_expected_behavior.sh --regenerate`. A single shot run
+  takes that one shot, checks no other view, times nothing and writes
+  neither `test_index.html` nor `timing.txt`; given `--compare-gold`, the
+  run compares that one shot with its gold twin.
+- A single shot run, from the project root, after the reports are rebuilt:
+  `python3 scripts/test_screenshot.py --build-root=$PWD
+  --shot=04-720p-database-urlparser-modified-light
+  perf2html_modified_report modified_`; a diff report's shot adds `--diff`
+  and takes `perf2html_diff_report diff_`, and `--out=<dir>` writes the shot
+  elsewhere than `screenshots/`.
+- `./perf2html_batch.sh --regenerate`, from the project
+  root, rebuilds all three reports from the kept recordings in about 20
+  seconds, the diff report among them, so an edit to a stylesheet or a page
+  script reaches every report before a shot is taken. `--keep-artifacts`
+  is implicit with `--regenerate`.
+- Every developer tool is installed where `packages.md` puts it and works
+  as is; nothing looks for a tool. `shfmt` and `clang-format` run by name,
+  and the home dir tools, shared with other projects, run at their paths
+  (`RUFF_PATH`, `PYRIGHT_PATH`, `PRETTIER_PATH`, test_utility.sh), never
+  through `PATH`. From the project root, a source stage's command on a
+  file, its check flag in brackets:
+  `shfmt -i 2 -bn -ci -ln bash -w` (`-d`);
+  `~/.local/bin/ruff format --config scripts/ruff.toml` (`--diff`);
+  `~/.local/bin/ruff check --config scripts/ruff.toml --fix` (no `--fix`);
+  `clang-format --style=file:src/.clang-format -i` (`--dry-run --Werror`);
+  `~/.npm-global/bin/prettier --config scripts/.prettierrc.json --write`
+  (`--check`);
+  `~/.local/bin/pyright --project scripts/pyrightconfig.json`.
+- The screenshot tool opens its browser itself, Chrome for Testing at
+  `SCREENSHOT_BROWSER_PATH` (test_settings.py), and the browser starts only
+  outside an agent's command sandbox.
 - The full run is `test_all.sh` and only run that when asked to "test".
 - No testing of `--txz` is allowed outside `scripts/publish.sh`. `publish.sh`
   takes no such argument: it always passes `--txz` to the script that makes the
@@ -682,11 +777,10 @@ The single function/check owning each concern - never bypass or duplicate:
   prints on stdout is its output, not a success line.
 - Every ok/success line a script of ours controls (including our Python tools'
   ok lines) is gated behind `--verbose`; an outside tool's own quiet switch is
-  passed unless `--verbose` (e.g. `ruff --quiet`), curl's `--silent` unless
-  level 2, as its progress meter would break the level 1 Markdown; a tool with
-  no quiet switch (pyright) prints its one success line in a quiet run,
-  accepted as-is; at level 1 `pyright_filtered_run` drops it, the maintainer's
-  one exception.
+  passed unless `--verbose` (e.g. `ruff --quiet`, apt-get's `--quiet=2`); a
+  tool with no quiet switch (pyright) prints its one success line in a quiet
+  run, accepted as-is; at level 1 `pyright_filtered_run` drops it, the
+  maintainer's one exception.
 - Level 2 (`VERBOSE_RAW_LEVEL`, `--verbose --verbose`) is plain text: no
   Markdown, no line of ours or a child's reformatted or filtered, every tool
   run without its quiet switch.
@@ -698,7 +792,8 @@ The single function/check owning each concern - never bypass or duplicate:
   comparison's `SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE` aside. The one
   exception is `pyright_filtered_run` at level 1.
 - `tools_resolve` (or equivalent) must find every formatter/linter, the
-  screenshot browser, Pillow and the `toolchain_missing_list` toolchain
+  screenshot browser, Pillow and the `toolchain_missing_list` toolchain,
+  its `TOOLCHAIN_LIBC_DEBUG_INFO_PACKAGE` (`libc6-dbg`) asked of `dpkg-query`,
   before anything is deleted, naming every missing tool in one line that
   points to `packages.md` (`ADMIN_INSTRUCTIONS_FILE_NAME`) - never discover a
   missing tool mid-run after damage is done.
@@ -769,7 +864,8 @@ The single function/check owning each concern - never bypass or duplicate:
   printing relevant variables too.
 - An error message states what failed and carries no advice: no fix, no next
   step, no command to run. A missing tool's pointer to `packages.md`
-  (`tools_resolve`, `toolchain_check`) is the one exception.
+  (`tools_resolve`, `toolchain_check`, and `source_cache_sync` for the
+  deb-src lines `apt-get source` needs) is the one exception.
 - `test_all.sh` should print significant run times, it is not "no news is good
   news".
 - Don't change code when unable to implement a request as specified. Do not

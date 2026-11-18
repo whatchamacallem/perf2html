@@ -76,16 +76,17 @@ report generators. Start by running the tests and checking the results.
 
 ## Browser Preferences
 
-Reports keep user preferences in in the browser's `localStorage`, shared by
-every report opened from the same origin. Each value is JSON, `null` meaning
-the user never chose one and the default in `settings.py` applies.
+Reports keep user preferences in the browser's `localStorage`, shared by every
+report opened from the same origin. Each value is JSON, `null` meaning the user
+never chose one and the default in `settings.py` applies.
 
 If the `perf2html.version` does not match `STORAGE_VERSION` then all
-preferences are reset at startup.
+preferences are reset at startup. A stored value that is no JSON, or one the
+report does not offer, clears every preference, then halts the page with an
+error naming its key and value.
 
-- `call_graph.cutoff`: The call graph cutoff slider's stop root, the cutoff its
-  square, the roots of `CALL_GRAPH_CUTOFF_STOP_COUNT` stops evenly spaced from
-  the smallest printed percent's to `CALL_GRAPH_CUTOFF_LARGEST_PERCENT`'s.
+- `call_graph.cutoff`: The call graph cutoff slider's depth.
+- `call_graph.sort`: The call graph sort order, `name`, `cumulative` or `heat`.
 - `database.counter_list`: The database counters list, each line, calls,
   callers, callees or any counter, in the order of the pulldown and the
   columns, with whether the line is shown, every line toggled, the ranking
@@ -97,7 +98,6 @@ preferences are reset at startup.
   is shown, every line toggled, the ranking counter too.
 - `heatmap.scale`: The heat map scale curve, `log` or `linear`.
 - `heatmap.sort`: The heat map sort order, `heat` or `name`.
-- `log.display_length`: The load log line count the settings view shows.
 - `perf2html.version`: The `STORAGE_VERSION` the other keys were written under.
 - `speedscope-color-scheme`: Speedscope's scheme, `null` so that speedscope
   follows the color scheme its frame takes from the dark mode shown.
@@ -139,11 +139,17 @@ Every file sits in the archive's one root directory,
 `timer-artifacts-<time_t>/`.
 
 - `0_file_data.json`: Source directory file listing with mode flags.
-- `0_timing_data.json`: The overview's timing values perf2html_diff.sh reads.
+- `0_function_data.json`: The function table, each function's name, image, file
+  and line, a file by its `0_file_data.json` index.
+- `0_test_data.json`: The overview's timing values perf2html_diff.sh reads.
 - `<test>.callgrind.out`: A test's callgrind file, the repo root cut.
-- `<test>_function_data.json`: Each function's name, image, file, line, self
-  costs, callers and callees, a file by its `0_file_data.json` index.
+- `<test>_function_data.json`: Each function's self costs, callers and callees,
+  a function by its `0_function_data.json` index.
 - `test_list.txt`: The test names, one per line, sorted.
+
+The measuring run writes `0_file_data.json`, then `0_function_data.json`, after
+its last test is recorded; a `--regenerate` run reads both and rewrites
+neither.
 
 `0_file_data.json` is an array, sorted by path, of objects holding a path `p`
 and its code `t`, one of the following:
@@ -153,15 +159,14 @@ and its code `t`, one of the following:
 - `sys` : A system file with source.
 - `err` : A file that `callgrind` could not find or was deleted.
 
-### `<test>_function_data.json` layout
+### `0_function_data.json` layout
 
 The file has this overall structure:
 
 ```txt
 {
-  "counters":  [<string>, ...],   // the callgrind events in line order
-  "images":    [<string>, ...],   // array of binary image paths, repo root cut
-  "functions": [<function>, ...]  // array of function records
+  "images":    [<string>, ...],  // Array of binary image paths, repo root cut.
+  "functions": [<function>, ...] // Every test's functions, sorted by name.
 }
 ```
 
@@ -169,27 +174,46 @@ It decomposes like this:
 
 ```txt
 function = [
-  <name>,          // <string>, callgrind's function name
-  <image_index>,   // <int>, index into "images"
-  <file_index>,    // <int>, index into 0_file_data.json's array
-  <line>,          // <int>, the line the function is addressed at
-  <self_costs>,    // one per "counters" entry, same order
-  <callers>,       // callers sorted by name
-  <callees>        // callees sorted by name
+  <name>,          // <string>, callgrind's function name.
+  <image_index>,   // <int>, index into "images".
+  <file_index>,    // <int>, index into 0_file_data.json's array.
+  <line>           // <int>, the line the function is addressed at.
+]
+```
+
+String lookups are replaced with integer array lookups as is standard practice
+optimizing databases.
+
+### `<test>_function_data.json` layout
+
+The file has this overall structure:
+
+```txt
+{
+  "counters":  [<string>, ...],   // the callgrind events in line order
+  "functions": [<function>, ...]  // the test's functions, in table order
+}
+```
+
+It decomposes like this:
+
+```txt
+function = [
+  <function_index>, // <int>, index into 0_function_data.json's "functions"
+  <self_costs>,     // one per "counters" entry, same order
+  <callers>,        // callers in table order
+  <callees>         // callees in table order
 ]
 
 self_costs = [<int>, ...]
 callers = [<function_index>, <calls>, ...] // pairs of functions and calls
 callees = [<function_index>, <calls>, ...] // same format as callers
-function_index = <int>                     // index into "functions" array
 calls = <int>                              // total number of calls
 ```
 
-- The three keys are the whole document.
-- A name two images record is shown, and sorted, as `<image file name>/<name>`,
-  the row holding the name alone.
-- `callers` and `callees` are flat, a row index then its calls for each one, so
-  a list holds half its length of callers or callees.
+- The two keys are the whole document.
+- `callers` and `callees` are flat, a table index then its calls for each one,
+  so a list holds half its length of callers or callees.
 - Every caller pair has a mirror callee pair in the row it names, with the same
   calls, and no calls count is 0.
 
@@ -201,8 +225,10 @@ An HTML generation run keeps its temporary files in a directory under
 A regular report's run keeps these.
 
 - `0_file_data.json`: The paths document, each path's code.
-- `<test>_function_data.json`: The function data, each function's place, self
-  costs, callers and callees.
+- `0_function_data.json`: The function table, each function's name, image, file
+  and line.
+- `<test>_function_data.json`: The function data, each function's self costs,
+  callers and callees.
 - `<test>.callgrind.out`: The callgrind recording.
 - `<test>.cyg_callback.bin`: The function trace of the sampled run.
 - `<test>.cyg_callback.bin.maps`: The traced process's mappings.
@@ -244,19 +270,28 @@ A diff report's run keeps these.
 
 ## Callgrind Parsing
 
-| File                | Purpose                                            |
-| ------------------- | -------------------------------------------------- |
-| `artifacts.py`      | Holds the artifacts contract: every temporary      |
-|                     | file's path, the test list, a report's build tree  |
-|                     | and the missing file error.                        |
-| `callgrind.py`      | Parses callgrind files into the one profile model, |
-|                     | with costs, derived counters and display paths,    |
-|                     | and pairs a diff's functions of one name by image  |
-|                     | path less each report's build tree, the lone one   |
-|                     | left in each report as moved.                      |
-| `callgrind_diff.py` | Subtracts the baseline profile from the modified   |
-|                     | profile and writes the delta, and the function     |
-|                     | data diff of every function either report lists.   |
+| File                       | Purpose                                     |
+| -------------------------- | ------------------------------------------- |
+| `artifacts.py`             | Holds the artifacts contract: every         |
+|                            | temporary file's path, the test list, a     |
+|                            | report's build tree and the missing file    |
+|                            | error.                                      |
+| `callgrind.py`             | Parses callgrind files into the one profile |
+|                            | model, with costs, derived counters and     |
+|                            | display paths, reads the function table     |
+|                            | and function data, and pairs a diff's       |
+|                            | functions of one name by image path less    |
+|                            | each report's build tree, the lone one left |
+|                            | in each report as moved.                    |
+| `callgrind_diff.py`        | Subtracts the baseline profile from the     |
+|                            | modified profile and writes the delta, and  |
+|                            | the function data diff of every function    |
+|                            | either report lists.                        |
+| `function_declarations.py` | Reads each recorded image's debug           |
+|                            | information with `readelf` and its symbols  |
+|                            | with `objdump`, giving a function the file  |
+|                            | and line its declaration names only when    |
+|                            | its address alone finds it.                 |
 
 ## Database Page
 
@@ -289,7 +324,7 @@ A diff report's run keeps these.
 |                    | the frames and replaces the top page with a plain     |
 |                    | error report.                                         |
 | `utility.js`       | Reports a failed load of a link, script or image, and |
-|                    | keeps the log.                                        |
+|                    | marks the page drawn.                                 |
 
 ## Flame Graph
 
@@ -306,29 +341,26 @@ A diff report's run keeps these.
 
 ## Heat Map
 
-| File                      | Purpose                                      |
-| ------------------------- | -------------------------------------------- |
-| `callgrind_to_heatmap.py` | Writes the heat map data and sources of each |
-|                           | test, the paths document and function data a |
-|                           | diff derives, and the one heat map page.     |
-| `heat_map.css`            | Styles the heat map tree, source table,      |
-|                           | information box, ticker tape and minimap.    |
-| `heat_map.html`           | Templates the heat map page with its tree    |
-|                           | pane, main box, minimap and text bars.       |
-| `heat_map.js`             | Draws the heat map tree, source view and     |
-|                           | info boxes for every test.                   |
+| File                      | Purpose                                     |
+| ------------------------- | ------------------------------------------- |
+| `callgrind_to_heatmap.py` | Writes the measuring run's paths document   |
+|                           | and function table, then the heat map data  |
+|                           | and sources of each test, the function data |
+|                           | a diff derives, and the one heat map page.  |
+| `heat_map.css`            | Styles the heat map tree, source table,     |
+|                           | information box, ticker tape and minimap.   |
+| `heat_map.html`           | Templates the heat map page with its tree   |
+|                           | pane, main box, minimap and text bars.      |
+| `heat_map.js`             | Draws the heat map tree, source view and    |
+|                           | info boxes for every test.                  |
 
 ## Menu Strip
 
-| File             | Purpose                                                 |
-| ---------------- | ------------------------------------------------------- |
-| `menu.js`        | Holds the menu controller, which draws the strip, takes |
-|                  | keys and starts every navigation.                       |
-| `preferences.js` | Holds the preferences the menu edits and a view draws   |
-|                  | with, their choices, each counters list's lines in the  |
-|                  | settings' order, their labels, columns and the parts a  |
-|                  | table makes of the shown ones, and the reader of each   |
-|                  | counter, a derived one summed from its terms.           |
+| File             | Purpose                                                  |
+| ---------------- | -------------------------------------------------------- |
+| `menu.js`        | Holds the menu controller, which draws the strip, takes  |
+|                  | keys and starts every navigation.                        |
+| `preferences.js` | Holds the preferences the menu edits and the pages show. |
 
 ## Overview Page
 
@@ -346,13 +378,10 @@ A diff report's run keeps these.
 
 ## Perf Measurement
 
-| File              | Purpose                                              |
-| ----------------- | ---------------------------------------------------- |
-| `perf_measure.py` | Runs the perf test executable under callgrind, perf  |
-|                   | stat and the function trace, the one caller of perf, |
-|                   | and parses the timing page and perf stat counters    |
-|                   | for the overview and the summary rows the measuring  |
-|                   | run prints.                                          |
+| File              | Purpose                                             |
+| ----------------- | --------------------------------------------------- |
+| `perf_measure.py` | Runs the perf test executable under callgrind, perf |
+|                   | stat and the function trace.                        |
 
 ## README Page
 
@@ -388,8 +417,7 @@ A diff report's run keeps these.
 |                             | the batch, checks the reports, then takes    |
 |                             | screenshots.                                 |
 | `test_report.py`            | Checks the pages, manifest, checksum, heat   |
-|                             | map, flame graph and timer artifacts of one  |
-|                             | report.                                      |
+|                             | map, flame graph and timer artifacts.        |
 | `test_screenshot.py`        | Shoots the golden bookmarks of one report in |
 |                             | Chrome, times its golden clicks, and writes  |
 |                             | `test_index.html` and `timing.txt`.          |
@@ -401,8 +429,8 @@ A diff report's run keeps these.
 | `test_template.html`        | Templates the index of report links over a   |
 |                             | grid of framed report pages that             |
 |                             | `test_screenshot.py` fills in.               |
-| `test_utility.sh`           | Holds the functions shared by the test       |
-|                             | scripts.                                     |
+| `test_utility.sh`           | Holds the home dir tool paths and the        |
+|                             | functions shared by the test scripts.        |
 | `test_whitelist.txt`        | Lists the file globs that the format, lint   |
 |                             | and scan stages touch.                       |
 

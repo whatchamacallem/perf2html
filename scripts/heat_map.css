@@ -64,20 +64,43 @@
   white-space: normal;
   padding: 0;
 }
+/* A line's or function's box has half a line clear above and below it. */
+tr.heat-map-source-line-detail-row- > td {
+  padding-block: var(--heat-map-source-line-box-padding-block-);
+}
+/* The file's box rises into the title line, level with the tree's title. */
+tr.heat-map-source-file-information-row- > td {
+  position: relative;
+  top: -1lh;
+}
+/* The title line over the file's box lets a press through to the box. */
+.heat-map-source-table-:has(.heat-map-source-file-information-row-) > thead {
+  pointer-events: none;
+}
+/* A title still takes its own presses. */
+.heat-map-source-table- > thead > tr > th {
+  pointer-events: auto;
+}
+/* A source title rides below the file's box until the box scrolls away. */
+.heat-map-source-table-:has(.heat-map-source-file-information-row-)
+  > thead
+  > tr
+  > th:not(:first-child) {
+  animation: heat-map-source-title-drop- linear;
+  animation-timeline: scroll();
+  animation-range: 0 var(--heat-map-source-file-box-height-);
+}
+@keyframes heat-map-source-title-drop- {
+  from {
+    translate: 0 var(--heat-map-source-file-box-height-);
+  }
+}
 /* A file with no source has its box beside the tree, level with its title. */
 .heat-map-source-box-alone- {
   display: grid;
   grid-template-columns: auto auto;
   justify-content: start;
   align-items: start;
-}
-/* A box's tables take the source line as left. */
-.heat-map-source-information-box- .table-,
-.heat-map-source-information-box- .table- :is(th, td):first-child {
-  border-left: 0;
-}
-td.heat-map-source-table-line-number-cell- {
-  user-select: none;
 }
 tr.clickable- {
   cursor: pointer;
@@ -89,9 +112,17 @@ tr.clickable- {
   > td.heat-map-source-table-code-cell- {
   min-width: var(--heat-map-source-box-room-);
 }
+/* The source's last line scrolls up to just below the column titles. */
+.heat-map-source-end- {
+  height: calc(100cqh - var(--heat-map-source-end-line-bottom-));
+}
 /* A hovered source line's tree cell ends where the line's frame starts. */
 tr[data-line-number-]:hover > td:first-child {
   anchor-name: --heat-map-source-hover-tree-cell-;
+}
+/* A hovered source line's frame starts at the tree's edge, in view. */
+table.heat-map-source-table-::before {
+  left: anchor(--heat-map-source-hover-tree-cell- right);
 }
 /* The hottest lines keep their line with none, so no file moves the page. */
 #heat-map-ticker-tape-box- {
@@ -140,7 +171,6 @@ tr[data-line-number-]:hover > td:first-child {
   position: absolute;
   left: 0;
   right: 0;
-  border-style: solid;
   cursor: grab;
 }
 #heat-map-minimap-viewport-.drag- {

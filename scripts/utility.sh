@@ -100,7 +100,7 @@ artifacts_verify() {
       test_kinds=("${ARTIFACT_DIFFED_KINDS[@]}")
       ;;
     recorded:1)
-      run_kinds=(header-rows)
+      run_kinds=("${ARTIFACT_RECORDED_RUN_KINDS[@]}")
       test_kinds=("${ARTIFACT_RECORDED_KINDS[@]}")
       ;;
     *)
@@ -427,10 +427,7 @@ project_root_check() {
 quiet_switch_set() {
   QUIET_SWITCH=()
   case "$1" in
-    curl)
-      [ "$VERBOSE" -ge "$VERBOSE_RAW_LEVEL" ] \
-        || QUIET_SWITCH=(--silent --show-error)
-      ;;
+    apt-get) [ "$VERBOSE" -ge 1 ] || QUIET_SWITCH=(--quiet=2) ;;
     prettier) [ "$VERBOSE" -ge 1 ] || QUIET_SWITCH=(--log-level warn) ;;
     ruff) [ "$VERBOSE" -ge 1 ] || QUIET_SWITCH=(--quiet) ;;
     *) error_exit 1 "error: no quiet switch is recorded for $1" ;;
@@ -606,23 +603,17 @@ options_parse() {
 
 source_cache_fetch() {
   local package="$1" version="$2" directory="$3"
-  local upstream="${version%-*}" pool staged tarball root
-  pool="$CACHE_ARCHIVE_BASE_URL/${package:0:1}/$package"
-  local url="$pool/${package}_$upstream.orig.tar.xz"
-  local package_dir
+  local upstream="${version#*:}" staged root package_dir
+  upstream="${upstream%-*}"
   package_dir="$(dirname "$directory")"
   rm -rf "$package_dir"
   staged="$directory.$TIMESTAMP.part"
   mkdir -p "$staged"
-  tarball="$staged/source.tar.xz"
-  quiet_switch_set curl
-  command_run curl --fail --location "${QUIET_SWITCH[@]}" \
-    --output "$tarball" "$url"
-  command_run tar xJf "$tarball" -C "$staged"
-  rm -f "$tarball"
+  quiet_switch_set apt-get
+  # Unpacks the source package with its patches applied into the staged dir.
+  command_run env --chdir="$staged" apt-get source "${QUIET_SWITCH[@]}" \
+    --only-source "$package=$version"
   root="$staged/$package-$upstream"
-  [ -d "$root" ] || error_exit 1 \
-    "error: $url holds no $package-$upstream directory"
   mv -f "$root" "$directory" || error_exit 1 \
     "error: could not move $root onto $directory"
   rm -rf "$staged"
@@ -636,6 +627,7 @@ source_cache_fill() {
 
 source_cache_sync() {
   local installed package version
+  local admin="$PERF2HTML_DIR_/$ADMIN_INSTRUCTIONS_FILE_NAME"
   installed="$(dpkg-query -W -f='${source:Package} ${source:Version}' \
     "$CACHE_EXTERNAL_PACKAGE")" || error_exit 1 \
     "error: dpkg-query knows no package $CACHE_EXTERNAL_PACKAGE"
@@ -646,6 +638,13 @@ source_cache_sync() {
   SOURCE_CACHE_PACKAGE="$package"
   SOURCE_CACHE_VERSION="$version"
   SOURCE_CACHE_DIR="$(absolute_path "$CACHE_ROOT_DIR")/$package/$version"
+  [ -d "$SOURCE_CACHE_DIR" ] && return
+  # Without `deb-src` apt knows no source package, else it lacks the version.
+  local reason="error: apt-get source has no $package"
+  apt-get source --print-uris --only-source "$package" >/dev/null \
+    || error_exit 127 "$reason, install commands in $admin"
+  apt-get source --print-uris --only-source "$package=$version" >/dev/null \
+    || error_exit 1 "$reason $version"
 }
 
 step_failure_print() {
@@ -747,7 +746,7 @@ toolchain_check() {
   local missing=() admin="$PERF2HTML_DIR_/$ADMIN_INSTRUCTIONS_FILE_NAME"
   toolchain_missing_list missing
   [ "${#missing[@]}" = 0 ] || error_exit 127 \
-    "error: not found on PATH: ${missing[*]}, install commands in $admin"
+    "error: not installed: ${missing[*]}, install commands in $admin"
   readme_converter_resolve
   SPEEDSCOPE_RELEASE="$(dirname \
     "$(dirname "$(readlink -f "$(command -v speedscope)")")")/dist/release"
@@ -756,14 +755,18 @@ toolchain_check() {
     "$reason, install commands in $admin"
 }
 
-# Appends each toolchain tool missing from PATH to the array named first.
+# Appends each toolchain tool or package not installed to the array named.
 toolchain_missing_list() {
   local -n missing_names="$1"
   local tool
   for tool in cmake ninja ccache cc valgrind perf taskset python3 \
-    addr2line readelf speedscope cksum curl tar xz dpkg-query cmark-gfm; do
+    addr2line readelf objdump speedscope cksum tar xz dpkg-query apt-get \
+    dpkg-source cmark-gfm; do
     command -v "$tool" >/dev/null 2>&1 || missing_names+=("$tool")
   done
+  [ "$(dpkg-query -W -f='${db:Status-Status}' \
+    "$TOOLCHAIN_LIBC_DEBUG_INFO_PACKAGE" 2>/dev/null)" = installed ] \
+    || missing_names+=("$TOOLCHAIN_LIBC_DEBUG_INFO_PACKAGE")
 }
 
 verbose_begin() {

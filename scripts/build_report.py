@@ -179,6 +179,7 @@ class BuildReport:
         artifacts_dir = artifacts.report_artifacts_dir(
             args.artifacts, args.report
         )
+        places = callgrind.function_table_places(artifacts_dir)
         for test_name in artifacts.test_list_read(artifacts_dir):
             profile = callgrind.profile_load(
                 artifacts_dir, "callgrind", test_name
@@ -196,6 +197,7 @@ class BuildReport:
                     artifacts.artifact_path(
                         artifacts_dir, "callgrind", test_name
                     ),
+                    places,
                 ),
             )
 
@@ -213,13 +215,17 @@ class BuildReport:
 
     # Lists the test's functions, edges, roots and branches, costs and total.
     def call_graph_model(
-        self, test_name: str, profile: callgrind.Profile, path: str
+        self,
+        test_name: str,
+        profile: callgrind.Profile,
+        path: str,
+        places: dict[callgrind.FunctionKey, callgrind.SourceLine],
     ) -> BuildReport.CallGraphModel:
         edges = self.call_graph_edges(profile)
         root_names = self.call_graph_roots(test_name, edges)
         function_names = sorted({name for pair in edges for name in pair})
         linked_names = self.linked_names(
-            *self.function_places(profile, function_names)
+            *self.function_places(profile, places, function_names)
         )
         call_graph_functions = [
             BuildReport.CallGraphFunction(
@@ -369,6 +375,10 @@ class BuildReport:
         artifacts_dir = artifacts.report_artifacts_dir(
             args.artifacts, args.report
         )
+        # A diff places each function as its function data diff does.
+        places = (
+            {} if args.diff else callgrind.function_table_places(artifacts_dir)
+        )
         for test_name in artifacts.test_list_read(artifacts_dir):
             database_model = (
                 self.diff_database_model(artifacts_dir, test_name)
@@ -378,6 +388,7 @@ class BuildReport:
                     callgrind.profile_load(
                         artifacts_dir, "callgrind", test_name
                     ),
+                    places,
                 )
             )
             self.database_page(
@@ -386,7 +397,10 @@ class BuildReport:
 
     # Lists each function the test calls, where it is, its calls and counters.
     def database_model(
-        self, test_name: str, profile: callgrind.Profile
+        self,
+        test_name: str,
+        profile: callgrind.Profile,
+        places: dict[callgrind.FunctionKey, callgrind.SourceLine],
     ) -> BuildReport.DatabaseModel:
         edges = self.call_graph_edges(profile)
         recorded_calls: dict[str, int] = {}
@@ -402,7 +416,9 @@ class BuildReport:
             name for name, calls in calls_by_name.items() if calls > 0
         }
         named_names = row_names | {name for pair in edges for name in pair}
-        locations, sourced_paths = self.function_places(profile, named_names)
+        locations, sourced_paths = self.function_places(
+            profile, places, named_names
+        )
         function_links = self.function_links(
             test_name,
             named_names,
@@ -709,14 +725,15 @@ class BuildReport:
 
     # Returns each named function's place and the shown files with source.
     def function_places(
-        self, profile: callgrind.Profile, function_names: Iterable[str]
+        self,
+        profile: callgrind.Profile,
+        places: dict[callgrind.FunctionKey, callgrind.SourceLine],
+        function_names: Iterable[str],
     ) -> tuple[dict[str, callgrind.SourceLine], set[str]]:
         heat_map = callgrind_to_heatmap.CallgrindToHeatmap(self.verbose)
         path_infos = heat_map.profile_path_infos(profile, None)
         locations = heat_map.function_locations(
-            profile,
-            {raw: path_info.display for raw, path_info in path_infos.items()},
-            function_names,
+            profile, places, function_names
         )
         return locations, {
             path_info.display

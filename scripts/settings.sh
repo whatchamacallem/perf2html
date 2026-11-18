@@ -8,7 +8,7 @@ ARTIFACTS_NAME=perf2html_temporary_artifacts
 
 ARTIFACT_ARCHIVE_KINDS=(callgrind function-data)
 
-ARTIFACT_ARCHIVE_RUN_KINDS=(file-data timing-data)
+ARTIFACT_ARCHIVE_RUN_KINDS=(file-data function-table timing-data)
 
 ARTIFACT_DIFFED_KINDS=(delta function-diff)
 
@@ -20,8 +20,9 @@ declare -A ARTIFACT_FILE_PURPOSES=(
   ["diff-log"]="the diff run's log"
   ["diff-regenerate-log"]="the last diff --regenerate run's log"
   ["file-data"]="the paths document, each path's code"
-  ["function-data"]="each function's place, self costs, callers and callees"
+  ["function-data"]="each function's self costs, callers and callees"
   ["function-diff"]="the function data diff with the baseline costs"
+  ["function-table"]="each function's name, image, file and line"
   ["header-rows"]="the manifest rows of the measuring run"
   ["modified-header"]="the modified report's header block"
   ["modified-profiles"]="the modified report's raw data archive, extracted"
@@ -42,12 +43,15 @@ declare -A ARTIFACT_FILE_PURPOSES=(
 ARTIFACT_RECORDED_KINDS=(callgrind timing-json timing-page trace-log
   trace-speedscope valgrind-log)
 
+ARTIFACT_RECORDED_RUN_KINDS=(file-data function-table header-rows)
+
 declare -A ARTIFACT_RUN_FILE_FORMATS=(
   ["baseline-header"]='%s/baseline.txt'
   ["baseline-profiles"]='%s/baseline'
   ["diff-log"]='%s/perf2html_diff.log'
   ["diff-regenerate-log"]='%s/perf2html_diff.regenerate.log'
   ["file-data"]='%s/0_file_data.json'
+  ["function-table"]='%s/0_function_data.json'
   ["header-rows"]='%s/perf2html.txt'
   ["modified-header"]='%s/modified.txt'
   ["modified-profiles"]='%s/modified'
@@ -79,8 +83,6 @@ BUILD_CCACHE_NAMESPACE=perf2html
 BUILD_DIR=build-relwithdebinfo
 
 BUILD_OUTPUT_DIR_NAME=build
-
-CACHE_ARCHIVE_BASE_URL=http://archive.ubuntu.com/ubuntu/pool/main
 
 CACHE_EXTERNAL_PACKAGE=libc6
 
@@ -157,10 +159,12 @@ TEST_SAMPLES_SIZE=$((TEST_LOOPS * 4 * 1024))
 
 TIMER_ARTIFACTS_ROOT_FORMAT='%s/timer-artifacts-%s'
 
-TIMING_PERF_STAT_EVENTS=(cycles:u instructions:u branches:u branch-misses:u
-  L1-dcache-loads:u L1-dcache-load-misses:u)
+TIMING_PERF_STAT_EVENTS=(cpu-cycles instructions branches branch-misses
+  L1-dcache-loads L1-dcache-load-misses)
 
 TIMING_PERF_STAT_RUNS=5
+
+TOOLCHAIN_LIBC_DEBUG_INFO_PACKAGE=libc6-dbg
 
 TRACE_BUILD_DIR=build-instr
 

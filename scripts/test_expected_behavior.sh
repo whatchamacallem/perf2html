@@ -55,9 +55,6 @@ _BUILD_LOCATION_ROOT_NAME=build
 _BUILD_LOCATION_SCRATCH_NAME=test_expected_build_location_scratch
 _BUILD_LOCATION_TRACE_TREES=build-instr
 _ROWS_FILE_NAME=perf2html.txt
-# Chrome for Testing as the puppeteer browsers tool installs it.
-_SCREENSHOT_BROWSER_PATH="$HOME/.local/share/chrome-for-testing/chrome"
-_SCREENSHOT_BROWSER_PATH+="/linux-157.0.8103.78/chrome-linux64/chrome"
 _SCREENSHOT_DIFF_DIR="$PERF2HTML_DIR_/screenshots-diff"
 _SCREENSHOT_GOLD_DIR="$PERF2HTML_DIR_/screenshots-gold"
 _SCREENSHOT_SCRIPT_NAME=test_screenshot.py
@@ -71,15 +68,19 @@ _DEFAULT_REPORTS=(
 )
 
 tools_resolve() {
-  local _missing=() _line _pillow_check
+  local _missing=() _line _browser_check _pillow_check
   local _admin="$PERF2HTML_DIR_/$ADMIN_INSTRUCTIONS_FILE_NAME"
-  _SHFMT="$(tool_find shfmt)" || _missing+=(shfmt)
-  _RUFF="$(tool_find ruff)" || _missing+=(ruff)
-  _CLANG_FORMAT="$(tool_find clang-format)" || _missing+=(clang-format)
-  _PRETTIER="$(tool_find prettier)" || _missing+=(prettier)
-  _PYRIGHT="$(tool_find pyright)" || _missing+=(pyright)
-  _SCREENSHOT_BROWSER="$_SCREENSHOT_BROWSER_PATH"
-  [ -x "$_SCREENSHOT_BROWSER" ] || _missing+=("$_SCREENSHOT_BROWSER")
+  command -v shfmt >/dev/null || _missing+=(shfmt)
+  [ -x "$RUFF_PATH" ] || _missing+=("$RUFF_PATH")
+  command -v clang-format >/dev/null || _missing+=(clang-format)
+  [ -x "$PRETTIER_PATH" ] || _missing+=("$PRETTIER_PATH")
+  [ -x "$PYRIGHT_PATH" ] || _missing+=("$PYRIGHT_PATH")
+  _browser_check='import os, test_settings'
+  _browser_check+='; browser_path = test_settings.SCREENSHOT_BROWSER_PATH'
+  _browser_check+='; raise SystemExit(not os.path.isfile(browser_path)'
+  _browser_check+=' or not os.access(browser_path, os.X_OK))'
+  PYTHONPATH="$_SCRIPT_DIR" python3 -c "$_browser_check" \
+    || _missing+=(chrome-for-testing)
   _pillow_check='from importlib.util import find_spec'
   _pillow_check+='; raise SystemExit(not find_spec("PIL"))'
   python3 -c "$_pillow_check" || _missing+=(pillow)
@@ -155,10 +156,10 @@ format_shell() {
   fi
 
   if [ "$_CHECK" = 1 ]; then
-    subprocess_run "$_SHFMT" -i "$_SHELL_INDENT" -bn -ci -ln bash -d \
+    subprocess_run shfmt -i "$_SHELL_INDENT" -bn -ci -ln bash -d \
       "${_files[@]}"
   else
-    subprocess_run "$_SHFMT" -i "$_SHELL_INDENT" -bn -ci -ln bash -w \
+    subprocess_run shfmt -i "$_SHELL_INDENT" -bn -ci -ln bash -w \
       "${_files[@]}"
   fi
 }
@@ -175,18 +176,18 @@ format_python() {
 
   quiet_switch_set ruff
   if [ "$_CHECK" = 1 ]; then
-    subprocess_run "$_RUFF" format --config "$_RUFF_CONFIG" \
+    subprocess_run "$RUFF_PATH" format --config "$_RUFF_CONFIG" \
       "${QUIET_SWITCH[@]}" --diff "${_files[@]}"
   else
-    subprocess_run "$_RUFF" format --config "$_RUFF_CONFIG" \
+    subprocess_run "$RUFF_PATH" format --config "$_RUFF_CONFIG" \
       "${QUIET_SWITCH[@]}" "${_files[@]}"
   fi
 
   if [ "$_CHECK" = 1 ]; then
-    subprocess_run "$_RUFF" check --config "$_RUFF_CONFIG" \
+    subprocess_run "$RUFF_PATH" check --config "$_RUFF_CONFIG" \
       "${QUIET_SWITCH[@]}" "${_files[@]}"
   else
-    subprocess_run "$_RUFF" check --config "$_RUFF_CONFIG" \
+    subprocess_run "$RUFF_PATH" check --config "$_RUFF_CONFIG" \
       "${QUIET_SWITCH[@]}" --fix "${_files[@]}"
   fi
 }
@@ -202,10 +203,10 @@ format_c() {
   fi
 
   if [ "$_CHECK" = 1 ]; then
-    subprocess_run "$_CLANG_FORMAT" --style=file:"$_CLANG_FORMAT_CONFIG" \
+    subprocess_run clang-format --style=file:"$_CLANG_FORMAT_CONFIG" \
       --dry-run --Werror "${_files[@]}"
   else
-    subprocess_run "$_CLANG_FORMAT" --style=file:"$_CLANG_FORMAT_CONFIG" \
+    subprocess_run clang-format --style=file:"$_CLANG_FORMAT_CONFIG" \
       -i "${_files[@]}"
   fi
 }
@@ -222,10 +223,10 @@ format_prettier() {
 
   quiet_switch_set prettier
   if [ "$_CHECK" = 1 ]; then
-    subprocess_run "$_PRETTIER" --config "$_PRETTIER_CONFIG" \
+    subprocess_run "$PRETTIER_PATH" --config "$_PRETTIER_CONFIG" \
       "${QUIET_SWITCH[@]}" --check "${_files[@]}"
   else
-    subprocess_run "$_PRETTIER" --config "$_PRETTIER_CONFIG" \
+    subprocess_run "$PRETTIER_PATH" --config "$_PRETTIER_CONFIG" \
       "${QUIET_SWITCH[@]}" --write "${_files[@]}"
   fi
 }
@@ -241,10 +242,11 @@ lint_run() {
   fi
 
   if [ "$VERBOSE" -ge 1 ] && [ "$VERBOSE" -lt "$VERBOSE_RAW_LEVEL" ]; then
-    pyright_filtered_run "$_PYRIGHT" --project "$_PYRIGHT_CONFIG" \
+    pyright_filtered_run "$PYRIGHT_PATH" --project "$_PYRIGHT_CONFIG" \
       "${_files[@]}"
   else
-    subprocess_run "$_PYRIGHT" --project "$_PYRIGHT_CONFIG" "${_files[@]}" >&2
+    subprocess_run "$PYRIGHT_PATH" --project "$_PYRIGHT_CONFIG" \
+      "${_files[@]}" >&2
   fi
 }
 
@@ -401,7 +403,7 @@ screenshots_run() {
 
   heading_print "$_SCREENSHOT_SCRIPT_NAME"
   for _name in "$REPORT_MODIFIED_DIR_NAME" "$REPORT_DIFF_DIR_NAME"; do
-    screenshot_command_set "$_name" "--browser=$_SCREENSHOT_BROWSER"
+    screenshot_command_set "$_name"
     # The verbose lines go to the Markdown log on stderr, as blocks of text.
     subprocess_run "${_SCREENSHOT_COMMAND[@]}" >&2
     VERBOSE_BLOCK_PRINTED=loose

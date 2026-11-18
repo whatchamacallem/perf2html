@@ -69,6 +69,12 @@ window.try_catch_handler_(function () {
   const STYLE_HEAT_MAP_SOURCE_BOX_ROOM_PROPERTY = settings_(
     "STYLE_HEAT_MAP_SOURCE_BOX_ROOM_PROPERTY",
   );
+  const STYLE_HEAT_MAP_SOURCE_END_LINE_BOTTOM_PROPERTY = settings_(
+    "STYLE_HEAT_MAP_SOURCE_END_LINE_BOTTOM_PROPERTY",
+  );
+  const STYLE_HEAT_MAP_SOURCE_FILE_BOX_HEIGHT_PROPERTY = settings_(
+    "STYLE_HEAT_MAP_SOURCE_FILE_BOX_HEIGHT_PROPERTY",
+  );
   const STYLE_TABLE_FUNCTION_LIST_COLUMN_MAX_CHARS = settings_(
     "STYLE_TABLE_FUNCTION_LIST_COLUMN_MAX_CHARS",
   );
@@ -226,7 +232,7 @@ window.try_catch_handler_(function () {
       functions: line_shows_functions,
     });
   const hash_for_function = (name) =>
-    report_ui_.address.function_hash(shown_test_name, name, true);
+    report_ui_.address.function_hash(shown_test_name, name);
   // Returns the indexes of the functions a line declares, in name order.
   function declared_functions(file_path, line_number) {
     const file_lines = entry_line_index[file_path];
@@ -242,11 +248,17 @@ window.try_catch_handler_(function () {
       .map(Number)
       .sort((line_a, line_b) => line_a - line_b);
   }
-  // Returns a line's hash in the shown mode, its costliest function's if any.
-  function hash_for_location(file_path, line_number) {
-    const function_indexes = declared_functions(file_path, line_number);
+  // Returns a line's hash in a mode, functions mode its costliest function's.
+  function hash_for_location(
+    file_path,
+    line_number,
+    location_shows_functions,
+  ) {
+    const function_indexes = location_shows_functions
+      ? declared_functions(file_path, line_number)
+      : [];
     if (!function_indexes.length)
-      return hash_for_line(file_path, line_number, shows_functions);
+      return hash_for_line(file_path, line_number, location_shows_functions);
     const self_cost = (function_index) =>
       absolute(ranking_value(function_table[function_index].self));
     const costliest_index = function_indexes.reduce(
@@ -255,11 +267,7 @@ window.try_catch_handler_(function () {
           ? function_index
           : kept_index,
     );
-    return report_ui_.address.function_hash(
-      shown_test_name,
-      function_table[costliest_index].name,
-      shows_functions,
-    );
+    return hash_for_function(function_table[costliest_index].name);
   }
   // Adds cost vectors counter by counter.
   function cost_vectors_add(cost_vectors) {
@@ -866,11 +874,6 @@ window.try_catch_handler_(function () {
       )
       .slice(0, HEAT_MAP_SOURCE_TICKER_TAPE_ENTRY_MAX_COUNT);
     if (!tape_lines.length) return "";
-    // A tape of lines links each line, a tape of functions each function.
-    const entry_hash = shows_functions
-      ? hash_for_location
-      : (tape_file_path, line_number) =>
-          hash_for_line(tape_file_path, line_number, false);
     return render_element(
       "div",
       {
@@ -890,7 +893,12 @@ window.try_catch_handler_(function () {
             ),
             {
               tag_name: "a",
-              href: entry_hash(file_path, tape_line.line_number),
+              // A tape of lines links each line, of functions each function.
+              href: hash_for_location(
+                file_path,
+                tape_line.line_number,
+                shows_functions,
+              ),
               class_names: ["heat-map-source-ticker-tape-entry-"],
               attributes: {
                 tabindex: entry_index ? -1 : 0,
@@ -943,7 +951,7 @@ window.try_catch_handler_(function () {
         ),
     };
   }
-  // Lists the counter table of a box, a line's calls rows after its counters.
+  // Lists a box's counter table, a line's calls rows last, null for no value.
   function box_counter_table(
     file_path,
     line_number,
@@ -990,6 +998,14 @@ window.try_catch_handler_(function () {
       ];
     });
     const call_cost = line_costs ? ranking_value(line_costs[1]) : 0;
+    // A table holding no counter's value and no calls shows nothing.
+    if (
+      !call_cost &&
+      !listed_counters.some((counter) =>
+        counter.get(counter_source.cost_vector),
+      )
+    )
+      return null;
     if (call_cost) {
       rows.push([
         { text: text("str_column_calls") },
@@ -1060,10 +1076,10 @@ window.try_catch_handler_(function () {
           first: line_run.first_line,
           last: line_run.last_line,
         });
-  // Lists the titles of a calls table part, the caller's or the callee's.
+  // Lists the titles of a calls part, its function's in functions mode alone.
   const calls_columns = (function_label_id, site_label_id) => [
     { label: text("str_column_calls"), numeric: true },
-    { label: text(function_label_id) },
+    ...(shows_functions ? [{ label: text(function_label_id) }] : []),
     { label: text(site_label_id) },
   ];
   // Renders a box's calls as one table: its callers, then its callees.
@@ -1180,10 +1196,8 @@ window.try_catch_handler_(function () {
     const declared_indexes = line_number
       ? declared_functions(file_path, line_number)
       : [];
-    // A line holding both its own costs and a function's shows the mode's.
-    const shows_function =
-      declared_indexes.length > 0 &&
-      (!file.lines[line_number] || shows_functions);
+    // A line declaring a function shows its costs in functions mode alone.
+    const shows_function = declared_indexes.length > 0 && shows_functions;
     const function_indexes = shows_function ? declared_indexes : [];
     const function_costs = shows_function
       ? declared_costs(function_indexes)
@@ -1219,18 +1233,14 @@ window.try_catch_handler_(function () {
       note_texts.push(text_fill("str_not_in_repo", { path: file.raw }));
     if (!line_number && source_text(file_path) == null)
       note_texts.push(text("str_source_unavailable"));
-    // The body is all the image draws, its strip filled once it is placed.
-    let body_markup = render_element(
-      "div",
-      { class: "heat-map-source-information-box-strip-" },
-      "",
-    );
-    body_markup += report_ui_.render_table(
-      "heat.detail.stats",
-      counter_table.columns,
-      counter_table.rows,
-      {},
-    );
+    let body_markup = counter_table
+      ? report_ui_.render_table(
+          "heat.detail.stats",
+          counter_table.columns,
+          counter_table.rows,
+          {},
+        )
+      : "";
     // A blank line parts the notes from the counters table.
     if (note_texts.length) body_markup += render_element("br", {}, null);
     for (const note_text of note_texts) {
@@ -1241,9 +1251,14 @@ window.try_catch_handler_(function () {
       );
     }
     const text_parts = [
-      title_text +
-        "\n" +
-        report_ui_.table_markdown(counter_table.columns, counter_table.rows),
+      ...(counter_table
+        ? [
+            report_ui_.table_markdown(
+              counter_table.columns,
+              counter_table.rows,
+            ),
+          ]
+        : []),
       ...note_texts,
     ];
     if (function_indexes.length) {
@@ -1265,26 +1280,33 @@ window.try_catch_handler_(function () {
               ranking_value(callee_b[3]) - ranking_value(callee_a[3]),
           )
       : [];
+    // A call's row names its line, its function too in functions mode alone.
+    const line_call_cells = (
+      function_index,
+      call_file,
+      call_line,
+      call_count,
+    ) => [
+      call_count_cell(call_count),
+      ...(shows_functions ? [{ text: function_name(function_index) }] : []),
+      line_link_cell(
+        call_file,
+        call_line,
+        report_ui_.location_text(call_file, call_line),
+      ),
+    ];
     if (callers.length || callees.length) {
-      const caller_rows = callers.map((call_row) => [
-        call_count_cell(call_row.call_count),
-        { text: function_name(call_row.function_index) },
-        line_link_cell(
+      const caller_rows = callers.map((call_row) =>
+        line_call_cells(
+          call_row.function_index,
           call_row.call_file,
           call_row.call_line,
-          report_ui_.location_text(call_row.call_file, call_row.call_line),
+          call_row.call_count,
         ),
-      ]);
+      );
       const callee_rows = callees.map(
-        ([callee_index, call_file, call_line, , call_count]) => [
-          call_count_cell(call_count),
-          { text: function_name(callee_index) },
-          line_link_cell(
-            call_file,
-            call_line,
-            report_ui_.location_text(call_file, call_line),
-          ),
-        ],
+        ([callee_index, call_file, call_line, , call_count]) =>
+          line_call_cells(callee_index, call_file, call_line, call_count),
       );
       const calls_table = calls_table_render(
         caller_rows,
@@ -1312,17 +1334,29 @@ window.try_catch_handler_(function () {
     // A line in several functions is titled by its links to them alone.
     const is_titled =
       function_indexes.length > 0 || line_function_indexes.length < 2;
+    // A copy or image of the box is headed by its test and title.
+    const heading_text = text_fill("str_information_box_heading", {
+      test: shown_test_name,
+      title: title_text,
+    });
+    // The strip, filled once placed, heads the body, all the image draws.
     return {
       markup: render_element(
         "div",
         { class: "heat-map-source-information-box-" },
         render_element(
           "div",
-          { class: "heat-map-source-information-box-body-" },
-          body_markup,
-        ),
+          { class: "heat-map-source-information-box-strip-" },
+          "",
+        ) +
+          render_element(
+            "div",
+            { class: "heat-map-source-information-box-body-" },
+            body_markup,
+          ),
       ),
       copy_text: text_parts.join("\n\n"),
+      heading_text,
       heading_entries: [
         ...(is_titled
           ? [report_ui_.strip.entry_make("title", "text", title_text, {})]
@@ -1355,6 +1389,7 @@ window.try_catch_handler_(function () {
           box_element.querySelector(".heat-map-source-information-box-body-"),
           shown_test_name + HEAT_MAP_DOWNLOAD_FILE_NAME_SUFFIX,
           report_ui_.location_text(file_path, line_number),
+          () => information_box.heading_text,
         ),
         ...close_entries,
       ],
@@ -1377,6 +1412,17 @@ window.try_catch_handler_(function () {
   }
   const file_box_row = () =>
     main_panel.querySelector("tr.heat-map-source-file-information-row-");
+  const source_end = () => main_panel.querySelector(".heat-map-source-end-");
+  // Sizes the blank so the source's last line scrolls up under the titles.
+  function source_end_size() {
+    const line_row = main_panel.querySelector("tr[data-line-number-]");
+    source_end().style.setProperty(
+      STYLE_HEAT_MAP_SOURCE_END_LINE_BOTTOM_PROPERTY,
+      covered_height(line_row.closest("table")) +
+        design_rect(line_row).height +
+        "px",
+    );
+  }
   // Writes a box's row, the tree's column left clear, its box cell the rest.
   const box_row_markup = (row_class, column_count) =>
     render_element(
@@ -1385,19 +1431,36 @@ window.try_catch_handler_(function () {
       render_element("td", {}, "") +
         render_element("td", { colspan: column_count - 1 }, ""),
     );
+  // Keeps the file box's height on its table, the source titles' drop.
+  const file_box_resize_observer = new ResizeObserver(
+    window.try_catch_handler_((resize_entries) => {
+      for (const resize_entry of resize_entries)
+        resize_entry.target
+          .closest("table")
+          .style.setProperty(
+            STYLE_HEAT_MAP_SOURCE_FILE_BOX_HEIGHT_PROPERTY,
+            design_rect(resize_entry.target).height + "px",
+          );
+    }),
+  );
   // Opens the file's box above its first line, as wide as a line's box.
   function file_box_place(file_path) {
     const table_element = main_panel.querySelector(
       "table.heat-map-source-table-",
     );
-    table_element.tBodies[0].insertAdjacentHTML(
-      "afterbegin",
-      box_row_markup(
-        "heat-map-source-file-information-row-",
-        table_element.tHead.rows[0].cells.length,
-      ),
-    );
+    // The box follows the chunk's sizer rows, so its title copy sizes it.
+    table_element.tBodies[0]
+      .querySelector(":scope > tr.table-sizer-row-:not(.table-title-copy-)")
+      .insertAdjacentHTML(
+        "afterend",
+        box_row_markup(
+          "heat-map-source-file-information-row-",
+          table_element.tHead.rows[0].cells.length,
+        ),
+      );
     information_box_place(file_box_row().cells[1], file_path, 0);
+    file_box_resize_observer.disconnect();
+    file_box_resize_observer.observe(file_box_row());
   }
   // Widens the source column by what a box outgrows the titles, every chunk.
   function box_rooms_fit() {
@@ -1642,7 +1705,6 @@ window.try_catch_handler_(function () {
       label: text("str_column_line"),
       name: TABLE_COLUMN_LINE_NAME,
       numeric: true,
-      cls: "heat-map-source-table-line-number-cell-",
     };
     // Each line fills the column, a chevron left and the number right.
     const line_number_column_chars = source_rows.reduce(
@@ -1708,7 +1770,7 @@ window.try_catch_handler_(function () {
     main_panel.innerHTML = render_element(
       "div",
       { class: "heat-map-source-" },
-      markup,
+      markup + render_element("div", { class: "heat-map-source-end-" }, ""),
     );
     file_box_place(file_path);
     ticker_tape_box.innerHTML = hottest_lines_render(file_path, source_rows);
@@ -1720,6 +1782,7 @@ window.try_catch_handler_(function () {
     // The minimap's column is decided before the bars draw for it.
     minimap_build();
     report_ui_.layout_activate(main_panel);
+    source_end_size();
     main_panel.scrollTop = kept_scroll_top;
     minimap_sync();
   }
@@ -1777,7 +1840,7 @@ window.try_catch_handler_(function () {
     clone_height_px = 0,
     clone_line_count = 0,
     clone_line_height_px = 0,
-    clone_box_row = null,
+    clone_box_rows = [],
     minimap_build_number = 0;
   // Sizes the minimap again as the source's rows take their drawn heights.
   const source_resize_observer = new ResizeObserver(
@@ -1810,6 +1873,7 @@ window.try_catch_handler_(function () {
     minimap_panel.classList.toggle("empty-", !is_taller);
     if (!is_taller) return;
     source_resize_observer.observe(table_element);
+    source_resize_observer.observe(source_end());
     minimap_fill_request();
   }
   const minimap_is_shown = () => !minimap_panel.classList.contains("empty-");
@@ -1825,8 +1889,15 @@ window.try_catch_handler_(function () {
   }
   // Writes the source's lines as one block, a colored line its band.
   function minimap_fill() {
-    const line_markups = [];
-    let box_row = null;
+    // A box is a gap in the minimap, sized once it is drawn.
+    const box_gap_markup = render_element(
+      "span",
+      { class: "heat-map-minimap-box-gap-" },
+      "",
+    );
+    // The file's box is the first gap, above the source's lines.
+    const line_markups = [box_gap_markup],
+      box_rows = [file_box_row()];
     for (const source_row of shown_source_rows) {
       const row_element = document.getElementById(
         "L" + source_row.line_number + "-",
@@ -1854,23 +1925,21 @@ window.try_catch_handler_(function () {
             : line_markup,
         );
       }
-      // A line's open box is a gap in the minimap, sized once it is drawn.
+      // A line's open box is a gap below its line.
       const next_row = row_element.nextElementSibling;
       if (
         next_row &&
         next_row.classList.contains("heat-map-source-line-detail-row-")
       ) {
-        box_row = next_row;
-        line_markups.push(
-          render_element("span", { class: "heat-map-minimap-box-gap-" }, ""),
-        );
+        box_rows.push(next_row);
+        line_markups.push(box_gap_markup);
       }
     }
     minimap_box.innerHTML = render_element("pre", {}, line_markups.join("\n"));
     clone_line_count = line_markups.length;
     clone_line_height_px =
       minimap_box.firstElementChild.offsetHeight / clone_line_count;
-    clone_box_row = box_row;
+    clone_box_rows = box_rows;
     minimap_viewport.hidden = false;
     minimap_size();
   }
@@ -1878,15 +1947,25 @@ window.try_catch_handler_(function () {
   function minimap_size() {
     if (minimap_viewport.hidden) return;
     const clone_element = minimap_box.firstElementChild;
-    // The gap holds the box at the scale the minimap holds the source lines.
-    if (clone_box_row) {
-      const box_height_px = design_rect(clone_box_row).height;
-      const source_height_px = geometry_measure().rows - box_height_px;
-      clone_element.querySelector(".heat-map-minimap-box-gap-").style.height =
-        (box_height_px * (clone_line_count - 1) * clone_line_height_px) /
-          source_height_px +
-        "px";
-    }
+    const box_heights_px = clone_box_rows.map(
+      (box_row) => design_rect(box_row).height,
+    );
+    const end_height_px = design_rect(source_end()).height;
+    let lines_height_px = geometry_measure().rows - end_height_px;
+    for (const box_height_px of box_heights_px)
+      lines_height_px -= box_height_px;
+    // The gaps hold the boxes and blank at the scale of the source's lines.
+    const clone_scale =
+      ((clone_line_count - clone_box_rows.length) * clone_line_height_px) /
+      lines_height_px;
+    const gap_elements = clone_element.querySelectorAll(
+      ".heat-map-minimap-box-gap-",
+    );
+    box_heights_px.forEach((box_height_px, box_index) => {
+      gap_elements[box_index].style.height =
+        box_height_px * clone_scale + "px";
+    });
+    clone_element.style.paddingBottom = end_height_px * clone_scale + "px";
     clone_height_px = clone_element.offsetHeight;
     minimap_layout();
   }
@@ -1913,12 +1992,12 @@ window.try_catch_handler_(function () {
       "table.heat-map-source-table-",
     );
     const main = design_rect(main_panel);
-    const body_bottom_px = design_rect(table_element).bottom;
-    // The rows the minimap clones start below the file box's row, a box too.
-    const code_top_px = design_rect(file_box_row()).bottom;
+    const body_bottom_px = design_rect(source_end()).bottom;
+    // The minimap's rows run from the file box's row to the blank's end.
+    const body_top_px = design_rect(file_box_row()).top;
     const clone_body = {
-      height: body_bottom_px - code_top_px,
-      top: code_top_px,
+      height: body_bottom_px - body_top_px,
+      top: body_top_px,
     };
     const rows = clone_body.height;
     const rows_above = (y_position_px) =>
@@ -2049,12 +2128,41 @@ window.try_catch_handler_(function () {
     }
     minimap_fill_request();
   }
+  // Returns the first source line in view and its top, null for no source.
+  function view_line_read() {
+    const line_rows = main_panel.querySelectorAll("tr[data-line-number-]");
+    if (!line_rows.length) return null;
+    const view_top =
+      design_rect(main_panel).top +
+      covered_height(line_rows[0].closest("table"));
+    let first_index = 0,
+      last_index = line_rows.length - 1;
+    while (first_index < last_index) {
+      const middle_index = Math.floor((first_index + last_index) / 2);
+      if (design_rect(line_rows[middle_index]).bottom > view_top)
+        last_index = middle_index;
+      else first_index = middle_index + 1;
+    }
+    return {
+      row_id: line_rows[first_index].id,
+      top: design_rect(line_rows[first_index]).top,
+    };
+  }
+  // Scrolls a line read before a redraw back to the top it had.
+  function view_line_restore(view_line) {
+    // A line in a chunk the first frame leaves deferred draws the rest now.
+    if (!document.getElementById(view_line.row_id)) source_rest_draw();
+    main_panel.scrollTop +=
+      design_rect(document.getElementById(view_line.row_id)).top -
+      view_line.top;
+    minimap_sync();
+  }
   // Places a line near the view's top when the line is out of view.
   function line_show(line) {
     const row = document.getElementById("L" + line + "-");
     if (!row_is_visible(row)) row_top_place(row);
   }
-  // Jumps to a box row's address, its line placed only when out of view.
+  // Jumps to a box row's address, its line placed as an address places it.
   function box_row_jump(jump_hash) {
     const shown_hash = report_ui_.address.hash(
       report_ui_.address.of_hash(location.hash),
@@ -2065,7 +2173,7 @@ window.try_catch_handler_(function () {
       return;
     }
     // The address shown stays, its line's row taking the focus a jump gives.
-    line_show(rendered_line);
+    row_top_place(document.getElementById("L" + rendered_line + "-"));
     minimap_sync();
     report_ui_.table_rows.tab_stop_set(
       document.getElementById("L" + rendered_line + "-"),
@@ -2116,7 +2224,7 @@ window.try_catch_handler_(function () {
         else {
           pressed_row_place = { line: line_number, top: row_top };
           report_ui_.address.request(
-            hash_for_location(current_file_path, line_number),
+            hash_for_location(current_file_path, line_number, shows_functions),
           );
         }
       }
@@ -2204,10 +2312,12 @@ window.try_catch_handler_(function () {
   let pressed_row_place = null;
   // Holds the address a box row jumped to until its route draws it, else null.
   let jumped_hash = null;
+  // Holds the address drawn and its place in the other mode, sent to the menu.
+  let view_mode_link = { hash: "", link_hash: "" };
   let rendered_key = "";
   let routed_hash = null;
   let is_routing = false;
-  let load_render_log = null;
+  let drawn_mark = null;
   // Builds the tree, each top level folder with samples open.
   function ranking_tree_build() {
     tree_root = tree_build();
@@ -2293,8 +2403,13 @@ window.try_catch_handler_(function () {
     shows_functions = page_address.functions;
     const pressed_place = pressed_row_place;
     pressed_row_place = null;
-    const is_new_address = location.hash !== routed_hash,
-      is_detail_closed = !is_new_address && !detail_line(),
+    const is_new_address = location.hash !== routed_hash;
+    // A lines or functions toggle shows the same place in the other mode.
+    const is_mode_toggle =
+      is_new_address &&
+      report_ui_.address.hash(page_address) === view_mode_link.link_hash;
+    const is_detail_closed =
+        (!is_new_address || is_mode_toggle) && !detail_line(),
       previous_file_path = current_file_path;
     let file = page_address.file,
       line = page_address.line === null ? 0 : page_address.line,
@@ -2323,8 +2438,22 @@ window.try_catch_handler_(function () {
     }
     if (!note_markup && !sources_ready(file)) return;
     routed_hash = location.hash;
+    // The menu's mode entry links the place drawn in the other mode, if any.
+    const drawn_hash = report_ui_.address.hash(page_address),
+      link_hash =
+        fn && note_markup
+          ? ""
+          : hash_for_location(file, line, !shows_functions);
+    if (
+      drawn_hash !== view_mode_link.hash ||
+      link_hash !== view_mode_link.link_hash
+    ) {
+      view_mode_link = { hash: drawn_hash, link_hash };
+      report_ui_.view_mode_link_send(view_mode_link);
+    }
     const is_jump = jumped_hash === report_ui_.address.hash(page_address);
     jumped_hash = null;
+    const is_pressed = pressed_place !== null && pressed_place.line === line;
     if (is_new_address && fn && !note_markup)
       report_ui_.function_location_send({
         test: page_address.test,
@@ -2337,13 +2466,14 @@ window.try_catch_handler_(function () {
       unavailable_note_render(note_markup);
       rendered_line = line;
       main_focus_restore(main_had_focus);
-      load_render_finish();
+      first_draw_finish();
       return;
     }
 
     // A new file draws its source and the tree, so its tree node opens first.
     const moves_tree = is_new_address && file !== previous_file_path;
     if (moves_tree) tree_reveal(file);
+    const kept_view_line = is_mode_toggle ? view_line_read() : null;
     const key = [
       file,
       active_scale.value,
@@ -2361,18 +2491,24 @@ window.try_catch_handler_(function () {
     if (!is_detail_closed && line !== detail_line())
       detail_set(
         line,
-        pressed_place && pressed_place.line === line
-          ? pressed_place.top
-          : null,
+        is_mode_toggle
+          ? design_rect(document.getElementById("L" + line + "-")).top
+          : is_pressed
+            ? pressed_place.top
+            : null,
       );
     else if (is_drawn && source_text(file) != null) box_rooms_fit();
-    // A jump's line already open is placed as a newly opened one is.
-    if (is_jump && line) {
-      line_show(line);
+    if (kept_view_line) view_line_restore(kept_view_line);
+    // An address gone to places its line at one place, a pressed line stays.
+    if (
+      line &&
+      (is_jump || (is_new_address && !is_mode_toggle && !is_pressed))
+    ) {
+      row_top_place(document.getElementById("L" + line + "-"));
       minimap_sync();
     }
     if (moves_tree) tree_selected_show();
-    if (is_new_address && !line) file_box_show();
+    if (is_new_address && !is_mode_toggle && !line) file_box_show();
     rendered_line = line;
     main_focus_restore(main_had_focus);
     // The first frame draws the chunks in view, the second frame the rest.
@@ -2382,7 +2518,7 @@ window.try_catch_handler_(function () {
     report_ui_.table_chunks.shown_draw(table_element, main_panel);
     if (report_ui_.table_chunks.are_deferred(table_element))
       source_rest_draw_request(table_element);
-    else load_render_finish();
+    else first_draw_finish();
   }
   // Draws the source again for a new clip or column place, its open line kept.
   function source_redraw() {
@@ -2414,17 +2550,17 @@ window.try_catch_handler_(function () {
             // A later route drew or replaced the source meanwhile.
             if (!table_element.isConnected) return;
             source_rest_draw();
-            load_render_finish();
+            first_draw_finish();
           }),
         ),
       ),
     );
   }
-  // Logs the view's load render once the first route has drawn.
-  function load_render_finish() {
-    if (load_render_log === null) return;
-    load_render_log();
-    load_render_log = null;
+  // Marks the view drawn once the first route has drawn.
+  function first_draw_finish() {
+    if (drawn_mark === null) return;
+    drawn_mark();
+    drawn_mark = null;
   }
   function model_load(test_name) {
     const held_models = window.report_heat_map_models_;
@@ -2502,8 +2638,8 @@ window.try_catch_handler_(function () {
 
   report_ui_.view_activate({
     forwards_input: true,
-    load_render_defer: (render_log) => {
-      load_render_log = render_log;
+    drawn_mark_defer: (page_drawn_mark) => {
+      drawn_mark = page_drawn_mark;
     },
     recenter: address_recenter,
     relay_handler,

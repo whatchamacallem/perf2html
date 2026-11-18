@@ -29,8 +29,8 @@ window.try_catch_handler_(function () {
   const render_character_cells = window.render_character_cells_;
   const render_element = window.render_element_;
   const render_html_escape = window.render_html_escape_;
-  const CALL_GRAPH_CUTOFF_STOP_ROOTS =
-    window.report_preferences_.call_graph_cutoff_stop_roots;
+  const CALL_GRAPH_CUTOFF_STOP_DEPTHS =
+    window.report_preferences_.call_graph_cutoff_stop_depths;
   // Holds the width of a multiple at full precision, zero's.
   const MULTIPLE_WIDTH_CHARS = window.report_ui_.fixed_text(
     0,
@@ -134,13 +134,6 @@ window.try_catch_handler_(function () {
   const node_branches = call_branches.filter(
     (call_branch) => call_branch.node_path.length > 1,
   );
-  // Holds each drawn branch's cost, the inclusive cost of its own calls.
-  const branch_costs = new Map(
-    node_branches.map((call_branch) => [
-      path_key(call_branch.node_path),
-      call_branch.inclusive_cost,
-    ]),
-  );
 
   // Returns a function's self cost as a percent of the test's total cost.
   function self_share_of_test(function_record) {
@@ -204,22 +197,11 @@ window.try_catch_handler_(function () {
       (call_edge) => !node_path.includes(call_edge.callee_index),
     );
   }
-  // Returns a branch's cost, zero for a call the branch never made.
-  function branch_cost(node_path) {
-    return branch_costs.get(path_key(node_path)) ?? 0;
-  }
-  // Returns the cutoff percent, the chosen stop's root squared.
-  function cutoff_percent() {
-    return cutoff_root * cutoff_root;
-  }
-  // Returns whether a shown child costs the cutoff percent of the test.
+  // Returns whether a node has shown children and lies within the cutoff.
   function branch_opens(node_path) {
-    return shown_callee_edges(node_path).some(
-      (call_edge) =>
-        window.report_ui_.share_of_test(
-          branch_cost([...node_path, call_edge.callee_index]),
-          test_total,
-        ) >= cutoff_percent(),
+    return (
+      shown_callee_edges(node_path).length > 0 &&
+      node_path.length - 1 <= cutoff_depth
     );
   }
   // Returns a fresh open set, each function open only at its costliest branch.
@@ -241,15 +223,38 @@ window.try_catch_handler_(function () {
         .map((call_branch) => path_key(call_branch.node_path)),
     );
   }
-  let cell_symbol_buttons = new WeakMap(),
-    cutoff_root = null,
+  // Returns the open set of a filter: each node on a branch to a match open.
+  function filter_open_set(matched_branches) {
+    const open_keys = new Set();
+    for (const call_branch of matched_branches)
+      for (
+        let path_length = 2;
+        path_length < call_branch.node_path.length;
+        path_length++
+      )
+        open_keys.add(path_key(call_branch.node_path.slice(0, path_length)));
+    return open_keys;
+  }
+  // Lists the branches whose drawn function's name the filter matches.
+  function filter_matched_branches() {
+    const text_matches = window.report_ui_.search_matcher(search_text);
+    return node_branches.filter((call_branch) =>
+      text_matches(path_function(call_branch.node_path).name),
+    );
+  }
+  let cell_tree_items = new WeakMap(),
+    cutoff_depth = null,
     drawn_path_keys = [],
     drawn_rows = new Map(),
+    filter_matches_nothing = false,
     heat_curve_name = null,
+    is_search_render_pending = false,
     item_graph_nodes = new WeakMap(),
     open_path_keys = null,
     path_tree_items = new Map(),
     rendered_preferences_text = null,
+    // Holds the filter's text, matched with each drawn function's name.
+    search_text = "",
     selected_function = null,
     sort_mode = null,
     tab_stop_item = null,
@@ -406,7 +411,7 @@ window.try_catch_handler_(function () {
       });
     return column_widths;
   }
-  // Writes a node's tree item, a button if it toggles, its bars to the width.
+  // Writes a node's tree item, a button if its function links, then its bars.
   function symbol_markup(layout_row, group_index, symbol_width) {
     const graph_node = layout_row[group_index];
     const symbol_part = symbol_parts(layout_row, group_index);
@@ -417,25 +422,24 @@ window.try_catch_handler_(function () {
       "aria-posinset": graph_node.sibling_place,
       "aria-setsize": graph_node.sibling_count,
     };
-    const shown_name_markup =
-      shown_callee_edges(graph_node.node_path).length > 0
-        ? window.render_menu_button_("treeitem", name_markup, {
-            attributes: {
-              ...tree_attributes,
-              "aria-expanded": String(node_is_open(graph_node)),
-            },
-            tag_name: "span",
-          })
-        : render_element(
-            "span",
-            {
-              class: "call-graph-leaf-",
-              role: "treeitem",
-              tabindex: -1,
-              ...tree_attributes,
-            },
-            name_markup,
-          );
+    if (shown_callee_edges(graph_node.node_path).length > 0)
+      tree_attributes["aria-expanded"] = String(node_is_open(graph_node));
+    // The button marks a function the heading links to, a valid destination.
+    const shown_name_markup = path_function(graph_node.node_path).is_linked
+      ? window.render_menu_button_("treeitem", name_markup, {
+          attributes: tree_attributes,
+          tag_name: "span",
+        })
+      : render_element(
+          "span",
+          {
+            class: "call-graph-plain-symbol-",
+            role: "treeitem",
+            tabindex: -1,
+            ...tree_attributes,
+          },
+          name_markup,
+        );
     if (!symbol_part.has_bars) return shown_name_markup;
     const bar_width =
       symbol_width -
@@ -607,10 +611,42 @@ window.try_catch_handler_(function () {
       );
     });
   }
+  // Draws the note of a filter matching nothing as the table's one row.
+  function filter_note_render() {
+    cell_tree_items = new WeakMap();
+    item_graph_nodes = new WeakMap();
+    path_tree_items = new Map();
+    drawn_path_keys = [];
+    for (const stale_row of [...drawn_rows.values()].flat())
+      stale_row.remove();
+    const note_markup = render_element(
+      "tr",
+      {},
+      render_element(
+        "td",
+        { colspan: GROUP_COLUMNS.length },
+        render_html_escape(
+          window.ui_strings_.text("str_filter_matches_nothing"),
+        ),
+      ),
+    );
+    const note_row = window.render_element_of_(note_markup);
+    // The next draw removes the note as it removes any row it keeps not.
+    drawn_rows = new Map([[note_markup, [note_row]]]);
+    head_draw(1);
+    rows_place([note_row]);
+    sizer_rows_draw(sizer_cells_markup([], 1));
+    tab_stop_item = null;
+    window.report_ui_.layout_activate();
+  }
   // Draws every layout row, making only a row whose markup changed.
   function graph_render() {
+    if (filter_matches_nothing) {
+      filter_note_render();
+      return;
+    }
     const had_focus = graph_table.contains(document.activeElement);
-    cell_symbol_buttons = new WeakMap();
+    cell_tree_items = new WeakMap();
     item_graph_nodes = new WeakMap();
     path_tree_items = new Map();
     const layout_rows = graph_layout();
@@ -652,11 +688,11 @@ window.try_catch_handler_(function () {
           .find((found_item) => found_item);
         path_tree_items.set(path_key(layout_place.node_path), tree_item);
         item_graph_nodes.set(tree_item, layout_place);
-        if (!tree_item.classList.contains("menu-button-")) return;
-        // Each of a symbol's cells takes the click its button takes.
+        const is_button = tree_item.classList.contains("menu-button-");
+        // Each of a node's cells takes the click its tree item takes.
         for (const node_cell of node_cells) {
-          node_cell.classList.add("clickable-");
-          cell_symbol_buttons.set(node_cell, tree_item);
+          if (is_button) node_cell.classList.add("clickable-");
+          cell_tree_items.set(node_cell, tree_item);
         }
       });
       column_cells.forEach((column_cell, column_index) => {
@@ -714,6 +750,7 @@ window.try_catch_handler_(function () {
       case WIDGET_KEY_NAMES.activate:
       case WIDGET_KEY_NAMES.click:
         if (is_open || is_closed) node_toggle(tree_item);
+        else leaf_select(tree_item);
         break;
       case WIDGET_KEY_NAMES.down:
         next_key = drawn_path_keys[drawn_index + 1] ?? null;
@@ -748,10 +785,31 @@ window.try_catch_handler_(function () {
   // Asks the top page for the cutoff of the stop the slider reaches.
   function cutoff_stop_choose(cutoff_stop) {
     window.report_ui_.call_graph_cutoff_choose_send(
-      CALL_GRAPH_CUTOFF_STOP_ROOTS[cutoff_stop],
+      CALL_GRAPH_CUTOFF_STOP_DEPTHS[cutoff_stop],
     );
   }
-  // Shows the cutoff slider, then the selected function, after the copy.
+  // Opens the filter's open set, or the fresh one for none, then draws.
+  function filter_apply() {
+    const matched_branches = search_text ? filter_matched_branches() : [];
+    filter_matches_nothing = Boolean(search_text) && !matched_branches.length;
+    open_path_keys = search_text
+      ? filter_open_set(matched_branches)
+      : call_graph_open_set();
+    graph_render();
+  }
+  // Keeps the filter's text, drawing once in the next frame for all typed.
+  function search_choose(typed_text) {
+    search_text = typed_text;
+    if (is_search_render_pending) return;
+    is_search_render_pending = true;
+    requestAnimationFrame(
+      window.try_catch_handler_(() => {
+        is_search_render_pending = false;
+        filter_apply();
+      }),
+    );
+  }
+  // Shows the cutoff slider, the filter, then the selected function.
   function heading_tail_show() {
     const cutoff_entry = window.report_ui_.strip.entry_make(
       "cutoff",
@@ -759,9 +817,19 @@ window.try_catch_handler_(function () {
       window.ui_strings_.text("str_call_graph_cutoff"),
       {
         is_widget: true,
-        slider_stop: CALL_GRAPH_CUTOFF_STOP_ROOTS.indexOf(cutoff_root),
-        slider_last_stop: CALL_GRAPH_CUTOFF_STOP_ROOTS.length - 1,
+        slider_stop: CALL_GRAPH_CUTOFF_STOP_DEPTHS.indexOf(cutoff_depth),
+        slider_last_stop: CALL_GRAPH_CUTOFF_STOP_DEPTHS.length - 1,
         on_stop_choose: cutoff_stop_choose,
+      },
+    );
+    const filter_entry = window.report_ui_.strip.entry_make(
+      "filter",
+      "search",
+      window.ui_strings_.text("str_table_heading_filter"),
+      {
+        search_text,
+        tool_tip_text: window.ui_strings_.text("str_tool_tip_search"),
+        on_search: search_choose,
       },
     );
     // A function the heat map cannot show, having no line, is no link.
@@ -778,7 +846,6 @@ window.try_catch_handler_(function () {
                     href: window.report_ui_.address.function_hash(
                       shown_test_name,
                       selected_function.name,
-                      true,
                     ),
                   }
                 : {},
@@ -786,24 +853,33 @@ window.try_catch_handler_(function () {
           ];
     window.report_ui_.page_heading_tail_set(page_heading, [
       cutoff_entry,
+      filter_entry,
       ...selected_entries,
     ]);
   }
-  // Opens or closes a symbol's node, draws again and selects it.
-  function node_toggle(symbol_button) {
-    const graph_node = item_graph_nodes.get(symbol_button);
+  // Selects a tree item's function, its link shown in the heading.
+  function node_select(tree_item) {
+    const graph_node = item_graph_nodes.get(tree_item);
     selected_function = path_function(graph_node.node_path);
     heading_tail_show();
-    const node_key = path_key(graph_node.node_path);
-    if (open_path_keys.has(node_key)) open_path_keys.delete(node_key);
-    else open_path_keys.add(node_key);
-    tab_stop_key = node_key;
-    graph_render();
+    tab_stop_key = path_key(graph_node.node_path);
     window.report_ui_.focused_path_send([selected_function.name]);
   }
-  // Returns the symbol button of the cell an input reached, if any.
-  function symbol_button_of(browser_event) {
-    return cell_symbol_buttons.get(browser_event.target.closest("td"));
+  // Opens or closes a symbol's node, selects it and draws again.
+  function node_toggle(tree_item) {
+    node_select(tree_item);
+    if (open_path_keys.has(tab_stop_key)) open_path_keys.delete(tab_stop_key);
+    else open_path_keys.add(tab_stop_key);
+    graph_render();
+  }
+  // Selects a leaf, opening nothing, the tab stop moved onto it.
+  function leaf_select(leaf_item) {
+    node_select(leaf_item);
+    tab_stop_place(graph_table.contains(document.activeElement));
+  }
+  // Returns the tree item of the cell an input reached, if any.
+  function tree_item_of(browser_event) {
+    return cell_tree_items.get(browser_event.target.closest("td"));
   }
 
   // Takes the relayed preferences: the heat curve, the sort and the cutoff.
@@ -818,36 +894,38 @@ window.try_catch_handler_(function () {
     if (!scale_choice) window.throw_exception_("str_error_internal");
     heat_curve_name = scale_choice.curve;
     sort_mode = view_preferences.call_graph_sort_mode;
-    const taken_cutoff_root = cutoff_root;
-    cutoff_root = view_preferences.call_graph_cutoff_root;
+    const taken_cutoff_depth = cutoff_depth;
+    cutoff_depth = view_preferences.call_graph_cutoff_depth;
     // Logs each cutoff the view takes, the first at page load included.
-    if (cutoff_root !== taken_cutoff_root)
+    if (cutoff_depth !== taken_cutoff_depth)
       console.log(
         window.ui_strings_.text_fill("str_call_graph_cutoff_log", {
-          percent: window.report_ui_.percent_text(cutoff_percent()),
+          depth: cutoff_depth,
         }),
       );
   }
   // Draws the graph and its heading's tail when the preferences change it.
   function preferences_apply() {
-    const opened_cutoff_root = cutoff_root;
+    const opened_cutoff_depth = cutoff_depth;
     preferences_handler();
     // A new cutoff, the page's first included, opens a fresh open set.
-    if (cutoff_root !== opened_cutoff_root)
+    if (cutoff_depth !== opened_cutoff_depth && !search_text)
       open_path_keys = call_graph_open_set();
     const preferences_text = JSON.stringify([
       heat_curve_name,
       sort_mode,
-      cutoff_root,
+      cutoff_depth,
     ]);
     if (preferences_text === rendered_preferences_text) return;
     rendered_preferences_text = preferences_text;
     graph_render();
     heading_tail_show();
   }
-  // Opens a fresh open set, draws every row and clears the selection.
+  // Opens a fresh open set, draws every row, clears filter and selection.
   function view_reset() {
     preferences_handler();
+    search_text = "";
+    filter_matches_nothing = false;
     open_path_keys = call_graph_open_set();
     selected_function = null;
     // Forgets the drawn preferences, so the graph draws again.
@@ -871,8 +949,10 @@ window.try_catch_handler_(function () {
   graph_table.addEventListener(
     "click",
     window.try_catch_handler_((click_event) => {
-      const symbol_button = symbol_button_of(click_event);
-      if (symbol_button) node_toggle(symbol_button);
+      const tree_item = tree_item_of(click_event);
+      if (!tree_item) return;
+      if (tree_item.hasAttribute("aria-expanded")) node_toggle(tree_item);
+      else leaf_select(tree_item);
     }),
   );
   graph_table.setAttribute("role", "tree");

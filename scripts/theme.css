@@ -26,6 +26,10 @@ body {
   margin: 0;
   overflow: hidden;
 }
+/* No text is selected, so that a drag is free for other uses. */
+html {
+  user-select: none;
+}
 body {
   font-family: var(--page-font-family-);
   font-size: calc(var(--design-font-size-px-) * var(--design-font-fit-));
@@ -200,7 +204,8 @@ pre {
 .page- {
   padding: 0 var(--page-inset-inline-) var(--page-inset-block-);
 }
-.page-emphasis- {
+.page-emphasis-,
+.strip-label- {
   display: inline-block;
   padding: 0 var(--page-emphasis-padding-inline-);
   white-space: pre;
@@ -241,10 +246,9 @@ pre {
 #menu- .menu-status-bar- {
   overflow: hidden;
 }
-/* A button: its pulldown hung from the box, side line room inside. */
+/* A button: its pulldown hung from the box. */
 .menu-button- {
   position: relative;
-  border-inline: var(--page-line-width-) solid transparent;
   padding: 0 var(--menu-button-padding-inline-);
   white-space: pre;
 }
@@ -262,7 +266,6 @@ pre {
   vertical-align: top;
   height: inherit;
   overflow: clip;
-  user-select: none;
   touch-action: none;
 }
 .menu-status-bar- {
@@ -271,27 +274,27 @@ pre {
   white-space: pre;
 }
 /* The search, label and placeholder share one place the last two size. */
-.menu-pulldown-text-box- {
+.menu-text-box- {
   display: inline-grid;
 }
-.menu-pulldown-text-box- > * {
+.menu-text-box- > * {
   grid-area: 1 / 1;
 }
 /* A search past its box shows its end, its start cut. */
-.menu-pulldown-search-box- {
+.menu-search-box- {
   display: flex;
   justify-content: flex-end;
   contain: inline-size;
   overflow: clip;
 }
 /* A search that fits starts at the box start. */
-.menu-pulldown-search-box-::after {
+.menu-search-box-::after {
   content: "";
   flex-grow: 1;
 }
 /* A shown search hides the label under it, the placeholder only sizing. */
-.menu-pulldown-search-box-:not([hidden]) ~ *,
-.menu-pulldown-placeholder-box- {
+.menu-search-box-:not([hidden]) ~ *,
+.menu-placeholder-box- {
   visibility: hidden;
 }
 .menu-pulldown-entry-box- {
@@ -324,12 +327,6 @@ table.table- {
   position: relative;
   border-collapse: collapse;
 }
-/* Its side lines keep their room in either mode, so no mode moves a column. */
-table.table-,
-.table- th,
-.table- td {
-  border-inline: var(--page-line-width-) solid transparent;
-}
 .table- th,
 .table- td {
   padding: 0 var(--page-table-cell-padding-inline-);
@@ -346,8 +343,6 @@ table.table-,
 table.table-chunked- {
   display: block;
   width: max-content;
-  /* Its side cells draw its sides, as a plain table's do. */
-  border-inline: 0;
 }
 table.table-chunked- > thead {
   display: table;
@@ -367,8 +362,8 @@ table.table-chunked- > tbody {
 table.table-chunked- > tbody.table-chunk-deferred- {
   content-visibility: hidden;
 }
-/* A hovered row's frame draws over the chunks it crosses. */
-table.table-chunked-::before {
+/* A hovered row's frame draws over the chunks and cells it crosses. */
+table.table-::before {
   z-index: var(--page-table-hover-row-z-index-);
 }
 /* A sizer row widens each column as wide as every chunk's, drawn nowhere. */
@@ -429,6 +424,14 @@ table.table-:has(
   pointer-events: none;
   border-style: solid;
 }
+/* A hovered row's frame, its sides on the row's sides, its bottom below. */
+table.table-::before,
+#call-graph-table-::before {
+  left: anchor(left);
+  right: anchor(right);
+  bottom: calc(anchor(bottom) - var(--page-line-width-));
+  border-width: var(--page-line-width-);
+}
 
 /* A link or button is one line high, its text set on the box bottom. */
 .page- a,
@@ -449,7 +452,6 @@ table.table-:has(
   contain: size;
   overflow: clip;
   white-space: pre;
-  user-select: none;
   touch-action: none;
 }
 .text-scrollbar-.horizontal- {
@@ -488,7 +490,6 @@ table.table-:has(
   left: 0;
   bottom: 0;
   z-index: var(--screenshot-z-index-);
-  user-select: none;
   max-width: 100%;
   overflow: hidden;
   white-space: pre;

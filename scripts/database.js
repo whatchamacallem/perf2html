@@ -34,11 +34,15 @@ window.try_catch_handler_(function () {
 
   const text = window.ui_strings_.text;
   const render_element = window.render_element_;
+  const render_html_escape = window.render_html_escape_;
   const line_column = window.report_preferences_.line_column;
   const table_sort_column = window.report_ui_.table_sort.column;
   const table_sort_records = window.report_ui_.table_sort.records;
   const page_scroll_box = document.getElementById("database-page-");
   const page_element = page_scroll_box.querySelector(":scope > .page-");
+  const shown_test_name = window.report_ui_.address.of_hash(
+    location.hash,
+  ).test;
   const model_data = document.getElementById("database-model-");
   const is_diff = model_data.getAttribute("data-diff-") === "1";
   const download_file_name = model_data.getAttribute(
@@ -255,11 +259,10 @@ window.try_catch_handler_(function () {
     search_text = typed_text;
     if (is_search_render_pending) return;
     is_search_render_pending = true;
-    const cause_event = window.event;
     requestAnimationFrame(
       window.try_catch_handler_(() => {
         is_search_render_pending = false;
-        window.report_load_log_.deferred_render_run(cause_event, page_render);
+        page_render();
       }),
     );
   }
@@ -276,7 +279,7 @@ window.try_catch_handler_(function () {
       },
     );
   }
-  // Draws the table under its heading by its sort, each row linked.
+  // Draws the table by its sort under its heading, titled by the test shown.
   function page_render() {
     const sort_columns = [...FIXED_COLUMNS, ...shown_line_columns];
     const sorted_column = sorted_column_find(sort_columns);
@@ -293,7 +296,7 @@ window.try_catch_handler_(function () {
         "data-row-count-default-": String(DATABASE_TOP_FUNCTION_ROWS),
         "data-row-count-key-": STORAGE_KEY_DATABASE_FUNCTION_ROWS,
       },
-      "",
+      render_html_escape(shown_test_name),
     );
     const table_markup = window.report_ui_.render_record_table(
       FUNCTIONS_TABLE_KEY,
@@ -301,6 +304,8 @@ window.try_catch_handler_(function () {
       shown_records,
       {
         counter_list_key: DATABASE_VIEW_KEY,
+        // A filter matching nothing says so in place of an empty table.
+        empty_note_text: search_text ? text("str_filter_matches_nothing") : "",
         is_chunked: true,
         heading_entries: [
           ...window.report_ui_.table_sort.heading_entries({
@@ -359,10 +364,13 @@ window.try_catch_handler_(function () {
     rendered_preferences_text = preferences_text;
     page_render();
   }
-  // Takes a relayed message, drawing again when its preferences changed.
+  // Takes a relayed message: a view reset clearing the filter, preferences.
   function relay_handler(message_data) {
     if (window.report_preferences_.relay_handler(message_data))
       preferences_apply();
+    if (message_data.report_ui !== "view_reset") return;
+    search_text = "";
+    page_render();
   }
   // Shows the page from its top when its address is followed again.
   function page_top_show() {

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import collections, dataclasses, functools, json, os, posixpath, re, sys
 from collections.abc import Collection, Iterable, Sequence
-from typing import NamedTuple, TypeAlias, TypedDict, TypeVar
+from typing import Any, NamedTuple, TypeAlias, TypedDict, TypeVar
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import artifacts, settings
@@ -219,23 +219,19 @@ class FileEntry(NamedTuple):
     code: str
 
 
-# Holds a test's function data, each file and image by its list index.
+# Holds a test's function data, each function by its function table index.
 class FunctionDataDocument(TypedDict):
     counters: list[str]
-    images: list[str]
     functions: list[FunctionDataRow]
 
 
-# Holds a function's name, image, place, self costs, callers and callees.
+# Holds a function's table index, self costs, callers and callees.
 class FunctionDataRow(NamedTuple):
-    function_name: str
-    image_index: int
-    file_index: int
-    line_number: int
+    function_index: int
     self_costs: Costs
-    # Each caller's row index then its calls, one caller after another.
+    # Each caller's table index then its calls, one caller after another.
     caller_pairs: list[int]
-    # Each callee's row index then its calls, one callee after another.
+    # Each callee's table index then its calls, one callee after another.
     callee_pairs: list[int]
 
 
@@ -259,6 +255,20 @@ class FunctionRecords:
     home: str
     self_records: list[SelfRecord] = dataclasses.field(default_factory=list)
     call_records: list[CallRecord] = dataclasses.field(default_factory=list)
+
+
+# Holds the run's functions, each image and file by its list index.
+class FunctionTable(TypedDict):
+    images: list[str]
+    functions: list[FunctionTableRow]
+
+
+# Holds a function's name, image and the place it is addressed at.
+class FunctionTableRow(NamedTuple):
+    function_name: str
+    image_index: int
+    file_index: int
+    line_number: int
 
 
 @dataclasses.dataclass
@@ -839,6 +849,11 @@ def baseline_line_key(display: str, line: int | str) -> str:
     return f"{display}\n{line}"
 
 
+# Cuts the build output dir as the recordings have it cut.
+def build_output_strip(text: str, build_output_dir: str) -> str:
+    return text.replace(f"{build_output_dir}/", "")
+
+
 # Returns each call graph branch from the roots, its own calls' costs summed.
 def call_branches(
     profile: Profile, root_names: Collection[str], path: str
@@ -1012,6 +1027,18 @@ def display_path(canonical: str, group: str, image_path: str) -> str:
     return f"{os.path.basename(image_path)}/{canonical}"
 
 
+# Returns a JSON object of exactly the keys given, refusing any other.
+def document_keys_check(
+    text: str, path: str, required_keys: Collection[str]
+) -> dict[str, Any]:
+    document = json.loads(text)
+    keys = sorted(required_keys)
+    found_keys = sorted(document) if isinstance(document, dict) else []
+    if found_keys != keys:
+        sys.exit(f"error: {path} holds no object of the keys {' '.join(keys)}")
+    return document
+
+
 # Returns a report's paths document in index order, refusing a malformed one.
 def file_data_read(directory: str) -> list[FileEntry]:
     path = artifacts.artifact_path(directory, "file-data")
@@ -1059,19 +1086,15 @@ def file_key(path: str, image_path: str) -> str:
 
 # Returns a test's function data document, refusing one of other keys.
 def function_data_parse(text: str, path: str) -> FunctionDataDocument:
-    document = json.loads(text)
-    keys = sorted(FunctionDataDocument.__required_keys__)
-    found_keys = sorted(document) if isinstance(document, dict) else []
-    if found_keys != keys:
-        sys.exit(f"error: {path} holds no object of the keys {' '.join(keys)}")
-    function_rows = [
-        FunctionDataRow(*function_row)
-        for function_row in document["functions"]
-    ]
+    document = document_keys_check(
+        text, path, FunctionDataDocument.__required_keys__
+    )
     return {
         "counters": document["counters"],
-        "images": document["images"],
-        "functions": function_rows,
+        "functions": [
+            FunctionDataRow(*function_row)
+            for function_row in document["functions"]
+        ],
     }
 
 
@@ -1175,6 +1198,59 @@ def function_pairs(
                 for location in modified_left
             )
     return pairs
+
+
+# Returns a profile function's key in the function table.
+def function_table_key(profile: Profile, name: str) -> FunctionKey:
+    key = profile.function_keys[name]
+    return FunctionKey(repo_root_strip(key.image_path), key.name)
+
+
+# Returns each function table row's key, its image as the table holds it.
+def function_table_keys(table: FunctionTable) -> list[FunctionKey]:
+    return [
+        FunctionKey(table["images"][row.image_index], row.function_name)
+        for row in table["functions"]
+    ]
+
+
+# Returns the run's function table, refusing one of other keys.
+def function_table_parse(text: str, path: str) -> FunctionTable:
+    document = document_keys_check(text, path, FunctionTable.__required_keys__)
+    return {
+        "images": document["images"],
+        "functions": [
+            FunctionTableRow(*function_row)
+            for function_row in document["functions"]
+        ],
+    }
+
+
+# Returns where a report shows each function, by its function table key.
+def function_table_places(directory: str) -> dict[FunctionKey, SourceLine]:
+    table = function_table_read(directory)
+    file_entries = file_data_read(directory)
+    return {
+        key: SourceLine(
+            display_path(
+                file_entries[row.file_index].path,
+                file_entries[row.file_index].code,
+                key.image_path,
+            ),
+            row.line_number,
+        )
+        for key, row in zip(
+            function_table_keys(table), table["functions"], strict=True
+        )
+    }
+
+
+# Returns the run's function table of a report's artifacts or archive.
+def function_table_read(directory: str) -> FunctionTable:
+    with artifacts.artifact_open(directory, "function-table") as handle:
+        return function_table_parse(
+            handle.read(), artifacts.artifact_path(directory, "function-table")
+        )
 
 
 # Returns an image's location, its path less its report's build tree.

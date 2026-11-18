@@ -110,11 +110,7 @@ window.try_catch_handler_(function () {
       window.report_source_database_.functionsWithCounters,
       "str_menu_function",
       (test_name, function_name) =>
-        window.report_ui_.address.function_hash(
-          test_name,
-          function_name,
-          true,
-        ),
+        window.report_ui_.address.function_hash(test_name, function_name),
     );
   }
   // Returns the address with another test, the database from the overview.
@@ -182,7 +178,6 @@ window.try_catch_handler_(function () {
     window.report_ui_.design_scale_stop_set(null);
     window.report_ui_.dark_mode_set_(dark_mode_enabled);
     window.report_preferences_.seed();
-    window.report_frame_.load_log_history();
     window.report_frame_.view_post("layout_reset");
     menu_render();
   }
@@ -221,8 +216,8 @@ window.try_catch_handler_(function () {
     window.report_frame_.view_post("preferences_apply");
   }
   // Chooses a call graph cutoff, the view opening its nodes by it again.
-  function call_graph_cutoff_choose(cutoff_root) {
-    window.report_preferences_.call_graph_cutoff_choose(cutoff_root);
+  function call_graph_cutoff_choose(cutoff_depth) {
+    window.report_preferences_.call_graph_cutoff_choose(cutoff_depth);
     window.report_frame_.view_post("preferences_apply");
   }
   // Chooses a call graph sort, then labels its pulldown with it.
@@ -491,19 +486,23 @@ window.try_catch_handler_(function () {
   }
   // Builds the view mode entry, its label the shown mode, its link the other.
   function view_mode_entry(address) {
+    const sent_link = window.report_frame_.view_mode_link_now();
+    // The link shows once the heat map sends the shown address's own.
+    const link_hash =
+      sent_link !== null &&
+      sent_link.hash === window.report_ui_.address.hash(address)
+        ? sent_link.link_hash
+        : "";
     return window.report_ui_.strip.entry_make(
       "heat_counter_source",
-      "link",
+      link_hash ? "link" : "label",
       window.ui_strings_.text(
         address.functions
           ? "str_menu_counter_source_functions"
           : "str_menu_counter_source_lines",
       ),
       {
-        href: window.report_ui_.address.hash({
-          ...address,
-          functions: !address.functions,
-        }),
+        href: link_hash,
         tool_tip_text: window.ui_strings_.text("str_tool_tip_counter_source"),
       },
     );
@@ -551,14 +550,13 @@ window.try_catch_handler_(function () {
           on_activate: heat_sort_toggle,
         },
       ),
-      entry(
-        dark_mode_string_id(),
-        "str_tool_tip_dark_mode",
+      // One name in either mode keeps the focus on the cell a key toggles.
+      window.report_ui_.strip.entry_make(
+        "dark_mode",
         "action",
-        address,
-        null,
+        window.ui_strings_.text(dark_mode_string_id()),
         {
-          is_numbered: false,
+          tool_tip_text: window.ui_strings_.text("str_tool_tip_dark_mode"),
           on_activate: dark_mode_toggle,
         },
       ),
@@ -641,6 +639,8 @@ window.try_catch_handler_(function () {
       [],
     );
     document.title = title_text(address);
+    // The view heads its copies and images with the status bar shown.
+    window.report_frame_.view_post("status_bar_show");
     const menu_entry_number = window.report_frame_.menu_entry_number_now();
     if (menu_entry_number !== null)
       menu_strip_handle.numbered_entry_focus(menu_entry_number);

@@ -10,7 +10,8 @@ from collections.abc import Container, Iterable, Iterator, Sequence
 from typing import NamedTuple, NotRequired, TypedDict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import artifacts, callgrind, callgrind_diff, settings, theme
+import artifacts, callgrind, callgrind_diff, function_declarations
+import settings, theme
 
 _ASSET_SOURCE_DATABASE_SCRIPT_NAME: str = ""
 _ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME: str = ""
@@ -74,7 +75,6 @@ class CallgrindToHeatmap:
         functions_with_counters: dict[str, list[str]] = dataclasses.field(
             default_factory=dict
         )
-        cold: list[str] = dataclasses.field(default_factory=list)
         tests: list[CallgrindToHeatmap.ShownTest] = dataclasses.field(
             default_factory=list
         )
@@ -186,17 +186,21 @@ class CallgrindToHeatmap:
         calls_cost: callgrind.Costs
         count: int = 0
 
-    # Holds a regular test's profile and paths for its function data.
+    # Holds a regular test's profile for its function data.
     class ShownTest(NamedTuple):
         test_name: str
         profile: callgrind.Profile
-        info: dict[str, callgrind.PathInfo]
 
     class SourceDatabase(TypedDict):
         files: list[str]
         filesWithCounters: dict[str, list[str]]
         functions: list[str]
         functionsWithCounters: dict[str, list[str]]
+
+    class TablesArgs(NamedTuple):
+        artifacts: str
+        report: str
+        build_output_dir: str
 
     # Holds a diff's paths and a test's function data diff.
     class TestDiff(NamedTuple):
@@ -227,7 +231,7 @@ class CallgrindToHeatmap:
         head, tail = self.model_script_parts(test_name)
         return f"{head}JSON.parse({data_literal}){tail}"
 
-    # Writes every test's model and sources, the source database, the paths.
+    # Writes every test's model and sources, the source database, the data.
     def data_write(self, args: CallgrindToHeatmap.DataArgs) -> None:
         artifacts_dir = artifacts.report_artifacts_dir(
             args.artifacts, args.report
@@ -235,17 +239,22 @@ class CallgrindToHeatmap:
         test_names = artifacts.test_list_read(artifacts_dir)
         self.test_names_check(test_names)
         derive, tracked = self.derive_resolve(artifacts_dir, args)
+        # A diff places each function as its function data diff does.
+        places = (
+            {}
+            if derive is not None
+            else callgrind.function_table_places(artifacts_dir)
+        )
         database = self.tests_write(
-            args.report, artifacts_dir, test_names, derive, tracked
+            args.report, artifacts_dir, test_names, derive, tracked, places
         )
         self.source_database_write(args.report, database)
         if derive is None:
-            file_paths = self.paths_write(
-                artifacts.artifact_path(artifacts_dir, "file-data"),
-                database.shown,
-                database.cold,
+            self.function_data_write(
+                artifacts_dir,
+                database.tests,
+                callgrind.function_table_read(artifacts_dir),
             )
-            self.function_data_write(artifacts_dir, database.tests, file_paths)
 
     # Adds a test's files, functions with a line and those with counters.
     def database_add(
@@ -256,13 +265,7 @@ class CallgrindToHeatmap:
         info: dict[str, callgrind.PathInfo],
         model: CallgrindToHeatmap.HeatModel,
     ) -> None:
-        for raw, path_info in info.items():
-            known = database.shown.setdefault(raw, path_info)
-            if known.group != path_info.group:
-                sys.exit(
-                    f"error: the test {test_name} codes {raw} as"
-                    f" {path_info.group}, an earlier test as {known.group}"
-                )
+        self.shown_paths_add(database.shown, test_name, info)
         tallies = self.file_tallies(info, len(profile.counters))
         for display, tally in tallies.items():
             entry: CallgrindToHeatmap.DatabaseFile = {
@@ -480,122 +483,116 @@ class CallgrindToHeatmap:
             )
         )
 
-    # Returns a test's function data, each file by its paths document index.
+    # Returns a test's function data, each function by its table index.
     def function_data(
         self,
         profile: callgrind.Profile,
-        info: dict[str, callgrind.PathInfo],
-        file_indexes: dict[str, int],
+        function_indexes: dict[callgrind.FunctionKey, int],
     ) -> callgrind.FunctionDataDocument:
-        function_names = sorted(profile.function_home)
-        function_index = {
-            name: index for index, name in enumerate(function_names)
+        table_indexes = {
+            name: function_indexes[callgrind.function_table_key(profile, name)]
+            for name in profile.function_home
         }
-        images = sorted(
-            {
-                callgrind.repo_root_strip(
-                    profile.function_keys[name].image_path
-                )
-                for name in function_names
-            }
-        )
-        image_index = {path: index for index, path in enumerate(images)}
-        caller_pairs: dict[str, list[int]] = {}
+        function_names = sorted(table_indexes, key=table_indexes.__getitem__)
+        caller_pairs: dict[str, list[int]] = {
+            name: [] for name in function_names
+        }
         callee_pairs: dict[str, list[int]] = {
             name: [] for name in function_names
         }
         for name in function_names:
-            caller_pairs[name] = []
             for caller_name, calls in sorted(
-                callgrind.caller_calls(profile, name).items()
+                callgrind.caller_calls(profile, name).items(),
+                key=lambda item: table_indexes[item[0]],
             ):
                 caller_pairs[name].extend(
-                    (function_index[caller_name], calls.calls)
+                    (table_indexes[caller_name], calls.calls)
                 )
                 callee_pairs[caller_name].extend(
-                    (function_index[name], calls.calls)
+                    (table_indexes[name], calls.calls)
                 )
-        rows: list[callgrind.FunctionDataRow] = []
-        for name in function_names:
-            key = profile.function_keys[name]
-            image_path = callgrind.repo_root_strip(key.image_path)
-            place = self.function_line(profile, name)
-            path_info = info[place.file]
-            file_path = callgrind.path_canonical(place.file)
-            # An error coded file is shown under its image's file name.
-            if (
-                callgrind.display_path(file_path, path_info.group, image_path)
-                != path_info.display
-            ):
-                sys.exit(
-                    f"error: {name} of {image_path} is placed in"
-                    f" {path_info.display}, which its function data would"
-                    f" show under its own image as {file_path}"
-                )
-            rows.append(
+        return {
+            "counters": list(profile.counters),
+            "functions": [
                 callgrind.FunctionDataRow(
-                    key.name,
-                    image_index[image_path],
-                    file_indexes[file_path],
-                    place.line,
+                    table_indexes[name],
                     list(profile.function_self.get(name, profile.zeros())),
                     caller_pairs[name],
                     callee_pairs[name],
                 )
-            )
-        return {
-            "counters": list(profile.counters),
-            "images": images,
-            "functions": rows,
+                for name in function_names
+            ],
         }
 
-    # Writes each test's function data, its files indexed in the paths order.
+    # Writes each test's function data, its functions by their table index.
     def function_data_write(
         self,
         artifacts_dir: str,
         shown_tests: Sequence[CallgrindToHeatmap.ShownTest],
-        file_paths: Sequence[str],
+        table: callgrind.FunctionTable,
     ) -> None:
-        file_indexes = {
-            file_path: index for index, file_path in enumerate(file_paths)
+        function_indexes = {
+            key: index
+            for index, key in enumerate(callgrind.function_table_keys(table))
         }
         for shown_test in shown_tests:
-            document = self.function_data(
-                shown_test.profile, shown_test.info, file_indexes
+            document = self.function_data(shown_test.profile, function_indexes)
+            self.json_write(
+                artifacts.artifact_path(
+                    artifacts_dir, "function-data", shown_test.test_name
+                ),
+                json.dumps(
+                    document, separators=(",", ":"), ensure_ascii=False
+                ),
             )
-            text = json.dumps(
-                document, separators=(",", ":"), ensure_ascii=False
-            )
-            path = artifacts.artifact_path(
-                artifacts_dir, "function-data", shown_test.test_name
-            )
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write(f"{text}\n")
-            if self.verbose:
-                print(
-                    f"wrote {path} ({len(text.encode('utf-8')) + 1:,} bytes)"
+
+    # Adds each function's entry line, refusing one a test enters elsewhere.
+    def function_entries_add(
+        self,
+        entries: dict[callgrind.FunctionKey, callgrind.SourceLine],
+        test_name: str,
+        profile: callgrind.Profile,
+    ) -> None:
+        for name in profile.function_home:
+            entry = profile.function_entry[name]
+            key = callgrind.function_table_key(profile, name)
+            known = entries.setdefault(key, entry)
+            known_place = (callgrind.path_canonical(known.file), known.line)
+            if known_place != (
+                callgrind.path_canonical(entry.file),
+                entry.line,
+            ):
+                sys.exit(
+                    f"error: the test {test_name} enters {key.name} of"
+                    f" {key.image_path} at {entry.file}:{entry.line}, an"
+                    f" earlier test at {known.file}:{known.line}"
                 )
 
-    # Returns where a function is addressed, the entry line its calls name.
+    # Returns the declared line when in the entry file, else the entry line.
     def function_line(
-        self, profile: callgrind.Profile, name: str
+        self,
+        entry: callgrind.SourceLine,
+        declaration: callgrind.SourceLine | None,
     ) -> callgrind.SourceLine:
-        return profile.function_entry[name]
+        if declaration is not None and callgrind.path_canonical(
+            declaration.file
+        ) == callgrind.path_canonical(entry.file):
+            return entry._replace(line=declaration.line)
+        return entry
 
-    # Returns each named function's shown file and the line it is addressed at.
+    # Returns each named function's shown file and line, as the table has it.
     def function_locations(
         self,
         profile: callgrind.Profile,
-        shown_paths: dict[str, str],
+        places: dict[callgrind.FunctionKey, callgrind.SourceLine],
         function_names: Iterable[str],
     ) -> dict[str, callgrind.SourceLine]:
-        locations: dict[str, callgrind.SourceLine] = {}
-        for function_name in function_names:
-            location = self.function_line(profile, function_name)
-            locations[function_name] = callgrind.SourceLine(
-                shown_paths[location.file], location.line
-            )
-        return locations
+        return {
+            function_name: places[
+                callgrind.function_table_key(profile, function_name)
+            ]
+            for function_name in function_names
+        }
 
     # Returns whether the heat map shows a function, at a line with source.
     @staticmethod
@@ -606,6 +603,66 @@ class CallgrindToHeatmap:
         return (
             bool(function["line"])
             and model["files"][function["file"]]["source"] is not None
+        )
+
+    # Returns the function table, each function at its `function_line()`.
+    def function_table(
+        self,
+        entries: dict[callgrind.FunctionKey, callgrind.SourceLine],
+        info: dict[str, callgrind.PathInfo],
+        file_paths: Sequence[str],
+        declarations: dict[callgrind.FunctionKey, callgrind.SourceLine],
+    ) -> callgrind.FunctionTable:
+        file_indexes = {
+            file_path: index for index, file_path in enumerate(file_paths)
+        }
+        keys = sorted(entries, key=lambda key: (key.name, key.image_path))
+        images = sorted({key.image_path for key in keys})
+        image_indexes = {path: index for index, path in enumerate(images)}
+        rows: list[callgrind.FunctionTableRow] = []
+        for key in keys:
+            place = self.function_line(entries[key], declarations.get(key))
+            path_info = info[place.file]
+            file_path = callgrind.path_canonical(place.file)
+            # An error coded file is shown under its image's file name.
+            if (
+                callgrind.display_path(
+                    file_path, path_info.group, key.image_path
+                )
+                != path_info.display
+            ):
+                sys.exit(
+                    f"error: {key.name} of {key.image_path} is placed in"
+                    f" {path_info.display}, which its function table would"
+                    f" show under its own image as {file_path}"
+                )
+            rows.append(
+                callgrind.FunctionTableRow(
+                    key.name,
+                    image_indexes[key.image_path],
+                    file_indexes[file_path],
+                    place.line,
+                )
+            )
+        return {"images": images, "functions": rows}
+
+    # Writes the function table, each image's declarations read by readelf.
+    def function_table_write(
+        self,
+        path: str,
+        entries: dict[callgrind.FunctionKey, callgrind.SourceLine],
+        info: dict[str, callgrind.PathInfo],
+        file_paths: Sequence[str],
+        build_output_dir: str,
+    ) -> None:
+        table = self.function_table(
+            entries,
+            info,
+            file_paths,
+            self.image_declarations(entries, build_output_dir),
+        )
+        self.json_write(
+            path, json.dumps(table, separators=(",", ":"), ensure_ascii=False)
         )
 
     def functions_model(
@@ -648,19 +705,50 @@ class CallgrindToHeatmap:
             )
         return functions
 
+    # Returns each function's declaration as its image's readelf gives it.
+    def image_declarations(
+        self,
+        keys: Iterable[callgrind.FunctionKey],
+        build_output_dir: str,
+    ) -> dict[callgrind.FunctionKey, callgrind.SourceLine]:
+        image_names: dict[str, list[str]] = {}
+        for key in keys:
+            image_names.setdefault(key.image_path, []).append(key.name)
+        declarations: dict[callgrind.FunctionKey, callgrind.SourceLine] = {}
+        for image_path, names in sorted(image_names.items()):
+            # A recording names a built image under the build output dir.
+            image_file = os.path.join(build_output_dir, image_path)
+            for name, declaration in function_declarations.image_declarations(
+                image_file, names
+            ).items():
+                declarations[callgrind.FunctionKey(image_path, name)] = (
+                    declaration._replace(
+                        file=callgrind.build_output_strip(
+                            declaration.file, build_output_dir
+                        )
+                    )
+                )
+        return declarations
+
+    # Writes a JSON text and its line end, printing its size if verbose.
+    def json_write(self, path: str, text: str) -> None:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(f"{text}\n")
+        if self.verbose:
+            print(f"wrote {path} ({len(text.encode('utf-8')) + 1:,} bytes)")
+
     def model(
         self,
         profile: callgrind.Profile,
         tracked: Sequence[str],
         test_diff: CallgrindToHeatmap.TestDiff | None,
+        places: dict[callgrind.FunctionKey, callgrind.SourceLine],
     ) -> tuple[CallgrindToHeatmap.HeatModel, dict[str, callgrind.PathInfo]]:
         if test_diff is None:
             info = self.profile_path_infos(profile, None)
             function_names = sorted(profile.function_home)
             locations = self.function_locations(
-                profile,
-                {raw: path_info.display for raw, path_info in info.items()},
-                function_names,
+                profile, places, function_names
             )
             self_costs = dict(profile.function_self)
         else:
@@ -803,21 +891,20 @@ class CallgrindToHeatmap:
         for cold in cold_files:
             document.setdefault(cold, _CALLGRIND_FILE_DATA_GIT_CODE)
         file_paths = sorted(document)
-        text = json.dumps(
-            [
-                {
-                    _CALLGRIND_FILE_DATA_PATH_KEY: file_path,
-                    _CALLGRIND_FILE_DATA_CODE_KEY: document[file_path],
-                }
-                for file_path in file_paths
-            ],
-            indent=_CALLGRIND_FILE_DATA_INDENT_CHARS,
-            ensure_ascii=False,
+        self.json_write(
+            path,
+            json.dumps(
+                [
+                    {
+                        _CALLGRIND_FILE_DATA_PATH_KEY: file_path,
+                        _CALLGRIND_FILE_DATA_CODE_KEY: document[file_path],
+                    }
+                    for file_path in file_paths
+                ],
+                indent=_CALLGRIND_FILE_DATA_INDENT_CHARS,
+                ensure_ascii=False,
+            ),
         )
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write(f"{text}\n")
-        if self.verbose:
-            print(f"wrote {path} ({len(text.encode('utf-8')) + 1:,} bytes)")
         return file_paths
 
     # Returns how a page shows each path the profile records.
@@ -878,6 +965,21 @@ class CallgrindToHeatmap:
             for line in completed.stdout.split("\n")
             if line.endswith((".c", ".h"))
         ]
+
+    # Adds a test's shown paths, refusing one an earlier test codes apart.
+    def shown_paths_add(
+        self,
+        shown: dict[str, callgrind.PathInfo],
+        test_name: str,
+        info: dict[str, callgrind.PathInfo],
+    ) -> None:
+        for raw, path_info in info.items():
+            known = shown.setdefault(raw, path_info)
+            if known.group != path_info.group:
+                sys.exit(
+                    f"error: the test {test_name} codes {raw} as"
+                    f" {path_info.group}, an earlier test as {known.group}"
+                )
 
     # Writes every test's files and functions, and each test's with counters.
     def source_database_write(
@@ -976,6 +1078,34 @@ class CallgrindToHeatmap:
                     f" {body};\n"
                 )
 
+    # Writes the paths document, then the function table, of the recordings.
+    def tables_write(self, args: CallgrindToHeatmap.TablesArgs) -> None:
+        artifacts_dir = artifacts.report_artifacts_dir(
+            args.artifacts, args.report
+        )
+        shown: dict[str, callgrind.PathInfo] = {}
+        displays: set[str] = set()
+        entries: dict[callgrind.FunctionKey, callgrind.SourceLine] = {}
+        for test_name, profile in self.profiles_load(
+            artifacts_dir, "callgrind", artifacts.test_list_read(artifacts_dir)
+        ):
+            info = self.profile_path_infos(profile, None)
+            self.shown_paths_add(shown, test_name, info)
+            displays.update(path_info.display for path_info in info.values())
+            self.function_entries_add(entries, test_name, profile)
+        file_paths = self.paths_write(
+            artifacts.artifact_path(artifacts_dir, "file-data"),
+            shown,
+            self.cold_paths(self.repo_tracked_files(), displays),
+        )
+        self.function_table_write(
+            artifacts.artifact_path(artifacts_dir, "function-table"),
+            entries,
+            shown,
+            file_paths,
+            args.build_output_dir,
+        )
+
     # Refuses a test named like a shipped script.
     def test_names_check(self, test_names: Iterable[str]) -> None:
         shipped_scripts = theme.shipped_script_names()
@@ -994,6 +1124,7 @@ class CallgrindToHeatmap:
         test_names: Sequence[str],
         derive: CallgrindToHeatmap.Derive | None,
         tracked: Sequence[str],
+        places: dict[callgrind.FunctionKey, callgrind.SourceLine],
     ) -> CallgrindToHeatmap.DatabaseTally:
         database = CallgrindToHeatmap.DatabaseTally()
         kind = "callgrind" if derive is None else "delta"
@@ -1011,17 +1142,16 @@ class CallgrindToHeatmap:
                     ),
                 )
             )
-            model, info = self.model(profile, tracked, test_diff)
+            model, info = self.model(profile, tracked, test_diff, places)
             if test_diff is None:
                 database.tests.append(
-                    CallgrindToHeatmap.ShownTest(test_name, profile, info)
+                    CallgrindToHeatmap.ShownTest(test_name, profile)
                 )
             else:
                 self.diff_model(model, profile, test_diff.function_diff)
             self.sources_write(sources_dir, info, model, derive)
             self.model_write(report_dir, test_name, model)
             self.database_add(database, test_name, profile, info, model)
-        database.cold = self.cold_paths(tracked, database.files)
         return database
 
 
@@ -1052,7 +1182,7 @@ def main() -> None:
     data_parser = subparsers.add_parser(
         "data",
         help="every listed test's model script and sources, the source"
-        " database, and the paths document of a regular report",
+        " database, and each test's function data of a regular report",
     )
     data_parser.add_argument(
         "--artifacts",
@@ -1100,7 +1230,32 @@ def main() -> None:
         metavar="DIR",
         help="the report directory the page is written in",
     )
-    for written_parser in (data_parser, page_parser):
+    tables_parser = subparsers.add_parser(
+        "tables",
+        help="the paths document, then the function table, of the measuring"
+        " run's recordings, each function at its declaration line when"
+        " readelf names one, else at its entry line",
+    )
+    tables_parser.add_argument(
+        "--artifacts",
+        required=True,
+        metavar="DIR",
+        help="the profiler artifacts directory, holding the report's own,"
+        " whose test list names every test recorded",
+    )
+    tables_parser.add_argument(
+        "--report",
+        required=True,
+        metavar="DIR",
+        help="the report directory, naming its artifacts directory",
+    )
+    tables_parser.add_argument(
+        "--build-output-dir",
+        required=True,
+        metavar="DIR",
+        help="the directory the recordings name each built image under",
+    )
+    for written_parser in (data_parser, page_parser, tables_parser):
         written_parser.add_argument(
             "--verbose",
             action="count",
@@ -1113,6 +1268,14 @@ def main() -> None:
     heat_map = CallgrindToHeatmap(namespace.verbose)
     if namespace.cmd == "page":
         heat_map.page_write(namespace.report)
+    elif namespace.cmd == "tables":
+        heat_map.tables_write(
+            CallgrindToHeatmap.TablesArgs(
+                artifacts=namespace.artifacts,
+                report=namespace.report,
+                build_output_dir=namespace.build_output_dir,
+            )
+        )
     else:
         heat_map.data_write(
             CallgrindToHeatmap.DataArgs(

@@ -42,7 +42,8 @@ CALL_GRAPH_BRANCH_MIDDLE_TEXT = "┣━"
 CALL_GRAPH_BRANCH_ONLY_TEXT = "━━"
 CALL_GRAPH_BRANCH_PASS_TEXT = "┃"
 CALL_GRAPH_CLOSED_TEXT = "⊞"
-CALL_GRAPH_CUTOFF_LARGEST_PERCENT = 40
+CALL_GRAPH_CUTOFF_DEFAULT_STOP = 4
+CALL_GRAPH_CUTOFF_LEAST_DEPTH = 3
 CALL_GRAPH_CUTOFF_STOP_COUNT = 19
 CALL_GRAPH_DOWNLOAD_FILE_NAME_SUFFIX = "_call_graph.svg"
 CALL_GRAPH_LINE_TEXT = "━"
@@ -147,6 +148,18 @@ DERIVED_COUNTER_TERMS: dict[str, dict[str, int]] = {
 
 DRAG_DIRECTION_THRESHOLD_PX = 5
 
+DWARF_COMPILE_DIR_ATTRIBUTE = "DW_AT_comp_dir"
+DWARF_DECLARATION_FILE_ATTRIBUTE = "DW_AT_decl_file"
+DWARF_DECLARATION_LINE_ATTRIBUTE = "DW_AT_decl_line"
+DWARF_LINE_TABLE_ATTRIBUTE = "DW_AT_stmt_list"
+DWARF_LOW_ADDRESS_ATTRIBUTE = "DW_AT_low_pc"
+DWARF_ORIGIN_ATTRIBUTES: tuple[str, ...] = (
+    "DW_AT_abstract_origin",
+    "DW_AT_specification",
+)
+DWARF_RANGES_ATTRIBUTE = "DW_AT_ranges"
+DWARF_SUBPROGRAM_TAG = "DW_TAG_subprogram"
+
 FLAME_GRAPH_ADDRESS_FRAME_NAME_FORMAT = "%s+%#x"
 FLAME_GRAPH_COLOR_SCHEME_KEY_NAME = "speedscope-color-scheme"
 FLAME_GRAPH_EXPORTER_NAME = "tests/perf2html/scripts/trace_to_speedscope.py"
@@ -199,13 +212,6 @@ HEAT_MAP_VIEW_ENTRY: tuple[str, str] = (
     "heat-map/index.html",
 )
 
-LOAD_LOG_INPUT_EVENT_NAMES: dict[str, str] = {
-    "click": "click",
-    "key": "keydown",
-}
-LOAD_LOG_MESSAGE_NAME = "load_log_entry"
-LOAD_LOG_NAVIGATION_CAUSE_NAME = "navigation"
-
 MENU_DIGIT_KEY_COUNT = 10
 MENU_ENTRY_NEEDS: dict[str, list[str]] = {
     "counters": ["counter_list"],
@@ -252,6 +258,33 @@ PROFILE_START_FUNCTION_UNRECORDED_CALLS = 1
 
 RANKING_COUNTER_NAME = "CEst"
 
+READELF_ATTRIBUTE_PATTERN = r"^    <[0-9a-f]+>\s+(DW_AT_\w+)\s*: (.*)$"
+READELF_DEBUG_INFO_OPTIONS: tuple[str, ...] = (
+    "--debug-dump=info",
+    "--dwarf-depth=2",
+)
+READELF_DIRECTORY_ENTRY_PATTERN = r"^  (\d+)\t(.*)$"
+READELF_DIRECTORY_TABLE_PREFIX = " The Directory Table"
+READELF_FILE_ENTRY_PATTERN = r"^  (\d+)\t(\d+)\t(?:.*\t)?(.*)$"
+READELF_FILE_TABLE_PREFIX = " The File Name Table"
+READELF_LINE_TABLE_OFFSET_PATTERN = r"^  Offset:\s+(\S+)$"
+READELF_LINE_TABLE_OPTIONS: tuple[str, ...] = ("--debug-dump=rawline",)
+READELF_LOADED_FILE_PATTERN = (
+    r"^Contents of the \.debug_info section \(loaded from (.+)\):$"
+)
+READELF_RANGE_ENTRY_PATTERN = r"^    ([0-9a-f]{8}) (.*)$"
+READELF_RANGE_LIST_END_TEXT = "<End of list>"
+READELF_RANGE_LIST_OPTIONS: tuple[str, ...] = ("--debug-dump=Ranges",)
+READELF_RANGE_PATTERN = r"^([0-9a-f]{16}) ([0-9a-f]{16}) $"
+READELF_RECORD_PATTERN = (
+    r"^ <(\d+)><([0-9a-f]+)>: Abbrev Number: \d+ \((DW_TAG_\w+)\)$"
+)
+READELF_REFERENCE_PATTERN = r"^<0x([0-9a-f]+)>$"
+READELF_SECTION_HEADER_PATTERN = (
+    r"^(?:Contents of the|Raw dump of debug contents of section) \.debug_"
+)
+READELF_STRING_FORM_PATTERN = r"^\([^)]*\): (.*)$"
+
 README_PAGE_BODY_MARKER = "__README_BODY__"
 README_PAGE_CONVERTER_EXTENSION_ARGUMENTS: tuple[str, ...] = ("-e", "table")
 README_PAGE_HEADING_ANCHOR_DROPPED_PATTERN = r"[^\w\- ]"
@@ -281,10 +314,6 @@ SETTINGS_DEBUG_JSON_SPACING_PATTERN = r'("(?:[^\\"]|\\.)*")|[:,]'
 SETTINGS_DEBUG_QUERY_KEY_NAME = "debug"
 SETTINGS_DEBUG_QUERY_VALUES: dict[str, str] = {"disabled": "0", "enabled": "1"}
 SETTINGS_HELD_SCRIPT_TEMPLATE_ID = "page-held-script-"
-SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES = 0
-SETTINGS_LOAD_LOG_HISTORY_ENTRY_NAME = "history"
-SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES: tuple[int, ...] = (0, 10, 20, 50, 100)
-SETTINGS_LOAD_LOG_HISTORY_MAX_LINES = 100
 SETTINGS_RELAY_MESSAGE_NAME = "settings_relay"
 SETTINGS_REQUEST_MESSAGE_NAME = "settings_request"
 SETTINGS_VIEW_ENTRY: tuple[str, str] = ("settings", "settings/index.html")
@@ -298,7 +327,6 @@ STORAGE_KEY_DATABASE_FUNCTION_ROWS = "database.function_rows"
 STORAGE_KEY_HEATMAP_COUNTER_LIST = "heatmap.counter_list"
 STORAGE_KEY_HEATMAP_SCALE = "heatmap.scale"
 STORAGE_KEY_HEATMAP_SORT = "heatmap.sort"
-STORAGE_KEY_LOG_DISPLAY_LENGTH = "log.display_length"
 STORAGE_KEY_VIEW_DARK_MODE = "view.dark_mode"
 STORAGE_KEY_VIEW_SCALE = "view.scale"
 STORAGE_OWNED_KEYS: tuple[str, ...] = (
@@ -310,7 +338,6 @@ STORAGE_OWNED_KEYS: tuple[str, ...] = (
     STORAGE_KEY_HEATMAP_COUNTER_LIST,
     STORAGE_KEY_HEATMAP_SCALE,
     STORAGE_KEY_HEATMAP_SORT,
-    STORAGE_KEY_LOG_DISPLAY_LENGTH,
     STORAGE_KEY_VIEW_DARK_MODE,
     STORAGE_KEY_VIEW_SCALE,
 )
@@ -320,11 +347,11 @@ STORAGE_VERSION_KEY = "perf2html.version"
 STYLE_COLOR_DARK_MODE: dict[str, list[str]] = {
     "#effdff": [
         "dark-mode-menu-normal-fg-",
-        "dark-mode-menu-normal-outline-",
         "dark-mode-menu-focus-bg-",
     ],
     "#D2691E": [
         "dark-mode-status-bar-fg-",
+        "dark-mode-table-hover-outline-",
     ],
     "#20354a": [
         "dark-mode-panel-bg-",
@@ -406,6 +433,12 @@ STYLE_HEAT_COLOR_STOPS: list[str] = [
     "#F06142",
 ]
 STYLE_HEAT_MAP_SOURCE_BOX_ROOM_PROPERTY = "--heat-map-source-box-room-"
+STYLE_HEAT_MAP_SOURCE_END_LINE_BOTTOM_PROPERTY = (
+    "--heat-map-source-end-line-bottom-"
+)
+STYLE_HEAT_MAP_SOURCE_FILE_BOX_HEIGHT_PROPERTY = (
+    "--heat-map-source-file-box-height-"
+)
 STYLE_MENU_LOGO_START_SHARE = 0.5
 STYLE_PAGE_BACKGROUND_DARK_MODE_ROLE = "dark-mode-page-bg-"
 STYLE_PAGE_BACKGROUND_EARLY_FILL_ENABLED = True
@@ -440,6 +473,7 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "call-graph-hover-row-z-index-": "1",
     "heat-map-main-edge-z-index-": "1",
     "heat-map-minimap-width-": "110px",
+    "heat-map-source-line-box-padding-block-": "0.5lh",
     "heat-map-source-ticker-tape-gap-": "1ch",
     "heat-map-tree-node-hover-z-index-": "1",
     "heat-map-tree-node-padding-right-": "1ch",
@@ -468,6 +502,12 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "screenshot-z-index-": "3",
 }
 
+SYMBOL_TABLE_COMMAND: tuple[str, ...] = ("objdump", "--syms", "--wide")
+SYMBOL_TABLE_PATTERN = (
+    r"^([0-9a-f]+) (?:.{6}F|.{4}i..) (?!\*UND\*)\S+\t.* (\S+)$"
+)
+SYMBOL_VERSION_SEPARATOR = "@"
+
 TABLE_CHUNK_ROW_COUNT = 100
 TABLE_COLUMN_FUNCTION_NAME = "function"
 TABLE_COLUMN_LINE_NAME = "line"
@@ -478,6 +518,7 @@ TABLE_DOWNLOAD_IMAGE_SCALE = 0.8
 TABLE_DOWNLOAD_URL_PREFIX = "data:image/svg+xml;charset=utf-8,"
 TABLE_MARKDOWN_COLUMN_NARROWEST_CHARS = 3
 TABLE_MARKDOWN_ESCAPE_TEXT = "\\"
+TABLE_MARKDOWN_HEADING_TEXT = "# "
 TABLE_MARKDOWN_PAD_TEXT = " "
 TABLE_MARKDOWN_PIPE_TEXT = "|"
 TABLE_MARKDOWN_RULE_RIGHT_TEXT = ":"
@@ -520,17 +561,19 @@ TIMING_COUNTER_RATIOS: tuple[tuple[str, str, str], ...] = (
 TIMING_DATA_INDENT_CHARS = 2
 TIMING_DUTY_CYCLE_NAME = "duty_cycle"
 # Each metric's last field is how many of perf's metric units make a ratio 1.
-TIMING_PERF_STAT_METRICS: tuple[tuple[str, str, str, int], ...] = (
-    ("instructions_per_cycle", "instructions", "insn per cycle", 1),
-    ("branch_miss_ratio", "branch-misses", "of all branches", 100),
+TIMING_PERF_STAT_METRICS: tuple[tuple[str, str, str, str, int], ...] = (
     (
-        "l1d_miss_ratio",
-        "L1-dcache-load-misses",
-        "of all L1-dcache accesses",
-        100,
+        "instructions_per_cycle",
+        "insn_per_cycle",
+        "cpu-cycles",
+        "instructions",
+        1,
     ),
+    ("branch_miss_ratio", "branch_miss_rate", "branch-misses", "%", 100),
+    ("l1d_miss_ratio", "l1d_miss_rate", "L1-dcache-load-misses", "%", 100),
 )
 TIMING_PERF_STAT_METRIC_FRACTION_DIGITS = 6
+TIMING_PERF_STAT_METRIC_UNIT_FORMAT = "%s  %s"
 TIMING_PERF_STAT_NUMBER_PATTERN = r"[0-9]+(?:\.[0-9]+)?"
 TIMING_PERF_STAT_UNCOUNTED_VALUES: tuple[str, ...] = (
     "<not counted>",
@@ -539,7 +582,7 @@ TIMING_PERF_STAT_UNCOUNTED_VALUES: tuple[str, ...] = (
 # Hides a shown tool tip this long after it shows.
 TOOL_TIP_HIDE_DELAY_MS = 5000
 # Shows a tool tip once the pointer rests this long on its cell.
-TOOL_TIP_SHOW_DELAY_MS = 500
+TOOL_TIP_SHOW_DELAY_MS = 1000
 
 TRACE_ADDR2LINE_COMMAND: tuple[str, ...] = ("addr2line", "-f", "-C", "-e")
 TRACE_ADDR2LINE_UNKNOWN_NAME = "??"

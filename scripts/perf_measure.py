@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from typing import Any, NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import artifacts, settings, theme, trace_to_speedscope
+import artifacts, callgrind, settings, theme, trace_to_speedscope
 
 _CALLGRIND_LAST_LEVEL_CACHE: str = ""
 _CALLGRIND_SEPARATE_CALLERS: int = 0
@@ -34,17 +34,14 @@ _TIMING_DATA_INDENT_CHARS: int = 0
 _TIMING_DUTY_CYCLE_NAME: str = ""
 _TIMING_PERF_STAT_EVENTS: tuple[str, ...] = ()
 _TIMING_PERF_STAT_METRIC_FRACTION_DIGITS: int = 0
-_TIMING_PERF_STAT_METRICS: tuple[tuple[str, str, str, int], ...] = ()
+_TIMING_PERF_STAT_METRIC_UNIT_FORMAT: str = ""
+_TIMING_PERF_STAT_METRICS: tuple[tuple[str, str, str, str, int], ...] = ()
 _TIMING_PERF_STAT_NUMBER_PATTERN: str = ""
 _TIMING_PERF_STAT_RUNS: int = 0
 _TIMING_PERF_STAT_UNCOUNTED_VALUES: tuple[str, ...] = ()
 _TRACE_SKIP_ALL: int = 0
 _VERBOSE_RAW_LEVEL: int = 0
 settings.load_into(__name__)
-
-_PERF_STAT_EVENT_NAMES = tuple(
-    event.partition(":")[0] for event in _TIMING_PERF_STAT_EVENTS
-)
 
 _PERF_TOOL_TIME_LINE = re.compile(
     rf"(?:{re.escape(_PERF_TOOL_TIME_LABEL)}:\s+"
@@ -118,7 +115,9 @@ class PerfMeasure:
         with open(callgrind_path, encoding="utf-8") as handle:
             recording = handle.read()
         with open(callgrind_path, "w", encoding="utf-8") as handle:
-            handle.write(recording.replace(f"{build_output_dir}/", ""))
+            handle.write(
+                callgrind.build_output_strip(recording, build_output_dir)
+            )
 
     # Returns each counter ratio, one over a 0 being 0.
     def counter_ratios(self, counters: dict[str, float]) -> list[float]:
@@ -152,11 +151,11 @@ class PerfMeasure:
     def event_name_check(
         self, setting_name: str, entry_name: str, event_name: str
     ) -> None:
-        if event_name not in _PERF_STAT_EVENT_NAMES:
+        if event_name not in _TIMING_PERF_STAT_EVENTS:
             sys.exit(
                 f"error: {setting_name} {entry_name!r} names {event_name},"
                 " which TIMING_PERF_STAT_EVENTS does not count:"
-                f" {list(_PERF_STAT_EVENT_NAMES)}"
+                f" {list(_TIMING_PERF_STAT_EVENTS)}"
             )
 
     # Exits as the shell would after a failed command, naming the command.
@@ -249,7 +248,7 @@ class PerfMeasure:
     def perf_stat_read(
         self, artifacts_dir: str, test_name: str
     ) -> PerfMeasure.PerfStat:
-        for metric_name, event_name, _, _ in _TIMING_PERF_STAT_METRICS:
+        for metric_name, _, event_name, _, _ in _TIMING_PERF_STAT_METRICS:
             self.event_name_check(
                 "TIMING_PERF_STAT_METRICS", metric_name, event_name
             )
@@ -265,14 +264,14 @@ class PerfMeasure:
             ]
         if not stat_records:
             return PerfMeasure.PerfStat(
-                counters=dict.fromkeys(_PERF_STAT_EVENT_NAMES, 0.0),
+                counters=dict.fromkeys(_TIMING_PERF_STAT_EVENTS, 0.0),
                 metric_texts=["" for _ in _TIMING_PERF_STAT_METRICS],
             )
         event_records: dict[str, list[Any]] = {
-            event_name: [] for event_name in _PERF_STAT_EVENT_NAMES
+            event_name: [] for event_name in _TIMING_PERF_STAT_EVENTS
         }
         for stat_record in stat_records:
-            event_name = stat_record["event"].partition(":")[0]
+            event_name = stat_record["event"]
             if event_name not in event_records:
                 sys.exit(
                     f"error: {stat_path} counts {stat_record['event']}, which"
@@ -293,9 +292,18 @@ class PerfMeasure:
             },
             metric_texts=[
                 self.metric_text(
-                    stat_path, event_records[event_name][0], metric_unit
+                    stat_path,
+                    event_records[event_name][0],
+                    _TIMING_PERF_STAT_METRIC_UNIT_FORMAT
+                    % (metric_unit, perf_metric_name),
                 )
-                for _, event_name, metric_unit, _ in _TIMING_PERF_STAT_METRICS
+                for (
+                    _,
+                    perf_metric_name,
+                    event_name,
+                    metric_unit,
+                    _,
+                ) in _TIMING_PERF_STAT_METRICS
             ],
         )
 
@@ -426,9 +434,12 @@ class PerfMeasure:
             artifacts_dir, "timing-page", args.test
         )
         stat_words = ["perf", "stat", "-j", "-r", str(_TIMING_PERF_STAT_RUNS)]
-        event_words = [
-            "-e",
-            "{" + ",".join(_TIMING_PERF_STAT_EVENTS) + "}",
+        metric_words = [
+            "--all-user",
+            "-M",
+            ",".join(
+                metric_entry[1] for metric_entry in _TIMING_PERF_STAT_METRICS
+            ),
             "--",
             *_PINNED_COMMAND,
         ]
@@ -437,7 +448,7 @@ class PerfMeasure:
             *stat_words,
             "-o",
             stat_path,
-            *event_words,
+            *metric_words,
             args.executable,
             *loop_words,
         ]
@@ -453,7 +464,7 @@ class PerfMeasure:
                         *stat_words,
                         "-o",
                         os.path.basename(stat_path),
-                        *event_words,
+                        *metric_words,
                         executable_shown,
                         *loop_words,
                     ],

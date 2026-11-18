@@ -5,7 +5,6 @@
 window.try_catch_handler_(function () {
   "use strict";
 
-  const NUMBER_FRACTION_DIGITS = settings_("NUMBER_FRACTION_DIGITS");
   const SETTINGS_DEBUG_ENABLED = settings_("SETTINGS_DEBUG_ENABLED");
   const SETTINGS_DEBUG_JSON_INDENT_CHARS = settings_(
     "SETTINGS_DEBUG_JSON_INDENT_CHARS",
@@ -20,12 +19,6 @@ window.try_catch_handler_(function () {
     "SETTINGS_DEBUG_QUERY_KEY_NAME",
   );
   const SETTINGS_DEBUG_QUERY_VALUES = settings_("SETTINGS_DEBUG_QUERY_VALUES");
-  const SETTINGS_LOAD_LOG_HISTORY_ENTRY_NAME = settings_(
-    "SETTINGS_LOAD_LOG_HISTORY_ENTRY_NAME",
-  );
-  const SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES = settings_(
-    "SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES",
-  );
 
   const ACTION_LABEL_TEXTS = {
     apply: window.ui_strings_.text("str_settings_apply"),
@@ -46,25 +39,16 @@ window.try_catch_handler_(function () {
     },
   );
   const INDENT_TEXT = " ".repeat(SETTINGS_DEBUG_JSON_INDENT_CHARS);
-  // Writes each kind of line value: a file as its report path, a span in ms.
-  const LOAD_LOG_VALUE_WRITERS = {
-    files: (file_href) => window.report_ui_.address.path(file_href),
-    spans: milliseconds_text,
-    texts: (value_text) => value_text,
-  };
   const SETTING_ACTIONS = {
     apply: setting_apply,
     copy: setting_copy,
     paste: setting_paste,
   };
   const debug_box = document.getElementById("settings-debug-");
-  const load_log_box = document.getElementById("settings-load-log-");
-  const load_log_menu = document.getElementById("settings-load-log-menu-");
   const page_scroll_box = document.getElementById("settings-page-");
   const settings_list = document.getElementById("settings-list-");
   const setting_boxes = new Map();
   const setting_titles = new Map();
-  let load_log_strip = null;
 
   // Writes a value as JSON, each part that fits its line kept on one line.
   function compact_json(json_value, current_indent, reserved_chars) {
@@ -222,78 +206,6 @@ window.try_catch_handler_(function () {
         setting_titles.get(page_address.setting).getBoundingClientRect().top -
         page_scroll_box.getBoundingClientRect().top;
   }
-  function milliseconds_text(milliseconds) {
-    return window.report_ui_.fixed_text(milliseconds, NUMBER_FRACTION_DIGITS);
-  }
-  // Writes one history line, its time on the clock the top page started.
-  function load_log_line(log_entry) {
-    const [string_id, log_milliseconds, page_href, line_values] = log_entry;
-    const marker_values = {
-      page: window.report_ui_.address.path(page_href),
-      time: milliseconds_text(log_milliseconds),
-    };
-    for (const [value_kind, kind_values] of Object.entries(line_values)) {
-      if (!Object.hasOwn(LOAD_LOG_VALUE_WRITERS, value_kind))
-        window.throw_exception_("str_error_internal");
-      for (const [marker_name, value] of Object.entries(kind_values))
-        marker_values[marker_name] = LOAD_LOG_VALUE_WRITERS[value_kind](value);
-    }
-    return window.ui_strings_.text_fill(string_id, marker_values);
-  }
-  function history_label(line_count) {
-    return window.ui_strings_.text_fill("str_settings_load_log_history", {
-      count: String(line_count),
-    });
-  }
-  // Writes the history pulldown, whose choice the top page keeps.
-  function load_log_strip_render(line_count) {
-    return window.report_ui_.strip.render(
-      load_log_menu,
-      [
-        window.report_ui_.strip.entry_make(
-          SETTINGS_LOAD_LOG_HISTORY_ENTRY_NAME,
-          "pulldown",
-          history_label(line_count),
-          {
-            pulldown_options: {
-              entries: () =>
-                window.report_ui_.strip.choice_entries(
-                  SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES.map(
-                    (choice_count) => ({
-                      label: String(choice_count),
-                      value: String(choice_count),
-                    }),
-                  ),
-                ),
-              entry_count: () => SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES.length,
-              keeps_open: false,
-              on_close: () => {},
-              on_move: null,
-              on_select: (value_text) =>
-                window.report_ui_.load_log_history_send(Number(value_text)),
-              reads_line_number: false,
-            },
-          },
-        ),
-      ],
-      [],
-    );
-  }
-  // Shows the history newest first, scrolling to the setting the first time.
-  function load_log_show(log_entries, line_count) {
-    load_log_box.textContent =
-      [...log_entries.toReversed().map(load_log_line), ""].join("\n") + "\n";
-    if (load_log_strip !== null) {
-      load_log_strip.pulldown_label_set(
-        SETTINGS_LOAD_LOG_HISTORY_ENTRY_NAME,
-        history_label(line_count),
-      );
-      return;
-    }
-    load_log_strip = load_log_strip_render(line_count);
-    address_setting_show();
-  }
-
   debug_box.innerHTML =
     window.render_menu_button_(
       "action",
@@ -331,9 +243,9 @@ window.try_catch_handler_(function () {
     window.try_catch_handler_(address_setting_show),
   );
   document.title = window.ui_strings_.text("str_view_settings");
+  address_setting_show();
   window.report_ui_.view_activate({
     forwards_input: false,
-    load_log_show,
     recenter: address_setting_show,
   });
 })();

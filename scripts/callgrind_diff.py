@@ -69,6 +69,10 @@ class CallgrindDiff:
             [entry.path for entry in callgrind.file_data_read(directory)]
             for directory in (self.baseline_dir, self.modified_dir)
         )
+        self.baseline_table, self.modified_table = (
+            callgrind.function_table_read(directory)
+            for directory in (self.baseline_dir, self.modified_dir)
+        )
         self.build_trees = (
             artifacts.build_tree_read(self.artifacts_dir, "baseline-header"),
             artifacts.build_tree_read(self.artifacts_dir, "modified-header"),
@@ -179,7 +183,9 @@ class CallgrindDiff:
     # Returns every function two function data documents list, 0 changes kept.
     @staticmethod
     def function_diff(
+        baseline_table: callgrind.FunctionTable,
         baseline: callgrind.FunctionDataDocument,
+        modified_table: callgrind.FunctionTable,
         modified: callgrind.FunctionDataDocument,
         baseline_paths: Sequence[str],
         modified_paths: Sequence[str],
@@ -192,14 +198,14 @@ class CallgrindDiff:
                 f" {' '.join(modified['counters'])}"
             )
         sides = (baseline, modified)
+        tables = (baseline_table, modified_table)
         baseline_keys, modified_keys = (
-            [
-                callgrind.FunctionKey(
-                    document["images"][row.image_index], row.function_name
-                )
-                for row in document["functions"]
-            ]
-            for document in sides
+            [table_keys[row.function_index] for row in document["functions"]]
+            for document, table_keys in zip(
+                sides,
+                (callgrind.function_table_keys(table) for table in tables),
+                strict=True,
+            )
         )
         side_names = [
             [names[key] for key in keys]
@@ -216,21 +222,30 @@ class CallgrindDiff:
         caller_counts: list[dict[str, dict[str, int]]] = []
         callee_counts: list[dict[str, dict[str, int]]] = []
         # The modified side, read last, places a function both list.
-        for document, names, paths in zip(
-            sides, side_names, (baseline_paths, modified_paths), strict=True
+        for document, table, names, paths in zip(
+            sides,
+            tables,
+            side_names,
+            (baseline_paths, modified_paths),
+            strict=True,
         ):
             self_costs.append({})
             caller_counts.append({})
             callee_counts.append({})
+            index_names = {
+                row.function_index: name
+                for row, name in zip(document["functions"], names, strict=True)
+            }
             for row, name in zip(document["functions"], names, strict=True):
+                table_row = table["functions"][row.function_index]
                 places[name] = (
-                    document["images"][row.image_index],
-                    paths[row.file_index],
-                    row.line_number,
+                    table["images"][table_row.image_index],
+                    paths[table_row.file_index],
+                    table_row.line_number,
                 )
                 self_costs[-1][name] = row.self_costs
                 caller_counts[-1][name] = {
-                    names[partner_index]: call_count
+                    index_names[partner_index]: call_count
                     for partner_index, call_count in zip(
                         row.caller_pairs[::2],
                         row.caller_pairs[1::2],
@@ -238,7 +253,7 @@ class CallgrindDiff:
                     )
                 }
                 callee_counts[-1][name] = {
-                    names[partner_index]: call_count
+                    index_names[partner_index]: call_count
                     for partner_index, call_count in zip(
                         row.callee_pairs[::2],
                         row.callee_pairs[1::2],
@@ -351,7 +366,9 @@ class CallgrindDiff:
             [f"Baseline: {baseline_path}", f"Modified: {modified_path}"],
         )
         function_diff = self.function_diff(
+            self.baseline_table,
             callgrind.function_data_read(self.baseline_dir, test_name),
+            self.modified_table,
             callgrind.function_data_read(self.modified_dir, test_name),
             self.baseline_paths,
             self.modified_paths,

@@ -5,8 +5,11 @@
 window.report_preferences_ = window.try_catch_handler_(function () {
   "use strict";
 
-  const CALL_GRAPH_CUTOFF_LARGEST_PERCENT = settings_(
-    "CALL_GRAPH_CUTOFF_LARGEST_PERCENT",
+  const CALL_GRAPH_CUTOFF_DEFAULT_STOP = settings_(
+    "CALL_GRAPH_CUTOFF_DEFAULT_STOP",
+  );
+  const CALL_GRAPH_CUTOFF_LEAST_DEPTH = settings_(
+    "CALL_GRAPH_CUTOFF_LEAST_DEPTH",
   );
   const CALL_GRAPH_CUTOFF_STOP_COUNT = settings_(
     "CALL_GRAPH_CUTOFF_STOP_COUNT",
@@ -72,34 +75,36 @@ window.report_preferences_ = window.try_catch_handler_(function () {
   }
   const CALL_GRAPH_SORT_CHOICES = sort_choices(["name", "cumulative", "heat"]);
   const HEAT_SORT_CHOICES = sort_choices(["heat", "name"]);
-  // Lists the cutoff stop roots, evenly spaced, each squared a cutoff.
-  function call_graph_cutoff_stop_roots() {
-    // An odd count of more than one stop has a halfway stop, the default.
-    if (
-      CALL_GRAPH_CUTOFF_STOP_COUNT % 2 !== 1 ||
-      CALL_GRAPH_CUTOFF_STOP_COUNT < 3
-    )
+  // Lists the cutoff stop depths, the least first, each a level deeper.
+  function call_graph_cutoff_stop_depths() {
+    if (CALL_GRAPH_CUTOFF_STOP_COUNT < 2)
       window.throw_exception_(
         "str_error_setting_stop_count_unusable",
         "CALL_GRAPH_CUTOFF_STOP_COUNT",
         CALL_GRAPH_CUTOFF_STOP_COUNT,
       );
-    const least_root = Math.sqrt(window.report_ui_.smallest_printed_percent);
-    const most_root = Math.sqrt(CALL_GRAPH_CUTOFF_LARGEST_PERCENT);
-    const last_stop_index = CALL_GRAPH_CUTOFF_STOP_COUNT - 1;
+    if (
+      !Number.isInteger(CALL_GRAPH_CUTOFF_DEFAULT_STOP) ||
+      CALL_GRAPH_CUTOFF_DEFAULT_STOP < 0 ||
+      CALL_GRAPH_CUTOFF_DEFAULT_STOP >= CALL_GRAPH_CUTOFF_STOP_COUNT
+    )
+      window.throw_exception_(
+        "str_error_setting_stop_unusable",
+        "CALL_GRAPH_CUTOFF_DEFAULT_STOP",
+        CALL_GRAPH_CUTOFF_DEFAULT_STOP,
+        CALL_GRAPH_CUTOFF_STOP_COUNT,
+      );
     return Object.freeze(
       Array.from(
         { length: CALL_GRAPH_CUTOFF_STOP_COUNT },
-        (_, stop_index) =>
-          least_root +
-          ((most_root - least_root) * stop_index) / last_stop_index,
+        (_, stop_index) => CALL_GRAPH_CUTOFF_LEAST_DEPTH + stop_index,
       ),
     );
   }
-  const CALL_GRAPH_CUTOFF_STOP_ROOTS = call_graph_cutoff_stop_roots();
-  // Holds the default stop's root, the halfway stop's.
-  const CALL_GRAPH_CUTOFF_DEFAULT_ROOT =
-    CALL_GRAPH_CUTOFF_STOP_ROOTS[(CALL_GRAPH_CUTOFF_STOP_COUNT - 1) / 2];
+  const CALL_GRAPH_CUTOFF_STOP_DEPTHS = call_graph_cutoff_stop_depths();
+  // Holds the default stop's depth, the set count of stops past the least.
+  const CALL_GRAPH_CUTOFF_DEFAULT_DEPTH =
+    CALL_GRAPH_CUTOFF_STOP_DEPTHS[CALL_GRAPH_CUTOFF_DEFAULT_STOP];
   // Holds each line that is not a callgrind counter: its title and its kind.
   const NON_CALLGRIND_LINES = {
     [COUNTER_LIST_CALLEES_LINE_NAME]: {
@@ -280,7 +285,7 @@ window.report_preferences_ = window.try_catch_handler_(function () {
   // Shows preferences on the page, storing nothing, answering if they changed.
   function show(wanted_preferences) {
     const next_preferences = Object.freeze({
-      call_graph_cutoff_root: wanted_preferences.call_graph_cutoff_root,
+      call_graph_cutoff_depth: wanted_preferences.call_graph_cutoff_depth,
       call_graph_sort_mode: wanted_preferences.call_graph_sort_mode,
       counter_lists: Object.freeze(
         Object.fromEntries(
@@ -349,34 +354,46 @@ window.report_preferences_ = window.try_catch_handler_(function () {
       is_shown: list_kind.default_shown_names.includes(line_name),
     }));
   }
-  // Returns the stored list when that names each offered line, else default.
+  // Returns whether stored lines name each offered line once, shown or not.
+  function counter_lines_offered(stored_lines) {
+    const sorted_text = (line_names) => JSON.stringify([...line_names].sort());
+    return (
+      Array.isArray(stored_lines) &&
+      stored_lines.every(
+        (stored_line) =>
+          stored_line !== null &&
+          typeof stored_line === "object" &&
+          typeof stored_line.is_shown === "boolean",
+      ) &&
+      sorted_text(stored_lines.map((stored_line) => stored_line.line_name)) ===
+        sorted_text(DEFAULT_LINE_NAMES)
+    );
+  }
+  // Returns the stored list, the default when the user never chose one.
   function stored_counter_lines(list_kind) {
     const stored_lines = window.report_ui_.view_storage.value_read(
       list_kind.storage_key,
+      counter_lines_offered,
     );
-    const sorted_text = (line_names) => JSON.stringify([...line_names].sort());
-    const stored_names = Array.isArray(stored_lines)
-      ? stored_lines.map((stored_line) => stored_line.line_name)
-      : [];
-    const is_offered =
-      sorted_text(stored_names) === sorted_text(DEFAULT_LINE_NAMES);
-    return is_offered ? stored_lines : default_counter_lines(list_kind);
+    return stored_lines === null
+      ? default_counter_lines(list_kind)
+      : stored_lines;
   }
-  // Returns the stored choice when this report offers it, else the default.
+  // Returns the stored choice, the default when the user never chose one.
   function stored_choice(storage_key, offered_values, default_value) {
-    const stored_value =
-      window.report_ui_.view_storage.value_read(storage_key);
-    return offered_values.includes(stored_value)
-      ? stored_value
-      : default_value;
+    const stored_value = window.report_ui_.view_storage.value_read(
+      storage_key,
+      (chosen_value) => offered_values.includes(chosen_value),
+    );
+    return stored_value === null ? default_value : stored_value;
   }
   // Shows the stored preferences, each one the user never chose its default.
   function seed() {
     show({
-      call_graph_cutoff_root: stored_choice(
+      call_graph_cutoff_depth: stored_choice(
         STORAGE_KEY_CALL_GRAPH_CUTOFF,
-        CALL_GRAPH_CUTOFF_STOP_ROOTS,
-        CALL_GRAPH_CUTOFF_DEFAULT_ROOT,
+        CALL_GRAPH_CUTOFF_STOP_DEPTHS,
+        CALL_GRAPH_CUTOFF_DEFAULT_DEPTH,
       ),
       call_graph_sort_mode: stored_choice(
         STORAGE_KEY_CALL_GRAPH_SORT,
@@ -493,14 +510,14 @@ window.report_preferences_ = window.try_catch_handler_(function () {
     kept_lines.splice(anchor_index + (lands_after ? 1 : 0), 0, moved_line);
     counter_lines_choose(list_key, kept_lines);
   }
-  // Chooses a call graph cutoff, refusing a root that is not a stop.
-  function call_graph_cutoff_choose(cutoff_root) {
-    if (!CALL_GRAPH_CUTOFF_STOP_ROOTS.includes(cutoff_root))
+  // Chooses a call graph cutoff, refusing a depth that is not a stop.
+  function call_graph_cutoff_choose(cutoff_depth) {
+    if (!CALL_GRAPH_CUTOFF_STOP_DEPTHS.includes(cutoff_depth))
       window.throw_exception_("str_error_internal");
     preference_choose(
-      { call_graph_cutoff_root: cutoff_root },
+      { call_graph_cutoff_depth: cutoff_depth },
       STORAGE_KEY_CALL_GRAPH_CUTOFF,
-      cutoff_root,
+      cutoff_depth,
     );
   }
   function call_graph_sort_choose(sort_mode) {
@@ -528,7 +545,7 @@ window.report_preferences_ = window.try_catch_handler_(function () {
   return {
     activate,
     call_graph_cutoff_choose,
-    call_graph_cutoff_stop_roots: CALL_GRAPH_CUTOFF_STOP_ROOTS,
+    call_graph_cutoff_stop_depths: CALL_GRAPH_CUTOFF_STOP_DEPTHS,
     call_graph_sort_choices: CALL_GRAPH_SORT_CHOICES,
     call_graph_sort_choose,
     counter_choices,

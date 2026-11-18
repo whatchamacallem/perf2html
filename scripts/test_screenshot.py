@@ -447,6 +447,15 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         (),
         "Error: heat map requires functions=0 or functions=1",
     ),
+    ScreenshotSet(
+        _SHOOT_REGULAR_ONCE,
+        "#test=wssend&view=heat-map&function=ws_opensocket&functions=0",
+        "",
+        "error",
+        "function_lines_mode",
+        (),
+        "Error: url names function ws_opensocket together with functions=0",
+    ),
 )
 
 _MENU = test_settings.CLICK_MENU_FRAME_NAME
@@ -960,9 +969,17 @@ _CLICKS: tuple[ClickSet, ...] = (
                     KeyWalk(
                         "ArrowDown",
                         _VIEW,
-                        'tr.function-entry-[data-line-number-="708"]',
+                        'tr.function-entry-[data-line-number-="706"]',
                     ),
                 ),
+                _VIEW,
+                "Enter",
+                _MENU,
+                _HASH_STATE,
+            ),
+            ClickStep(
+                "heat map function body line",
+                (KeyWalk("ArrowDown", _VIEW, 'tr[data-line-number-="708"]'),),
                 _VIEW,
                 "Enter",
                 _MENU,
@@ -1119,12 +1136,11 @@ _CLICKS: tuple[ClickSet, ...] = (
             ),
             ClickStep(
                 "dark mode",
-                (_tab_to(_MENU, _entry_cell("str_menu_dark_mode_enabled")),),
+                (_tab_to(_MENU, _entry_cell("dark_mode")),),
                 _MENU,
                 "Enter",
                 _MENU,
-                "Boolean(document.querySelector("
-                "'[data-entry-name-=\"str_menu_dark_mode_enabled\"]'))",
+                _entry_text_state(_entry_cell("dark_mode")),
             ),
             ClickStep(
                 "scale",
@@ -1394,7 +1410,7 @@ _CLICKS: tuple[ClickSet, ...] = (
 
 # Drives one browser over its DevTools pipe, each tab in a fresh profile.
 class BrowserSession:
-    def __init__(self, browser: str) -> None:
+    def __init__(self) -> None:
         command_read_fd, command_write_fd = os.pipe()
         self.reply_read_fd, reply_write_fd = os.pipe()
 
@@ -1415,7 +1431,7 @@ class BrowserSession:
 
         self.browser_process = subprocess.Popen(
             [
-                browser,
+                test_settings.SCREENSHOT_BROWSER_PATH,
                 "--headless",
                 "--disable-gpu",
                 "--no-sandbox",
@@ -1615,8 +1631,6 @@ class PageTab:
         self.has_news = False
         # The frames out of view, which no shot shows.
         self.hidden_frames: set[str] = set()
-        # The top page's time of the input this settle follows, 0 for a load.
-        self.input_milliseconds = 0.0
         # Whether the frame a navigation opens started loading, after an input.
         self.is_started = False
         self.loading_frames: set[str] = set()
@@ -1795,14 +1809,6 @@ class PageTab:
             for child_tree in child_trees:
                 if not self.frame_shown(child_tree["frame"]):
                     self.hidden_frames.add(child_tree["frame"]["id"])
-            # A page logs its own load render and each new child page's.
-            render_count = int(is_new) + sum(
-                child_tree["frame"]["url"] != test_settings.BLANK_PAGE_URL
-                and child_tree["frame"]["id"] not in self.hidden_frames
-                and self.frame_contexts.get(child_tree["frame"]["id"])
-                not in self.earlier_contexts
-                for child_tree in child_trees
-            )
             try:
                 self.command(
                     "Runtime.evaluate",
@@ -1811,10 +1817,6 @@ class PageTab:
                             test_settings.PAGE_DRAWN_FUNCTION,
                             json.dumps(test_settings.PAGE_DRAWN_BINDING_NAME),
                             json.dumps(str(self.settle_count)),
-                            json.dumps(
-                                0 if is_new else self.input_milliseconds
-                            ),
-                            str(render_count),
                         ),
                         "contextId": context_id,
                     },
@@ -1859,13 +1861,6 @@ class PageTab:
         with open(image_path, "wb") as image_file:
             image_file.write(base64.b64decode(image_data))
 
-    # Begins a settle after an input, load renders counted from its time.
-    def input_settle_begin(self) -> None:
-        self.settle_begin()
-        self.input_milliseconds = self.frame_evaluate(
-            test_settings.CLICK_MENU_FRAME_NAME, "performance.now()"
-        )
-
     # Sends a key's press and release to whatever holds the focus.
     def key_send(self, key_name: str) -> None:
         key_press = test_settings.CLICK_KEY_PRESSES[key_name]
@@ -1890,7 +1885,7 @@ class PageTab:
 
     # Presses a key, returning once each frame drew after it.
     def key_settle(self, key_name: str) -> None:
-        self.input_settle_begin()
+        self.settle_begin()
         self.key_send(key_name)
         self.browser_session.settled_tab_wait([self])
 
@@ -1934,7 +1929,7 @@ class PageTab:
         state_before: str,
     ) -> None:
         state_context = self.frame_context(state_frame_name)
-        self.input_settle_begin()
+        self.settle_begin()
         self.key_send(key_name)
         try:
             state_change = self.command(
@@ -1970,7 +1965,6 @@ class PageTab:
         self.earlier_contexts = set(self.frame_contexts.values())
         self.has_news = True
         self.hidden_frames = set()
-        self.input_milliseconds = 0.0
         self.is_started = True
         self.loading_frames = set()
         self.pending_events = []
@@ -2009,7 +2003,7 @@ class PageTab:
 
     # Types text a key per character, returning once each frame drew after it.
     def text_type(self, typed_text: str) -> None:
-        self.input_settle_begin()
+        self.settle_begin()
         for typed_character in typed_text:
             self.command(
                 "Input.dispatchKeyEvent",
@@ -2093,14 +2087,17 @@ class PageTab:
 class Screenshots:
     def __init__(
         self,
-        browser_session: BrowserSession | None,
         report: str,
         report_flag: int,
         out_dir: str,
         compare_dir: str,
         scratch_dir: str,
+        chosen_shot: str,
     ) -> None:
-        self.browser_session = browser_session
+        # The browser session a shooting run opens, none in a compare only run.
+        self.browser_session: BrowserSession | None = None
+        # The one shot a single shot run takes, empty for every shot.
+        self.chosen_shot = chosen_shot
         self.report = report
         self.report_flag = report_flag
         self.out_dir = out_dir
@@ -2453,13 +2450,22 @@ class Screenshots:
         )
         if os.path.isdir(self.compare_dir):
             for file_name in os.listdir(self.compare_dir):
-                if file_name.startswith(
+                shot_file_name = file_name.removeprefix(
                     test_settings.COMPARE_IMAGE_PREFIX
-                ) and shot_pattern.fullmatch(
-                    file_name.removeprefix(test_settings.COMPARE_IMAGE_PREFIX)
+                )
+                if (
+                    file_name.startswith(test_settings.COMPARE_IMAGE_PREFIX)
+                    and shot_pattern.fullmatch(shot_file_name)
+                    and self.shot_is_taken(
+                        shot_file_name.removesuffix(test_settings.IMAGE_SUFFIX)
+                    )
                 ):
                     os.remove(os.path.join(self.compare_dir, file_name))
-        shot_names = self.shot_names(prefix)
+        shot_names = [
+            shot
+            for shot in self.shot_names(prefix)
+            if self.shot_is_taken(shot)
+        ]
         is_same = True
         for shot_name in shot_names:
             if not self.gold_compare_one(
@@ -2467,10 +2473,11 @@ class Screenshots:
             ):
                 is_same = False
         for file_name in sorted(os.listdir(gold_dir)):
+            gold_shot = file_name.removesuffix(test_settings.IMAGE_SUFFIX)
             if (
                 shot_pattern.fullmatch(file_name)
-                and file_name.removesuffix(test_settings.IMAGE_SUFFIX)
-                not in shot_names
+                and self.shot_is_taken(gold_shot)
+                and gold_shot not in shot_names
             ):
                 print(
                     f"{file_name}: in {gold_dir}, not among this run's shots"
@@ -2824,6 +2831,8 @@ class Screenshots:
         for view_index, view in self.report_views:
             if view.shot_flags & test_settings.SHOOT_INDEX_PAGE:
                 continue
+            if not self.view_is_taken(view_index, prefix, view):
+                continue
             if view.absent_files:
                 written += self.copy_shoot(view_index, prefix, view)
             else:
@@ -2838,7 +2847,9 @@ class Screenshots:
     ) -> int:
         written = 0
         for view_index, view in self.report_views:
-            if view.shot_flags & test_settings.SHOOT_INDEX_PAGE:
+            if view.shot_flags & test_settings.SHOOT_INDEX_PAGE and (
+                self.view_is_taken(view_index, prefix, view)
+            ):
                 written += self.view_shoot(
                     index_path,
                     view_index,
@@ -2872,6 +2883,30 @@ class Screenshots:
     # Names every shot of this report, the index page's too.
     def shot_names(self, prefix: str) -> list[str]:
         return [
+            shot
+            for view_index, view in self.report_views
+            if view.is_pictured(view_index)
+            for shot in self.view_shot_names(view_index, prefix, view)
+        ]
+
+    # Returns whether the run takes a shot, a single shot run its own alone.
+    def shot_is_taken(self, shot: str) -> bool:
+        return not self.chosen_shot or shot == self.chosen_shot
+
+    # Returns whether the run takes a shot of the view.
+    def view_is_taken(
+        self, view_index: int, prefix: str, view: ScreenshotSet
+    ) -> bool:
+        return any(
+            self.shot_is_taken(shot)
+            for shot in self.view_shot_names(view_index, prefix, view)
+        )
+
+    # Names the shots of one view, one for each of its variants.
+    def view_shot_names(
+        self, view_index: int, prefix: str, view: ScreenshotSet
+    ) -> list[str]:
+        return [
             self.shot_name(
                 view_index,
                 variant.size_name,
@@ -2879,8 +2914,6 @@ class Screenshots:
                 view,
                 variant.mode_name,
             )
-            for view_index, view in self.report_views
-            if view.is_pictured(view_index)
             for variant in view.shot_variants(view_index)
         ]
 
@@ -3334,6 +3367,7 @@ class Screenshots:
         )
         # Every shot of a page drawn in two frames is taken after its second.
         is_drawn_twice = bool(view.shot_flags & test_settings.SHOOT_TWO_FRAMES)
+        taken_count = 0
         for variant in shot_variants:
             shot = self.shot_name(
                 view_index,
@@ -3342,6 +3376,9 @@ class Screenshots:
                 view,
                 variant.mode_name,
             )
+            if not self.shot_is_taken(shot):
+                continue
+            taken_count += 1
             with browser_session.tab(
                 variant.width_px, variant.height_px
             ) as page_tab:
@@ -3382,14 +3419,13 @@ class Screenshots:
                     )
             # Only the first shot traces, so a page's timing is its 720p load.
             is_traced = False
-        return len(shot_variants) if is_pictured else 0
+        return taken_count if is_pictured else 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("report", help="a report directory to shoot")
     parser.add_argument("prefix", help="what every file name starts with")
-    parser.add_argument("--browser", default="", metavar="PATH")
     parser.add_argument(
         "--build-root",
         default="",
@@ -3428,6 +3464,7 @@ def main() -> int:
         help="where the PNGs go (default"
         f" tests/perf2html/{test_settings.SCREENSHOT_DIR_NAME})",
     )
+    parser.add_argument("--shot", default="", metavar="NAME")
     parser.add_argument(
         "--verbose",
         action="count",
@@ -3468,10 +3505,6 @@ def main() -> int:
         )
         return 2
 
-    if not namespace.browser and not namespace.compare_only:
-        print("error: shooting needs --browser", file=sys.stderr)
-        return 2
-
     if not namespace.build_root and not namespace.compare_only:
         print("error: shooting needs --build-root", file=sys.stderr)
         return 2
@@ -3495,26 +3528,44 @@ def main() -> int:
         else test_settings.SHOOT_REGULAR_REPORT
     )
     compare_dir = os.path.abspath(namespace.compare_out or out_dir)
+    shooter = Screenshots(
+        report, report_flag, out_dir, compare_dir, scratch_dir, namespace.shot
+    )
+    if namespace.shot and namespace.shot not in shooter.shot_names(
+        namespace.prefix
+    ):
+        print(
+            f"error: --shot {namespace.shot} names no shot of {report}",
+            file=sys.stderr,
+        )
+        return 2
+
     if namespace.compare_only:
-        Screenshots(
-            None, report, report_flag, out_dir, compare_dir, scratch_dir
-        ).gold_compare(gold_dir, namespace.prefix, namespace.verbose)
+        shooter.gold_compare(gold_dir, namespace.prefix, namespace.verbose)
         return 0
 
+    index_path = os.path.join(perf2html_dir, test_settings.INDEX_PAGE_NAME)
     os.makedirs(out_dir, exist_ok=True)
     if namespace.verbose:
         verbose_print(
             namespace.verbose, [f"{os.path.basename(report)} -> {out_dir}"]
         )
-    with BrowserSession(namespace.browser) as browser_session:
-        shooter = Screenshots(
-            browser_session,
-            report,
-            report_flag,
-            out_dir,
-            compare_dir,
-            scratch_dir,
-        )
+    # A single shot run takes its shot alone, checking and timing nothing.
+    if namespace.shot:
+        with BrowserSession() as browser_session:
+            shooter.browser_session = browser_session
+            written = shooter.shoot_all(namespace.prefix)
+            written += shooter.index_shoot(
+                namespace.prefix, index_path, namespace.index_hash
+            )
+        if namespace.verbose:
+            verbose_print(namespace.verbose, [f"{written} screenshot(s)"])
+        if namespace.compare_gold:
+            shooter.gold_compare(gold_dir, namespace.prefix, namespace.verbose)
+        return 0
+
+    with BrowserSession() as browser_session:
+        shooter.browser_session = browser_session
         shooter.test_views_check()
         written = shooter.shoot_all(namespace.prefix)
         shooter.clicks_time()
@@ -3528,15 +3579,10 @@ def main() -> int:
         ) as template_file:
             index_template = template_file.read()
         report_timings = shooter.index_write(
-            namespace.prefix,
-            os.path.join(perf2html_dir, test_settings.INDEX_PAGE_NAME),
-            index_template,
-            timing_rows,
+            namespace.prefix, index_path, index_template, timing_rows
         )
         written += shooter.index_shoot(
-            namespace.prefix,
-            os.path.join(perf2html_dir, test_settings.INDEX_PAGE_NAME),
-            namespace.index_hash,
+            namespace.prefix, index_path, namespace.index_hash
         )
     if namespace.verbose:
         verbose_print(namespace.verbose, [f"{written} screenshot(s)"])

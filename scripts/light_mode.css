@@ -47,7 +47,7 @@ table.heat-map-source-table- > tbody > tr:focus-visible > td {
 .heat-map-source-ticker-tape- {
   background: var(--light-mode-page-bg-);
 }
-.heat-map-source-ticker-tape-entry-:focus-visible {
+.heat-map-source-ticker-tape-entry-:focus {
   background: var(--light-mode-menu-focus-bg-) !important;
   color: var(--light-mode-menu-focus-fg-) !important;
 }
@@ -55,7 +55,7 @@ table.heat-map-source-table- > tbody > tr:focus-visible > td {
   background: var(--light-mode-page-bg-);
 }
 .heat-map-tree-node-:focus-visible,
-.call-graph-leaf-:focus-visible {
+.call-graph-plain-symbol-:focus-visible {
   background: var(--light-mode-menu-focus-bg-) !important;
   color: var(--light-mode-menu-focus-fg-) !important;
 }
@@ -96,8 +96,7 @@ body {
   background: var(--light-mode-status-bar-bg-);
   color: var(--light-mode-status-bar-fg-);
 }
-.menu-button-:focus-visible,
-.menu-button-[role="searchbox"]:focus,
+.menu-button-:focus,
 .menu-button-.flash-,
 .menu-button-.open-,
 .menu-button-.tool-tip-,
@@ -169,12 +168,6 @@ body {
   /* A table's lines: its sides, the titles' top and bottom, its own bottom. */
   table.table- {
     overflow-x: clip;
-    overflow-clip-margin: border-box;
-  }
-  table.table-,
-  .table- th,
-  .table- td {
-    border-inline-color: var(--light-mode-page-fg-);
   }
   table.table-::after,
   .table- th::before,
@@ -185,23 +178,39 @@ body {
     right: 0;
     border-top: var(--page-line-width-) solid var(--light-mode-page-fg-);
   }
-  .table- th::before {
-    top: 0;
+  /* A body cell's piece draws over all it holds, a box's fill among them. */
+  .table- td {
+    position: relative;
   }
+  .table- td::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    pointer-events: none;
+  }
+  /* A cell's left line over its own left edge, a row's last its right too. */
+  .table- th::before,
+  .table- td::after {
+    top: 0;
+    bottom: 0;
+    border-left: var(--page-line-width-) solid var(--light-mode-page-fg-);
+  }
+  .table- th:last-child::before,
+  .table- td:last-child::after {
+    right: 0;
+    border-right: var(--page-line-width-) solid var(--light-mode-page-fg-);
+  }
+  /* A box's tables take the source line as left. */
+  .heat-map-source-information-box- .table- th:first-child::before,
+  .heat-map-source-information-box- .table- td:first-child::after {
+    border-left: 0;
+  }
+  table.table-::after,
   .table- th::after {
     top: 100%;
   }
-  table.table-::after {
-    top: 100%;
-    left: calc(-1 * var(--page-line-width-));
-    right: calc(-1 * var(--page-line-width-));
-  }
-  /* A hovered row's frame, its sides on the side lines, its bottom below. */
-  table.table-::before {
-    left: calc(anchor(left) - var(--page-line-width-) / 2);
-    right: calc(anchor(right) - var(--page-line-width-) / 2);
-    bottom: calc(anchor(bottom) - var(--page-line-width-));
-    border-width: var(--page-line-width-);
+  table.table-::before,
+  #call-graph-table-::before {
     border-color: var(--light-mode-table-hover-outline-);
   }
   /* A box in a cell: its top, its bottom hung below, its sides the cell's. */
@@ -220,24 +229,16 @@ body {
   .heat-map-source-information-box-::after {
     top: 0;
   }
-  /* A box row's frame leaves its left side to the source column's line. */
-  .heat-map-source-information-box- table.table-::before {
-    left: calc(anchor(left) - var(--page-line-width-));
+  /* A line's box's lines lie at its room's ends, its tables between them. */
+  tr.heat-map-source-line-detail-row-
+    > td
+    > .heat-map-source-information-box-::before {
+    top: calc(100% + var(--heat-map-source-line-box-padding-block-));
   }
-  /* A hovered source line's frame starts at the tree's edge, in view. */
-  table.heat-map-source-table-::before {
-    left: calc(
-      anchor(--heat-map-source-hover-tree-cell- right) -
-        var(--page-line-width-) / 2
-    );
-  }
-  /* A hovered call graph row's frame, its bottom below, as in dark mode. */
-  #call-graph-table-::before {
-    left: anchor(left);
-    right: anchor(right);
-    bottom: calc(anchor(bottom) - var(--page-line-width-));
-    border-width: var(--page-line-width-);
-    border-color: var(--light-mode-table-hover-outline-);
+  tr.heat-map-source-line-detail-row-
+    > td
+    > .heat-map-source-information-box-::after {
+    top: calc(-1 * var(--heat-map-source-line-box-padding-block-));
   }
   /* A call graph node's frame runs from its multiple through its name. */
   #call-graph-table-

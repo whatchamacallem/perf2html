@@ -7,13 +7,16 @@ reports about the results.
 
 The latest version and an example report can be found here:
 
-- [Repository](https://github.com/whatchamacallem/perf2html)
 - [Example Report](https://whatchamacallem.github.io/perf2html/)
+
+The repo with the latest version is here:
+
+- [Repository](https://github.com/whatchamacallem/perf2html)
 
 ## Table Of Contents
 
 - [Using A Report](#using-a-report)
-- [Menu And Keyboard](#menu-and-keyboard)
+- [The Menu And Keyboard Input](#the-menu-and-keyboard-input)
 - [Running The Generator Scripts](#running-the-generator-scripts)
 - [Callgrind Counters](#callgrind-counters)
 - [Reading A Diff Report](#reading-a-diff-report)
@@ -40,12 +43,12 @@ possible).
 A report can also be served from an Ubuntu container with:
 `python3 -m http.server 8000`.
 
-## Menu And Keyboard
+## The Menu And Keyboard Input
 
-Some of the settings are stored in the browser and may be reset with the reset
-button. Pull-down buttons often support searching by typing or pasting text.
+The menu stores settings in the browser that may be reset with the reset
+button. In case you want to start over.
 
-### First menu row
+### First Menu Row
 
 The first row of buttons will have the same number on every page. The number
 can be used to select them, and some of them support searching within their
@@ -64,7 +67,7 @@ pull-downs by typing or pasting text.
 - `scale`: Scales the whole report, as do `+`, `-` and `=`.
 - `dark` / `light`: Toggles between the light and dark themes.
 
-### Status menu row
+### Status Menu Row
 
 These settings may be unique to a given page or shared.
 

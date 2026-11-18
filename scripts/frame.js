@@ -21,19 +21,7 @@ window.try_catch_handler_(function () {
     "SETTINGS_DEBUG_QUERY_KEY_NAME",
   );
   const SETTINGS_DEBUG_QUERY_VALUES = settings_("SETTINGS_DEBUG_QUERY_VALUES");
-  const SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES = settings_(
-    "SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES",
-  );
-  const SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES = settings_(
-    "SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES",
-  );
-  const SETTINGS_LOAD_LOG_HISTORY_MAX_LINES = settings_(
-    "SETTINGS_LOAD_LOG_HISTORY_MAX_LINES",
-  );
   const SETTINGS_VIEW_ENTRY = settings_("SETTINGS_VIEW_ENTRY");
-  const STORAGE_KEY_LOG_DISPLAY_LENGTH = settings_(
-    "STORAGE_KEY_LOG_DISPLAY_LENGTH",
-  );
 
   const home_panel = window.report_ui_.home_panel;
   const loaded_hash = location.hash;
@@ -53,8 +41,8 @@ window.try_catch_handler_(function () {
   let current_address = null;
   let focused_path_entries = [];
   let function_location = null;
-  let load_log_shown_count = null;
   let loaded_view_href = "";
+  let view_mode_link = null;
 
   function address_now() {
     return current_address;
@@ -66,6 +54,10 @@ window.try_catch_handler_(function () {
   // Returns the function location the heat map last sent, null before one.
   function function_location_now() {
     return function_location;
+  }
+  // Returns the drawn address and other mode place the heat map last sent.
+  function view_mode_link_now() {
+    return view_mode_link;
   }
   // Returns whether this report holds a view's page, a diff holding fewer.
   function view_has_page(view_key) {
@@ -222,7 +214,7 @@ window.try_catch_handler_(function () {
       }),
     );
   }
-  // Posts a message down carrying the dark mode and preferences shown.
+  // Posts a message down carrying the dark mode, status and preferences.
   function view_post(message_name, message_fields = {}) {
     if (message_name === "layout_reset")
       window.report_ui_.layout_reset(home_panel);
@@ -231,42 +223,12 @@ window.try_catch_handler_(function () {
         {
           report_ui: message_name,
           dark_mode_enabled: window.report_ui_.dark_mode_enabled_now_(),
+          status_bar_text: window.report_ui_.status_bar_text_now(),
           view_preferences: window.report_preferences_.now(),
           ...message_fields,
         },
         "*",
       );
-  }
-  // Shows the stored history count when offered, else its default.
-  function load_log_history() {
-    const stored_count = window.report_ui_.view_storage.value_read(
-      STORAGE_KEY_LOG_DISPLAY_LENGTH,
-    );
-    load_log_shown_count = SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES.includes(
-      stored_count,
-    )
-      ? stored_count
-      : SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES;
-  }
-  // Relays the newest history entries the view shows, and their count.
-  function load_log_relay_post() {
-    view_post("load_log_relay", {
-      load_log_entries: window.report_load_log_.newest_entries(
-        load_log_shown_count,
-      ),
-      load_log_line_count: load_log_shown_count,
-    });
-  }
-  // Stores the history count the view chose, then relays the history.
-  function load_log_history_set(line_count) {
-    if (!SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES.includes(line_count))
-      window.throw_exception_("str_error_internal");
-    window.report_ui_.view_storage.value_write(
-      STORAGE_KEY_LOG_DISPLAY_LENGTH,
-      line_count,
-    );
-    load_log_shown_count = line_count;
-    load_log_relay_post();
   }
   // Shows the shown view's chained bar the top page's sideways scroll.
   function page_scroll_post() {
@@ -286,6 +248,11 @@ window.try_catch_handler_(function () {
     function_location = sent_location;
     window.report_menu_.menu_render();
   }
+  // Holds the view mode link the view sent, then draws the menu with it.
+  function view_mode_link_set(sent_link) {
+    view_mode_link = sent_link;
+    window.report_menu_.menu_render();
+  }
   function view_message_handler(message_event) {
     const message_data = message_event.data;
     if (message_event.source !== view_frame.contentWindow || !message_data)
@@ -293,7 +260,7 @@ window.try_catch_handler_(function () {
     const message_tag = message_data.report_ui;
     if (message_tag === "address_request") address_request(message_data.hash);
     else if (message_tag === "call_graph_cutoff_choose")
-      window.report_menu_.call_graph_cutoff_choose(message_data.cutoff_root);
+      window.report_menu_.call_graph_cutoff_choose(message_data.cutoff_depth);
     else if (message_tag === "counter_line_move")
       window.report_menu_.counter_line_move(
         message_data.list_key,
@@ -308,9 +275,6 @@ window.try_catch_handler_(function () {
       function_location_set(message_data.function_location);
     else if (message_tag === "heat_sort_toggle")
       window.report_menu_.heat_sort_toggle();
-    else if (message_tag === "load_log_history_set")
-      load_log_history_set(message_data.line_count);
-    else if (message_tag === "load_log_request") load_log_relay_post();
     else if (message_tag === "menu_key_pressed")
       window.report_menu_.menu_key_handler(
         message_data.key,
@@ -330,9 +294,10 @@ window.try_catch_handler_(function () {
       settings_apply(message_data.setting_name, message_data.setting_value);
     else if (message_tag === "settings_debug_toggle")
       settings_debug_load(!SETTINGS_DEBUG_ENABLED);
+    else if (message_tag === "view_mode_link_set")
+      view_mode_link_set(message_data.view_mode_link);
     else if (
       message_tag !== undefined &&
-      message_tag !== "load_log_entry" &&
       message_tag !== "report_error" &&
       message_tag !== "settings_request"
     )
@@ -340,20 +305,6 @@ window.try_catch_handler_(function () {
   }
 
   function activate() {
-    if (
-      !SETTINGS_LOAD_LOG_HISTORY_LINE_CHOICES.includes(
-        SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES,
-      )
-    )
-      window.throw_exception_(
-        "str_error_setting_choice_unknown",
-        "SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES",
-        SETTINGS_LOAD_LOG_HISTORY_DEFAULT_LINES,
-      );
-    window.report_load_log_.kept_line_count_set(
-      SETTINGS_LOAD_LOG_HISTORY_MAX_LINES,
-    );
-    load_log_history();
     window.addEventListener(
       "hashchange",
       window.try_catch_handler_(hash_change_show),
@@ -364,7 +315,7 @@ window.try_catch_handler_(function () {
     );
     window.report_ui_.page_scroll.change_listen(page_scroll_post);
     view_show();
-    window.report_load_log_.page_render_log(() => {});
+    window.page_drawn_mark_();
   }
 
   window.report_frame_ = {
@@ -374,11 +325,11 @@ window.try_catch_handler_(function () {
     counter_names,
     focused_path_now,
     function_location_now,
-    load_log_history,
     menu_entry_number_now,
     settings_debug_clear,
     test_names,
     view_has_page,
+    view_mode_link_now,
     view_post,
   };
 })();

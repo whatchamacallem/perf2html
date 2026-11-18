@@ -342,7 +342,12 @@ tests_record() {
   for _index in "${!_TESTS[@]}"; do
     step_run "$((_index + 1))" "${_TESTS[_index]}" run_one "${_TESTS[_index]}"
   done
-  [ "$REGENERATE" = 1 ] || artifacts_verify recorded
+  [ "$REGENERATE" = 0 ] || return 0
+  step_run "$((${#_TESTS[@]} + 1))" tables page_tool_run \
+    callgrind_to_heatmap.py tables "--artifacts=$ARTIFACTS_DIR" \
+    "--report=$_OUT_DIR" "--build-output-dir=$_BUILD_OUTPUT_DIR" \
+    "${VERBOSE_FLAGS[@]}"
+  artifacts_verify recorded
 }
 
 timer_artifacts_write() {

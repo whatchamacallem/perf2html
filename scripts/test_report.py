@@ -11,7 +11,8 @@ from collections.abc import Sequence
 from typing import Any, NamedTuple, NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import callgrind, callgrind_diff, callgrind_to_heatmap, settings, test_settings
+import callgrind, callgrind_diff, callgrind_to_heatmap, function_declarations
+import settings, test_settings
 
 _FLAME_GRAPH_APP_DIR_NAME: str = ""
 _FLAME_GRAPH_EXPORTER_NAME: str = ""
@@ -1173,7 +1174,7 @@ class TestReport:
                     f" counts as {is_counted}, expected {is_wanted}"
                 )
 
-    # Checks a golden recording's function data document.
+    # Checks a golden recording's function table and function data.
     def function_data_builder_check(self) -> None:
         heat_map = callgrind_to_heatmap.CallgrindToHeatmap(0)
         try:
@@ -1181,13 +1182,24 @@ class TestReport:
                 test_settings.TEST_FUNCTION_DATA_RECORDING,
                 test_settings.TEST_FUNCTION_DATA_RECORDING_NAME,
             )
+            entries: dict[callgrind.FunctionKey, callgrind.SourceLine] = {}
+            heat_map.function_entries_add(
+                entries,
+                test_settings.TEST_FUNCTION_DATA_RECORDING_NAME,
+                profile,
+            )
+            table = heat_map.function_table(
+                entries,
+                heat_map.profile_path_infos(profile, None),
+                test_settings.TEST_FUNCTION_DATA_FILE_PATHS,
+                {},
+            )
             document = heat_map.function_data(
                 profile,
-                heat_map.profile_path_infos(profile, None),
                 {
-                    file_path: file_index
-                    for file_index, file_path in enumerate(
-                        test_settings.TEST_FUNCTION_DATA_FILE_PATHS
+                    key: index
+                    for index, key in enumerate(
+                        callgrind.function_table_keys(table)
                     )
                 },
             )
@@ -1197,14 +1209,24 @@ class TestReport:
                 f" {test_settings.TEST_FUNCTION_DATA_RECORDING_NAME}"
                 f" is refused: {error}"
             )
-        found = json.loads(json.dumps(document))
-        if found != test_settings.TEST_FUNCTION_DATA_DOCUMENT:
-            self.fail(
-                "the function data of"
-                f" {test_settings.TEST_FUNCTION_DATA_RECORDING_NAME} is"
-                f" {found}, expected"
-                f" {test_settings.TEST_FUNCTION_DATA_DOCUMENT}"
-            )
+        for label, found, wanted in (
+            (
+                "function table",
+                json.loads(json.dumps(table)),
+                test_settings.TEST_FUNCTION_DATA_TABLE,
+            ),
+            (
+                "function data",
+                json.loads(json.dumps(document)),
+                test_settings.TEST_FUNCTION_DATA_DOCUMENT,
+            ),
+        ):
+            if found != wanted:
+                self.fail(
+                    f"the {label} of"
+                    f" {test_settings.TEST_FUNCTION_DATA_RECORDING_NAME} is"
+                    f" {found}, expected {wanted}"
+                )
 
     # Checks a test's function data names and places as its heat map does.
     def function_data_check(
@@ -1274,19 +1296,20 @@ class TestReport:
             return file_path
         return f"{os.path.basename(image_path)}/{file_path}"
 
-    # Returns a function data document, its indexes and calls checked.
+    # Returns a test's function data, each row joined to its table row.
     def function_data_document_check(
         self, raw_data: TestReport.RawData, file_name: str, file_count: int
     ) -> dict[str, Any]:
+        table = self.function_table_check(raw_data, file_count)
         label = f"{raw_data.archive_name}'s {file_name}"
         text = raw_data.texts.get(file_name)
         if text is None:
             self.fail(f"{raw_data.archive_name} holds no {file_name}")
         try:
-            document = json.loads(text)
+            stored = json.loads(text)
         except ValueError as error:
             self.fail(f"{label} holds no JSON: {error}: {raw_data.path}")
-        found_keys = sorted(document) if isinstance(document, dict) else []
+        found_keys = sorted(stored) if isinstance(stored, dict) else []
         if found_keys != sorted(
             test_settings.TEST_FUNCTION_DATA_DOCUMENT_KEYS
         ):
@@ -1295,6 +1318,61 @@ class TestReport:
                 f" {sorted(test_settings.TEST_FUNCTION_DATA_DOCUMENT_KEYS)}:"
                 f" {raw_data.path}"
             )
+        index_field = test_settings.TEST_FUNCTION_DATA_STORED_INDEX_FIELD
+        row_indexes: dict[int, int] = {}
+        for row_index, stored_row in enumerate(stored["functions"]):
+            if (
+                len(stored_row)
+                != test_settings.TEST_FUNCTION_DATA_STORED_ROW_FIELDS
+                or not 0 <= stored_row[index_field] < len(table["functions"])
+                or stored_row[index_field] in row_indexes
+            ):
+                self.fail(
+                    f"{label} holds the row {stored_row}, expected"
+                    f" {test_settings.TEST_FUNCTION_DATA_STORED_ROW_FIELDS}"
+                    " fields, first a function of the"
+                    f" {len(table['functions'])} of"
+                    f" {test_settings.TEST_FUNCTION_TABLE_NAME} no other row"
+                    f" names: {raw_data.path}"
+                )
+            row_indexes[stored_row[index_field]] = row_index
+        pair_fields = test_settings.TEST_FUNCTION_DATA_CALL_PAIR_FIELDS
+        joined_rows: list[list[Any]] = []
+        for stored_row in stored["functions"]:
+            joined_calls: list[list[int]] = []
+            for calls_field in (
+                test_settings.TEST_FUNCTION_DATA_STORED_CALLERS_FIELD,
+                test_settings.TEST_FUNCTION_DATA_STORED_CALLEES_FIELD,
+            ):
+                joined_calls.append([])
+                call_numbers = stored_row[calls_field]
+                for pair_start in range(0, len(call_numbers), pair_fields):
+                    call_pair = call_numbers[
+                        pair_start : pair_start + pair_fields
+                    ]
+                    if call_pair[0] not in row_indexes:
+                        self.fail(
+                            f"{label} gives the row {stored_row} the call"
+                            f" {call_pair}, whose function no row names:"
+                            f" {raw_data.path}"
+                        )
+                    joined_calls[-1].extend(
+                        (row_indexes[call_pair[0]], *call_pair[1:])
+                    )
+            joined_rows.append(
+                [
+                    *table["functions"][stored_row[index_field]],
+                    stored_row[
+                        test_settings.TEST_FUNCTION_DATA_STORED_SELF_FIELD
+                    ],
+                    *joined_calls,
+                ]
+            )
+        document = {
+            "counters": stored["counters"],
+            "images": table["images"],
+            "functions": joined_rows,
+        }
         counter_count = len(document["counters"])
         image_count = len(document["images"])
         function_rows = document["functions"]
@@ -1502,25 +1580,82 @@ class TestReport:
                     )
         return side_names
 
+    # Checks golden dumps give each function its declaration and debug file.
+    def function_declarations_check(self) -> None:
+        image_path = test_settings.TEST_FUNCTION_DECLARATIONS_IMAGE
+        embedded_records, records, line_tables, ranges, symbols = (
+            dump.splitlines()
+            for dump in (
+                test_settings.TEST_FUNCTION_DECLARATIONS_EMBEDDED_RECORDS,
+                test_settings.TEST_FUNCTION_DECLARATIONS_RECORDS,
+                test_settings.TEST_FUNCTION_DECLARATIONS_LINE_TABLES,
+                test_settings.TEST_FUNCTION_DECLARATIONS_RANGES,
+                test_settings.TEST_FUNCTION_DECLARATIONS_SYMBOLS,
+            )
+        )
+        try:
+            _, embedded_file_path = function_declarations.debug_records_read(
+                embedded_records, image_path
+            )
+            debug_records, debug_file_path = (
+                function_declarations.debug_records_read(records, image_path)
+            )
+            declarations = function_declarations.declarations_read(
+                debug_records,
+                line_tables,
+                ranges,
+                symbols,
+                test_settings.TEST_FUNCTION_DECLARATIONS_NAMES,
+            )
+        except SystemExit as error:
+            self.fail(f"the golden dumps are refused: {error}")
+        if embedded_file_path != image_path:
+            self.fail(
+                f"the golden embedded dump is read from {embedded_file_path},"
+                f" expected {image_path}"
+            )
+        if (
+            debug_file_path
+            != test_settings.TEST_FUNCTION_DECLARATIONS_DEBUG_FILE
+        ):
+            self.fail(
+                f"the golden dump is read from {debug_file_path}, expected"
+                f" {test_settings.TEST_FUNCTION_DECLARATIONS_DEBUG_FILE}"
+            )
+        found = {
+            name: tuple(declaration)
+            for name, declaration in declarations.items()
+        }
+        if found != test_settings.TEST_FUNCTION_DECLARATIONS:
+            self.fail(
+                f"the golden dumps declare {found}, expected"
+                f" {test_settings.TEST_FUNCTION_DECLARATIONS}"
+            )
+
     # Checks two golden function data documents' diff and its refusals.
     def function_diff_check(self) -> None:
         try:
-            baseline_document, modified_document = (
-                callgrind.function_data_parse(json.dumps(document), name)
-                for document, name in (
+            sides = [
+                (
+                    callgrind.function_table_parse(json.dumps(table), name),
+                    callgrind.function_data_parse(json.dumps(document), name),
+                )
+                for table, document, name in (
                     (
+                        test_settings.TEST_FUNCTION_DIFF_BASELINE_TABLE,
                         test_settings.TEST_FUNCTION_DIFF_BASELINE_DOCUMENT,
                         test_settings.TEST_FUNCTION_DIFF_BASELINE_NAME,
                     ),
                     (
+                        test_settings.TEST_FUNCTION_DIFF_MODIFIED_TABLE,
                         test_settings.TEST_FUNCTION_DIFF_MODIFIED_DOCUMENT,
                         test_settings.TEST_FUNCTION_DIFF_MODIFIED_NAME,
                     ),
                 )
-            )
+            ]
             function_diff = callgrind_diff.CallgrindDiff.function_diff(
-                baseline_document,
-                modified_document,
+                *sides[0],
+                *sides[1],
                 list(test_settings.TEST_FUNCTION_DIFF_BASELINE_PATHS),
                 list(test_settings.TEST_FUNCTION_DIFF_MODIFIED_PATHS),
                 test_settings.TEST_FUNCTION_DIFF_BUILD_TREES,
@@ -1543,27 +1678,32 @@ class TestReport:
             )
         ambiguous_name = test_settings.TEST_FUNCTION_DIFF_AMBIGUOUS_NAME
         for image_sets in test_settings.TEST_FUNCTION_DIFF_AMBIGUOUS_CASES:
-            baseline_document, modified_document = (
-                callgrind.function_data_parse(
-                    json.dumps(
-                        {
-                            "counters": ["Ir"],
-                            "images": list(images),
-                            "functions": [
-                                [
-                                    ambiguous_name,
-                                    image_index,
-                                    0,
-                                    1,
-                                    [1],
-                                    [],
-                                    [],
-                                ]
-                                for image_index in range(len(images))
-                            ],
-                        }
+            sides = [
+                (
+                    callgrind.function_table_parse(
+                        json.dumps(
+                            {
+                                "images": list(images),
+                                "functions": [
+                                    [ambiguous_name, image_index, 0, 1]
+                                    for image_index in range(len(images))
+                                ],
+                            }
+                        ),
+                        name,
                     ),
-                    name,
+                    callgrind.function_data_parse(
+                        json.dumps(
+                            {
+                                "counters": ["Ir"],
+                                "functions": [
+                                    [image_index, [1], [], []]
+                                    for image_index in range(len(images))
+                                ],
+                            }
+                        ),
+                        name,
+                    ),
                 )
                 for images, name in zip(
                     image_sets,
@@ -1573,11 +1713,11 @@ class TestReport:
                     ),
                     strict=True,
                 )
-            )
+            ]
             try:
                 callgrind_diff.CallgrindDiff.function_diff(
-                    baseline_document,
-                    modified_document,
+                    *sides[0],
+                    *sides[1],
                     list(test_settings.TEST_FUNCTION_DIFF_AMBIGUOUS_PATHS),
                     list(test_settings.TEST_FUNCTION_DIFF_AMBIGUOUS_PATHS),
                     test_settings.TEST_FUNCTION_DIFF_BUILD_TREES,
@@ -1683,7 +1823,9 @@ class TestReport:
                 f" {error}"
             )
         found_lines = {
-            name: tuple(heat_map.function_line(profile, name))
+            name: tuple(
+                heat_map.function_line(profile.function_entry[name], None)
+            )
             for name in sorted(profile.function_home)
         }
         if found_lines != test_settings.TEST_FUNCTION_LINES:
@@ -1700,14 +1842,32 @@ class TestReport:
                 test_settings.TEST_FUNCTION_LINE_RECORDING_NAME,
             )
         except SystemExit:
-            return
-        self.fail(
-            "the parser takes"
-            f" {test_settings.TEST_FUNCTION_LINE_RECORDING_NAME} with"
-            f" {test_settings.TEST_FUNCTION_ENTRY_CONFLICT!r} after it, two"
-            " calls naming"
-            " one function at two entry lines"
-        )
+            pass
+        else:
+            self.fail(
+                "the parser takes"
+                f" {test_settings.TEST_FUNCTION_LINE_RECORDING_NAME} with"
+                f" {test_settings.TEST_FUNCTION_ENTRY_CONFLICT!r} after it,"
+                " two calls naming one function at two entry lines"
+            )
+        for (
+            entry,
+            declaration,
+            wanted,
+        ) in test_settings.TEST_FUNCTION_DECLARATION_CASES:
+            found = tuple(
+                heat_map.function_line(
+                    callgrind.SourceLine(*entry),
+                    None
+                    if declaration is None
+                    else callgrind.SourceLine(*declaration),
+                )
+            )
+            if found != wanted:
+                self.fail(
+                    f"a function entered at {entry} and declared at"
+                    f" {declaration} is placed at {found}, expected {wanted}"
+                )
 
     # Checks no function is listed both alone and under an image's name.
     def function_names_check(
@@ -1724,6 +1884,49 @@ class TestReport:
                     f"{label} lists {bare_name} both alone and under"
                     f" {image_name} as {name}: {path}"
                 )
+
+    # Returns an archive's function table, each row's fields checked.
+    def function_table_check(
+        self, raw_data: TestReport.RawData, file_count: int
+    ) -> dict[str, Any]:
+        file_name = test_settings.TEST_FUNCTION_TABLE_NAME
+        label = f"{raw_data.archive_name}'s {file_name}"
+        text = raw_data.texts.get(file_name)
+        if text is None:
+            self.fail(f"{label} is missing: {raw_data.path}")
+        try:
+            table = json.loads(text)
+        except ValueError as error:
+            self.fail(f"{label} holds no JSON: {error}: {raw_data.path}")
+        found_keys = sorted(table) if isinstance(table, dict) else []
+        if found_keys != sorted(test_settings.TEST_FUNCTION_TABLE_KEYS):
+            self.fail(
+                f"{label} holds the keys {found_keys}, expected"
+                f" {sorted(test_settings.TEST_FUNCTION_TABLE_KEYS)}:"
+                f" {raw_data.path}"
+            )
+        image_field = test_settings.TEST_FUNCTION_DATA_ROW_IMAGE_FIELD
+        name_field = test_settings.TEST_FUNCTION_DATA_ROW_NAME_FIELD
+        listed: set[tuple[str, int]] = set()
+        for table_row in table["functions"]:
+            if (
+                len(table_row) != test_settings.TEST_FUNCTION_TABLE_ROW_FIELDS
+                or not 0 <= table_row[image_field] < len(table["images"])
+                or not 0
+                <= table_row[test_settings.TEST_FUNCTION_DATA_ROW_FILE_FIELD]
+                < file_count
+                or (table_row[name_field], table_row[image_field]) in listed
+            ):
+                self.fail(
+                    f"{label} holds the row {table_row}, expected"
+                    f" {test_settings.TEST_FUNCTION_TABLE_ROW_FIELDS} fields,"
+                    f" an image of its {len(table['images'])}, a file of the"
+                    f" {file_count} of"
+                    f" {test_settings.TEST_PATHS_DOCUMENT_NAME} and a name"
+                    f" and image no other row has: {raw_data.path}"
+                )
+            listed.add((table_row[name_field], table_row[image_field]))
+        return table
 
     # Checks each listed call was recorded and each function ran in a file.
     def heat_map_calls_check(self, filed_model: Any, label: str) -> None:
@@ -2519,6 +2722,7 @@ class TestReport:
         self.diff_unknown_places_check()
         self.function_counted_check()
         self.function_data_builder_check()
+        self.function_declarations_check()
         self.function_diff_check()
         self.home_dir_check(out_dir)
         self.manifest_check(out_dir, layout)
@@ -2919,6 +3123,7 @@ class TestReport:
             path,
         )
         wanted_names = {
+            test_settings.TEST_FUNCTION_TABLE_NAME,
             test_settings.TEST_LIST_FILE_NAME,
             test_settings.TEST_PATHS_DOCUMENT_NAME,
             test_settings.TEST_TIMING_DOCUMENT_NAME,

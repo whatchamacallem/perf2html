@@ -6,7 +6,7 @@ window.ui_strings_ = (function () {
   "use strict";
   const STRINGS = {
     str_call_graph_cutoff: "cutoff",
-    str_call_graph_cutoff_log: "call graph cutoff {percent}",
+    str_call_graph_cutoff_log: "call graph cutoff depth {depth}",
     str_clip_ellipsis: "…",
     str_column_baseline_share: "vs baseline",
     str_column_branch_miss_ratio: "branch miss",
@@ -60,6 +60,8 @@ window.ui_strings_ = (function () {
       "url encodes a file this report never profiled: {0}",
     str_error_hash_function_conflicting:
       "url names function {0} together with a file or line",
+    str_error_hash_function_lines_mode:
+      "url names function {0} together with functions=0",
     str_error_hash_function_unknown:
       "url encodes a function address this report never recorded: {0}",
     str_error_hash_functions_unusable:
@@ -99,14 +101,19 @@ window.ui_strings_ = (function () {
     str_error_setting_choice_unknown:
       "setting {0} names a choice this report does not offer: {1}",
     str_error_setting_stop_count_unusable:
-      "setting {0} holds {1}, not an odd stop count above 1",
+      "setting {0} holds {1}, not a stop count above 1",
+    str_error_setting_stop_unusable:
+      "setting {0} holds {1}, not a stop index below {2}",
     str_error_setting_unknown: "no such setting: {0}",
     str_error_settings_debug_query_unusable:
       "the {0} query value came out as {1}, expected {2} or {3}",
     str_error_settings_values_unusable:
       "url part {0} holds no object of setting values",
+    str_error_stored_preference_unknown:
+      "stored preference error: {0}, clearing: {1}",
     str_error_strip_number_unusable:
       "no available strip entry is numbered {0}",
+    str_filter_matches_nothing: "Nothing matches filter...",
     str_flame_graph_page_title: "speedscope",
     str_function_list_cell_entry: "{function} ({share})",
     str_function_name_unknown: "?",
@@ -120,25 +127,10 @@ window.ui_strings_ = (function () {
     str_heat_map_tree_label: "files",
     str_information_box_close: "close",
     str_information_box_function: "function",
+    str_information_box_heading: "{test}: {title}",
     str_information_box_title: "{location} {function}",
     str_line_range: "{first}-{last}",
     str_line_self: "line self",
-    str_load_log_asset_entry: "[{time}ms] {page} loaded {asset}",
-    str_load_log_frame_entry:
-      "[{time}ms] {page} long frame {span}ms, {render}ms rendering",
-    str_load_log_input_entry:
-      "[{time}ms] {page} {event} {target}, painted after {span}ms",
-    str_load_log_load_entry: "[{time}ms] {page} load event",
-    str_load_log_parse_entry:
-      "[{time}ms] {page} parsed, {count} scripts loaded while parsing",
-    str_load_log_render_entry:
-      "[{time}ms] {page} {cause}, rendered after {span}ms",
-    str_load_log_script_entry:
-      "[{time}ms] {page} script {span}ms, {invoker}, {source}",
-    str_load_log_script_function_entry:
-      "[{time}ms] {page} script {span}ms, {invoker}, {function} in {source}",
-    str_load_log_scripts_entry:
-      "[{time}ms] {page} loaded {count} scripts in {span}ms, the last {asset}",
     str_location_cell: "{file}:{line}",
     str_menu_button: "{number} {label}",
     str_menu_counter_selected_mark: "◼ ",
@@ -160,18 +152,18 @@ window.ui_strings_ = (function () {
     str_no_samples: "no samples",
     str_no_samples_in_test: "This test recorded no samples for {name}.",
     str_not_in_repo: "not in this repo ({path})",
-    str_pulldown_drag_placeholder: "[search or drag]",
-    str_pulldown_placeholder: "[search]",
     str_report_name: "perf2html",
     str_scale_curve_linear: "linear scale",
     str_scale_curve_log: "log scale",
+    str_search_drag_placeholder: "[search or drag]",
+    str_search_placeholder: "[search]",
+    str_search_text: "[{search}]",
     str_settings_apply: "apply",
     str_settings_copy: "copy",
     str_settings_debug_query: "{name}={value}",
-    str_settings_load_log_history: "history: {count}",
     str_settings_paste: "paste",
-    str_slider_cell_after_stop: "▓",
-    str_slider_cell_before_stop: "▒",
+    str_slider_cell_after_stop: "▒",
+    str_slider_cell_before_stop: "▓",
     str_sort_alphabetical: "alphabetical",
     str_sort_cumulative_first: "cumulative first",
     str_sort_hottest_first: "hottest first",

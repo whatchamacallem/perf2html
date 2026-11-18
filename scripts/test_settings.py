@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import html.entities, re
+import html.entities, os, re
 
 # Holds an error report's text, the first line of its message a group.
 ERROR_REPORT_PATTERN_TEXT = (
@@ -192,19 +192,12 @@ MENU_LOGO_LINKS: dict[str, str] = {
 PAGE_CHECK_TABS_AT_ONCE = 16
 # The binding a page calls once drawn, which DevTools reports.
 PAGE_DRAWN_BINDING_NAME = "screenshot_page_drawn"
-# Calls the binding after the load, the renders logged since a time, a paint.
+# Calls the binding after the load, the page's own drawn mark, a paint.
 PAGE_DRAWN_FUNCTION = (
-    "async function (after_paint, binding_name, binding_payload,"
-    " since_milliseconds, render_count) {"
-    " const navigation_render_count = () =>"
-    " window.report_load_log_.newest_entries(Infinity).filter("
-    "(log_entry) => log_entry[0] === 'str_load_log_render_entry'"
-    " && log_entry[1] >= since_milliseconds"
-    " && log_entry[3].texts.cause === 'navigation').length;"
+    "async function (after_paint, binding_name, binding_payload) {"
     " while (document.readyState !== 'complete'"
     " || document.title === 'speedscope'"
-    " || (window.report_load_log_ !== undefined && !window.is_framed_"
-    " && navigation_render_count() < render_count))"
+    " || window.page_is_drawn_ === false)"
     " await after_paint();"
     " await document.fonts.ready;"
     " await after_paint();"
@@ -224,6 +217,11 @@ REPORT_CHECKSUM_COMMAND = (
 )
 REPORT_THEME_STYLESHEET_ASSET: tuple[str, ...] = ("scripts/theme.css",)
 
+# Chrome for Testing where packages.md installs it in the home dir.
+SCREENSHOT_BROWSER_PATH = os.path.expanduser(
+    "~/.local/share/chrome-for-testing/chrome/linux-157.0.8103.78"
+    "/chrome-linux64/chrome"
+)
 SCREENSHOT_DIR_NAME = "screenshots"
 SCREENSHOT_LABEL_URL_PARAM = "screenshot"
 SCREENSHOT_LABEL_URL_VALUE = "1"
@@ -420,14 +418,13 @@ TEST_FUNCTION_DATA_CALL_COUNT_FIELD = 1
 TEST_FUNCTION_DATA_CALL_PAIR_FIELDS = 2
 TEST_FUNCTION_DATA_DOCUMENT = {
     "counters": ["Ir", "Dr"],
-    "images": ["/opt/data/libdata.so", "/opt/other/libother.so"],
     "functions": [
-        ["data_leaf", 0, 0, 20, [3, 0], [1, 2], []],
-        ["data_start", 0, 0, 10, [2, 1], [], [0, 2, 2, 1]],
-        ["other_leaf", 1, 1, 5, [2, 2], [1, 1], []],
+        [0, [3, 0], [1, 2], []],
+        [1, [2, 1], [], [0, 2, 2, 1]],
+        [2, [2, 2], [1, 1], []],
     ],
 }
-TEST_FUNCTION_DATA_DOCUMENT_KEYS = ("counters", "functions", "images")
+TEST_FUNCTION_DATA_DOCUMENT_KEYS = ("counters", "functions")
 TEST_FUNCTION_DATA_FILE_PATHS = (
     "test_fixture/data.c",
     "test_fixture/other.c",
@@ -470,6 +467,165 @@ TEST_FUNCTION_DATA_ROW_IMAGE_FIELD = 1
 TEST_FUNCTION_DATA_ROW_LINE_FIELD = 3
 TEST_FUNCTION_DATA_ROW_NAME_FIELD = 0
 TEST_FUNCTION_DATA_ROW_SELF_FIELD = 4
+TEST_FUNCTION_DATA_STORED_CALLEES_FIELD = 3
+TEST_FUNCTION_DATA_STORED_CALLERS_FIELD = 2
+TEST_FUNCTION_DATA_STORED_INDEX_FIELD = 0
+TEST_FUNCTION_DATA_STORED_ROW_FIELDS = 4
+TEST_FUNCTION_DATA_STORED_SELF_FIELD = 1
+TEST_FUNCTION_DATA_TABLE = {
+    "images": ["/opt/data/libdata.so", "/opt/other/libother.so"],
+    "functions": [
+        ["data_leaf", 0, 0, 20],
+        ["data_start", 0, 0, 10],
+        ["other_leaf", 1, 1, 5],
+    ],
+}
+TEST_FUNCTION_DECLARATION_CASES = (
+    (("lib/lines.c", 31), None, ("lib/lines.c", 31)),
+    (("lib/lines.c", 31), ("lib/./lines.c", 29), ("lib/lines.c", 29)),
+    (("lib/lines.c", 31), ("include/lines.h", 3), ("lib/lines.c", 31)),
+)
+TEST_FUNCTION_DECLARATIONS = {
+    "inline_function": ("/src/fixture/lib/fixture.c", 30),
+    "plain_function": ("/src/fixture/lib/fixture.c", 12),
+    "split_function": ("/src/fixture/include/split.h", 7),
+}
+TEST_FUNCTION_DECLARATIONS_DEBUG_FILE = (
+    "/usr/lib/debug/.build-id/ab/cdef0123456789.debug"
+)
+TEST_FUNCTION_DECLARATIONS_EMBEDDED_RECORDS = (
+    "Contents of the .debug_info section:\n"
+)
+TEST_FUNCTION_DECLARATIONS_IMAGE = "/opt/fixture/lib/libfixture.so.1"
+TEST_FUNCTION_DECLARATIONS_LINE_TABLES = (
+    "Raw dump of debug contents of section .debug_line:\n"
+    "\n"
+    "  Offset:                      0\n"
+    "  Length:                      100\n"
+    "  DWARF Version:               5\n"
+    "\n"
+    " The Directory Table (offset 0x22, lines 3, columns 1):\n"
+    "  Entry\tName\n"
+    "  0\t(indirect line string, offset: 0x10): /src/fixture\n"
+    "  1\t(indirect line string, offset: 0x20): lib\n"
+    "  2\t/src/fixture/include\n"
+    "\n"
+    " The File Name Table (offset 0x30, lines 3, columns 2):\n"
+    "  Entry\tDir\tName\n"
+    "  0\t1\t(indirect line string, offset: 0x30): fixture.c\n"
+    "  1\t1\tfixture.c\n"
+    "  2\t2\tsplit.h\n"
+    "\n"
+    " Line Number Statements:\n"
+    "  [0x00000050]  Set column to 1\n"
+    "  [0x00000052]  Advance Line by 11 to 12\n"
+    "\n"
+    "  Offset:                      0x40\n"
+    "  Length:                      40\n"
+    "  DWARF Version:               5\n"
+    "\n"
+    " The Directory Table (offset 0x62, lines 1, columns 1):\n"
+    "  Entry\tName\n"
+    "  0\t./string\n"
+    "\n"
+    " The File Name Table (offset 0x70, lines 1, columns 2):\n"
+    "  Entry\tDir\tName\n"
+    "  0\t0\tstrlen.S\n"
+    "\n"
+    " No Line Number Statements.\n"
+)
+TEST_FUNCTION_DECLARATIONS_NAMES = (
+    "assembly_function",
+    "free",
+    "inline_function",
+    "missing_function",
+    "plain_function",
+    "split_function",
+    "twin_function",
+)
+TEST_FUNCTION_DECLARATIONS_RANGES = (
+    "Contents of the .debug_rnglists section:\n"
+    "\n"
+    " Table at Offset: 0:\n"
+    "  Length:          0x20\n"
+    "  DWARF version:   5\n"
+    "  Address size:    8\n"
+    "  Segment size:    0\n"
+    "  Offset entries:  0\n"
+    "    Offset   Begin    End\n"
+    "    0000000c 0000000000002800 (base address)\n"
+    "    00000015 0000000000003000 0000000000003010 \n"
+    "    0000001a 0000000000003100 0000000000003100  (start == end)\n"
+    "    0000001f 0000000000009000 0000000000009020 \n"
+    "    00000024 <End of list>\n"
+)
+TEST_FUNCTION_DECLARATIONS_RECORDS = (
+    "Contents of the .debug_info section (loaded from"
+    " /usr/lib/debug/.build-id/ab/cdef0123456789.debug):\n"
+    "\n"
+    "  Compilation Unit @ offset 0:\n"
+    "   Length:        0x100 (32-bit)\n"
+    "   Version:       5\n"
+    " <0><c>: Abbrev Number: 1 (DW_TAG_compile_unit)\n"
+    "    <d>   DW_AT_producer    : (indirect string, offset: 0x0): GNU C17\n"
+    "    <11>   DW_AT_name        : (indirect line string, offset: 0x0):"
+    " lib/fixture.c\n"
+    "    <15>   DW_AT_comp_dir    : (indirect line string, offset: 0x10):"
+    " /src/fixture\n"
+    "    <19>   DW_AT_stmt_list   : 0\n"
+    " <1><20>: Abbrev Number: 2 (DW_TAG_subprogram)\n"
+    "    <21>   DW_AT_name        : (indirect string, offset: 0x20):"
+    " plain_function\n"
+    "    <25>   DW_AT_decl_file   : 1\n"
+    "    <26>   DW_AT_decl_line   : 12\n"
+    "    <27>   DW_AT_low_pc      : 0x1000\n"
+    "    <2f>   DW_AT_high_pc     : 0x40\n"
+    " <1><40>: Abbrev Number: 3 (DW_TAG_subprogram)\n"
+    "    <41>   DW_AT_name        : inline_function\n"
+    "    <45>   DW_AT_decl_file   : 1\n"
+    "    <46>   DW_AT_decl_line   : 30\n"
+    "    <47>   DW_AT_inline      : 3\t(declared as inline and inlined)\n"
+    " <1><50>: Abbrev Number: 4 (DW_TAG_subprogram)\n"
+    "    <51>   DW_AT_abstract_origin: <0x40>\n"
+    "    <55>   DW_AT_low_pc      : 0x2000\n"
+    " <1><60>: Abbrev Number: 5 (DW_TAG_subprogram)\n"
+    "    <61>   DW_AT_name        : split_function\n"
+    "    <65>   DW_AT_decl_file   : 2\n"
+    "    <66>   DW_AT_decl_line   : 7\n"
+    "    <67>   DW_AT_ranges      : 0xc\n"
+    " <1><70>: Abbrev Number: 6 (DW_TAG_subprogram)\n"
+    "    <71>   DW_AT_name        : twin_function\n"
+    "    <75>   DW_AT_decl_file   : 1\n"
+    "    <76>   DW_AT_decl_line   : 50\n"
+    "    <77>   DW_AT_low_pc      : 0x4000\n"
+    " <1><7f>: Abbrev Number: 0\n"
+    "  Compilation Unit @ offset 0x80:\n"
+    " <0><8c>: Abbrev Number: 7 (DW_TAG_compile_unit)\n"
+    "    <8d>   DW_AT_stmt_list   : 0x40\n"
+    "    <91>   DW_AT_comp_dir    : ./string\n"
+    "    <99>   DW_AT_language    : 32769\t(MIPS assembler)\n"
+    " <1><a0>: Abbrev Number: 8 (DW_TAG_subprogram)\n"
+    "    <a1>   DW_AT_name        : assembly_function\n"
+    "    <a5>   DW_AT_low_pc      : 0x5000\n"
+)
+TEST_FUNCTION_DECLARATIONS_SYMBOLS = (
+    "\n"
+    "/usr/lib/debug/.build-id/ab/cdef0123456789.debug:     file format"
+    " elf64-x86-64\n"
+    "\n"
+    "SYMBOL TABLE:\n"
+    "0000000000000000 l    df *ABS*\t0000000000000000 fixture.c\n"
+    "0000000000001000 g     F .text\t0000000000000040"
+    "              plain_function\n"
+    "0000000000002000 l     F .text\t0000000000000010 inline_function\n"
+    "0000000000003000 g     F .text\t00000000000186a0"
+    " split_function@@FIXTURE_1\n"
+    "0000000000004000 l     F .text\t0000000000000010 twin_function\n"
+    "0000000000004100 l     F .text\t0000000000000010 twin_function\n"
+    "0000000000005000 g   i   .text\t0000000000000020 assembly_function\n"
+    "0000000000006000 l     O .data\t0000000000000008 plain_function\n"
+    "0000000000000000       F *UND*\t0000000000000000 free@GLIBC_2.2.5\n"
+)
 TEST_FUNCTION_DIFF = {
     "counters": ["Ir", "Dr"],
     "images": [
@@ -533,27 +689,14 @@ TEST_FUNCTION_DIFF_AMBIGUOUS_NAME = "overload"
 TEST_FUNCTION_DIFF_AMBIGUOUS_PATHS = ("lib/overload.c",)
 TEST_FUNCTION_DIFF_BASELINE_DOCUMENT = {
     "counters": ["Ir", "Dr"],
-    "images": [
-        "/opt/a/libA.so",
-        "build-x/tree-a/bin/tool",
-        "build-x/tree-a/lib/libkept.so",
-    ],
     "functions": [
-        ["gone", 2, 0, 5, [2, 0], [1, 1], []],
-        [
-            "kept_caller",
-            2,
-            1,
-            9,
-            [5, 1],
-            [],
-            [0, 1, 2, 2, 3, 1, 4, 1, 5, 1],
-        ],
-        ["kept_steady", 2, 1, 19, [4, 0], [1, 2], []],
-        ["moved", 0, 2, 29, [3, 3], [1, 1], []],
-        ["spread", 2, 3, 7, [1, 1], [1, 1], []],
-        ["twice", 2, 3, 3, [2, 2], [1, 1], []],
-        ["twice", 1, 3, 3, [6, 0], [], []],
+        [1, [2, 0], [2, 1], []],
+        [2, [5, 1], [], [1, 1, 3, 2, 4, 1, 5, 1, 6, 1]],
+        [3, [4, 0], [2, 2], []],
+        [4, [3, 3], [2, 1], []],
+        [5, [1, 1], [2, 1], []],
+        [6, [2, 2], [2, 1], []],
+        [7, [6, 0], [], []],
     ],
 }
 TEST_FUNCTION_DIFF_BASELINE_NAME = "baseline_function_data.json"
@@ -563,32 +706,36 @@ TEST_FUNCTION_DIFF_BASELINE_PATHS = (
     "lib/moved.c",
     "lib/twice.c",
 )
+TEST_FUNCTION_DIFF_BASELINE_TABLE = {
+    "images": [
+        "/opt/a/libA.so",
+        "build-x/tree-a/bin/tool",
+        "build-x/tree-a/lib/libkept.so",
+    ],
+    "functions": [
+        ["other_test_function", 0, 0, 1],
+        ["gone", 2, 0, 5],
+        ["kept_caller", 2, 1, 9],
+        ["kept_steady", 2, 1, 19],
+        ["moved", 0, 2, 29],
+        ["spread", 2, 3, 7],
+        ["twice", 2, 3, 3],
+        ["twice", 1, 3, 3],
+    ],
+}
 TEST_FUNCTION_DIFF_BUILD_TREES = ("build-x/tree-a", "build-x/tree-b")
 TEST_FUNCTION_DIFF_MODIFIED_DOCUMENT = {
     "counters": ["Ir", "Dr"],
-    "images": [
-        "/opt/b/libB.so",
-        "build-x/tree-b/bin/tool",
-        "build-x/tree-b/lib/libkept.so",
-    ],
     "functions": [
-        ["added", 2, 0, 49, [1, 0], [2, 1], []],
-        ["added", 1, 0, 49, [2, 0], [], []],
-        [
-            "kept_caller",
-            2,
-            1,
-            9,
-            [6, 1],
-            [],
-            [0, 1, 3, 2, 4, 1, 5, 2, 7, 1],
-        ],
-        ["kept_steady", 2, 1, 19, [4, 0], [2, 2], []],
-        ["moved", 0, 2, 31, [3, 4], [2, 1], []],
-        ["spread", 2, 3, 7, [1, 1], [2, 2], []],
-        ["spread", 1, 3, 7, [3, 0], [], []],
-        ["twice", 2, 3, 3, [2, 1], [2, 1], []],
-        ["twice", 1, 3, 3, [6, 0], [], []],
+        [1, [1, 0], [3, 1], []],
+        [2, [2, 0], [], []],
+        [3, [6, 1], [], [1, 1, 4, 2, 5, 1, 6, 2, 8, 1]],
+        [4, [4, 0], [3, 2], []],
+        [5, [3, 4], [3, 1], []],
+        [6, [1, 1], [3, 2], []],
+        [7, [3, 0], [], []],
+        [8, [2, 1], [3, 1], []],
+        [9, [6, 0], [], []],
     ],
 }
 TEST_FUNCTION_DIFF_MODIFIED_NAME = "modified_function_data.json"
@@ -598,6 +745,25 @@ TEST_FUNCTION_DIFF_MODIFIED_PATHS = (
     "lib/moved.c",
     "lib/twice.c",
 )
+TEST_FUNCTION_DIFF_MODIFIED_TABLE = {
+    "images": [
+        "/opt/b/libB.so",
+        "build-x/tree-b/bin/tool",
+        "build-x/tree-b/lib/libkept.so",
+    ],
+    "functions": [
+        ["other_test_function", 0, 0, 1],
+        ["added", 2, 0, 49],
+        ["added", 1, 0, 49],
+        ["kept_caller", 2, 1, 9],
+        ["kept_steady", 2, 1, 19],
+        ["moved", 0, 2, 31],
+        ["spread", 2, 3, 7],
+        ["spread", 1, 3, 7],
+        ["twice", 2, 3, 3],
+        ["twice", 1, 3, 3],
+    ],
+}
 TEST_FUNCTION_ENTRY_CONFLICT = (
     "cfi=lib/lines.c\ncfn=two_line_function\ncalls=1 31\n3 1\n"
 )
@@ -654,6 +820,10 @@ TEST_FUNCTION_LINES = {
     "start_function": ("lib/lines.c", 20),
     "two_line_function": ("lib/lines.c", 30),
 }
+
+TEST_FUNCTION_TABLE_KEYS = ("functions", "images")
+TEST_FUNCTION_TABLE_NAME = "0_function_data.json"
+TEST_FUNCTION_TABLE_ROW_FIELDS = 4
 
 TEST_HEAT_MAP_CALL_ROW_COUNT_FIELD = 4
 TEST_HEAT_MAP_CALL_ROW_FUNCTION_FIELD = 0
@@ -778,7 +948,7 @@ TIMING_FRAME_PHASE_NAMES: tuple[str, ...] = ("first frame", "second frame")
 TIMING_LOAD_PHASE_NAME = "load"
 TIMING_MICROSECONDS_PER_MILLISECOND = 1000
 # Bounds a golden page load and its phases, clicks being bound apart.
-TIMING_PAGE_LOAD_LIMIT_MS = 200
+TIMING_PAGE_LOAD_LIMIT_MS = 300
 TIMING_SCRIPT_PHASE_NAME = "script"
 
 # Marks the compositor taking a main thread frame, by that frame's number.

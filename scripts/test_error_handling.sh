@@ -40,7 +40,6 @@ _TEST_VERBOSE_DOCUMENT="$PERF2HTML_DIR_/test_verbose.md"
 
 _TEST_ERROR_MARKDOWN_FORMATTER=prettier
 _PRETTIER_CONFIG="$_SCRIPT_DIR/.prettierrc.json"
-_TEST_ERROR_MARKDOWN_FORMATTER_INSTALL="npm install -g prettier"
 
 _TEST_ERROR_BASELINE_REPORT="$PERF2HTML_DIR_/perf2html_baseline_report"
 _TEST_ERROR_MODIFIED_REPORT="$PERF2HTML_DIR_/perf2html_modified_report"
@@ -170,19 +169,17 @@ test_error_relink_regenerate_run() {
 }
 
 test_error_markdown_formatter_check() {
-  _PRETTIER="$(tool_find "$_TEST_ERROR_MARKDOWN_FORMATTER")" && return 0
-  {
-    echo "error: 1 tool(s) missing, so" \
-      "$(path_shown "$_TEST_VERBOSE_DOCUMENT") is not checked:" \
-      "$_TEST_ERROR_MARKDOWN_FORMATTER"
-    echo "  $_TEST_ERROR_MARKDOWN_FORMATTER_INSTALL"
-  } >&2
+  local _admin="$PERF2HTML_DIR_/$ADMIN_INSTRUCTIONS_FILE_NAME"
+  [ -x "$PRETTIER_PATH" ] && return 0
+  echo "error: 1 tool(s) missing, so" \
+    "$(path_shown "$_TEST_VERBOSE_DOCUMENT") is not checked:" \
+    "$PRETTIER_PATH, install commands in $_admin" >&2
   exit 127
 }
 
 test_error_markdown_check_run() {
   local _code=0
-  "$_PRETTIER" --config "$_PRETTIER_CONFIG" \
+  "$PRETTIER_PATH" --config "$_PRETTIER_CONFIG" \
     --log-level warn --check "$_TEST_VERBOSE_DOCUMENT" || _code=$?
   if [ "$_code" != 0 ]; then
     printf 'FAILED: %s --check exited %s on %s\n' \

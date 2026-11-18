@@ -247,19 +247,42 @@ window.try_catch_handler_(function () {
     storage_sweep(owned_keys);
     localStorage.setItem(version_key, storage_version);
   }
+  // Clears every stored preference, so the next load opens, then refuses one.
+  function stored_value_refuse(settings_values, storage_key, stored_text) {
+    storage_sweep(setting_read(settings_values, "STORAGE_OWNED_KEYS"));
+    window.throw_exception_(
+      "str_error_stored_preference_unknown",
+      storage_key,
+      stored_text,
+    );
+  }
   // Reads a stored preference, null for none or under ignored preferences.
   function stored_value_read(settings_values, storage_key) {
     storage_version_check(settings_values);
     if (preferences_are_ignored) return null;
-    return JSON.parse(localStorage.getItem(storage_key));
+    const stored_text = localStorage.getItem(storage_key);
+    try {
+      return JSON.parse(stored_text);
+    } catch (parse_error) {
+      if (!(parse_error instanceof SyntaxError)) throw parse_error;
+      stored_value_refuse(settings_values, storage_key, stored_text);
+    }
   }
   const view_storage = {
     preferences_clear() {
       storage_version_check(settings_object);
       storage_sweep(settings_("STORAGE_OWNED_KEYS"));
     },
-    value_read(storage_key) {
-      return stored_value_read(settings_object, storage_key);
+    // Reads a stored preference, null for none, a value not offered refused.
+    value_read(storage_key, value_is_offered) {
+      const stored_value = stored_value_read(settings_object, storage_key);
+      if (stored_value !== null && !value_is_offered(stored_value))
+        stored_value_refuse(
+          settings_object,
+          storage_key,
+          JSON.stringify(stored_value),
+        );
+      return stored_value;
     },
     value_write(storage_key, stored_value) {
       storage_version_check(settings_object);
