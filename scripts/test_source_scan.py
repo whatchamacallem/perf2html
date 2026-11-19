@@ -36,6 +36,18 @@ class SourceScan:
         self.escape_patterns = [
             (rule, re.compile(rule.pattern)) for rule in _ESCAPE_RULES
         ]
+        missing_patterns = (
+            test_settings.SOURCE_SCAN_SUPPORT_FLOOR_MISSING_PATTERNS
+        )
+        self.missing_patterns = [
+            re.compile(pattern) for pattern in missing_patterns
+        ]
+        self.paired_patterns = [
+            (re.compile(pattern), re.compile(older_pattern))
+            for pattern, older_pattern in (
+                test_settings.SOURCE_SCAN_SUPPORT_FLOOR_PAIRED_PATTERNS.items()
+            )
+        ]
 
     def banned_tag_re(self) -> re.Pattern[str]:
         names = "|".join(test_settings.SOURCE_SCAN_BANNED_TAG_NAMES)
@@ -128,7 +140,9 @@ class SourceScan:
                     f" {test_settings.COMMENT_BLOCK_MAX_LINES} lines, no stray"
                     " non-ASCII,"
                     " no unicode escape, no banned tag, no comment outside"
-                    " ENGLISH_PUNCT, no comment opening with a banned word"
+                    " ENGLISH_PUNCT, no comment opening with a banned word,"
+                    " no feature"
+                    f" {test_settings.SOURCE_SCAN_SUPPORT_FLOOR_BROWSER} lacks"
                 )
             return 0
         for fault in sorted(self.faults):
@@ -157,6 +171,10 @@ class SourceScan:
         self.escape_check(path, lines)
         self.tag_check(path, lines, banned_tag)
         self.comment_check(path, comments, header_end)
+        if path.endswith(test_settings.SOURCE_SCAN_SUPPORT_FLOOR_EXTENSIONS):
+            self.support_floor_check(path, lines)
+        if path.endswith(".css"):
+            self.nesting_check(path, text)
         self.first_word_check(path, lines, comments, header_end, first_word)
         self.punctuation_check(
             path, lines, comments, header_end, comment_cut, outside_punctuation
@@ -238,6 +256,34 @@ class SourceScan:
             header_end = comment.last_line + 1
         return header_end
 
+    def nesting_check(self, path: str, text: str) -> None:
+        # Comments and strings become spaces, so no brace in them counts.
+        code = re.sub(
+            r"/\*[\s\S]*?\*/|\"[^\"\n]*\"|'[^'\n]*'",
+            lambda cut: re.sub(r"[^\n]", " ", cut.group()),
+            text,
+        )
+        preludes: list[str] = []
+        prelude_start = 0
+        for match in re.finditer(r"[{};]", code):
+            mark = match.group()
+            if mark == "{":
+                if preludes and not preludes[-1].startswith("@"):
+                    floor_browser = (
+                        test_settings.SOURCE_SCAN_SUPPORT_FLOOR_BROWSER
+                    )
+                    self.faults.append(
+                        SourceScan.SourceFault(
+                            path,
+                            code.count("\n", 0, match.start()) + 1,
+                            f"nests a rule, which {floor_browser} lacks",
+                        )
+                    )
+                preludes.append(code[prelude_start : match.start()].strip())
+            elif mark == "}":
+                preludes.pop()
+            prelude_start = match.end()
+
     def non_ascii_re(self) -> re.Pattern[str]:
         allowed = "".join(test_settings.SOURCE_SCAN_ALLOWED_NON_ASCII_CHARS)
         return re.compile(r"[^\t\n\r -~" + allowed + r"]")
@@ -272,6 +318,36 @@ class SourceScan:
                             comment.first_line + offset,
                             f"comment holds {match.group()!r} outside"
                             " ENGLISH_PUNCT",
+                        )
+                    )
+
+    def support_floor_check(self, path: str, lines: list[str]) -> None:
+        floor_browser = test_settings.SOURCE_SCAN_SUPPORT_FLOOR_BROWSER
+        for line_number, line in enumerate(lines, start=1):
+            for pattern in self.missing_patterns:
+                match = pattern.search(line)
+                if match:
+                    self.faults.append(
+                        SourceScan.SourceFault(
+                            path,
+                            line_number,
+                            f"uses {match.group()!r}, which {floor_browser}"
+                            f" lacks: {line.strip()}",
+                        )
+                    )
+            for pattern, older_pattern in self.paired_patterns:
+                match = pattern.search(line)
+                if match and not (
+                    line_number > 1
+                    and older_pattern.search(lines[line_number - 2])
+                ):
+                    self.faults.append(
+                        SourceScan.SourceFault(
+                            path,
+                            line_number,
+                            f"uses {match.group()!r} without the line before"
+                            f" it holding the older form {floor_browser}"
+                            f" reads: {line.strip()}",
                         )
                     )
 

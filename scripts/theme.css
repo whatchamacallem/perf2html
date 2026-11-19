@@ -26,8 +26,15 @@ body {
   margin: 0;
   overflow: hidden;
 }
+/* A scaled box draws from its top left, where its place starts. */
+html,
+#overview-home-,
+#overview-view-frame- {
+  transform-origin: 0 0;
+}
 /* No text is selected, so that a drag is free for other uses. */
 html {
+  -moz-user-select: none;
   user-select: none;
 }
 body {
@@ -63,8 +70,10 @@ pre {
 }
 /* The home page column, as wide as its widest line, centred in its box. */
 #overview-home-text- > .page- {
+  width: -moz-max-content;
   width: max-content;
-  margin-inline: auto;
+  margin-inline-start: auto;
+  margin-inline-end: auto;
 }
 #overview-view-frame- {
   grid-column: 1 / -1;
@@ -87,12 +96,9 @@ pre {
   grid-row: sideways-bar-;
 }
 
-/* The call graph page sizes its heading by the width it shows. */
-#call-graph-page- {
-  container-type: inline-size;
-}
 /* The page is as wide as the graph, so the heading sticks on both axes. */
 #call-graph-page- > .page- {
+  min-width: -moz-max-content;
   min-width: max-content;
 }
 /* The heading and the table's clear top border, now its own, stay in view. */
@@ -101,13 +107,14 @@ pre {
   top: 0;
   left: var(--page-inset-inline-);
   z-index: var(--call-graph-heading-z-index-);
-  width: calc(100cqw - 2 * var(--page-inset-inline-));
+  width: calc(var(--call-graph-page-width-) - 2 * var(--page-inset-inline-));
   border-bottom: var(--call-graph-border-width-) solid transparent;
 }
 /* The call graph table, as wide as its longest row, in its clear border. */
 #call-graph-table- {
   position: relative;
   isolation: isolate;
+  width: -moz-max-content;
   width: max-content;
   border: var(--call-graph-border-width-) solid transparent;
   border-top: 0;
@@ -123,7 +130,8 @@ pre {
   position: static;
 }
 /* A share or multiple sits right, so each lines up with those above it. */
-#call-graph-table- :is(.call-graph-share-, .call-graph-multiple-) {
+#call-graph-table- .call-graph-share-,
+#call-graph-table- .call-graph-multiple- {
   text-align: right;
 }
 /* A symbol button has no room of its own, its template's spaces inside it. */
@@ -141,6 +149,7 @@ pre {
 
 /* The database page grows with its table, so the bars redraw as it widens. */
 #database-page- > .page- {
+  min-width: -moz-max-content;
   min-width: max-content;
 }
 
@@ -160,7 +169,6 @@ pre {
 /* The main box sizes the tree that hangs in it. */
 #heat-map-main- {
   grid-area: 1 / 1;
-  container-type: size;
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -172,7 +180,8 @@ pre {
   display: flex;
 }
 /* A source under a shown minimap ends past it, so a scroll shows its end. */
-#heat-map-main-column-:has(#heat-map-minimap-:not(.empty-)) .heat-map-source- {
+#heat-map-main-column-:not(.minimap-empty-) .heat-map-source- {
+  width: -moz-fit-content;
   width: fit-content;
   padding-inline-end: calc(
     var(--heat-map-minimap-width-) +
@@ -181,7 +190,8 @@ pre {
   );
 }
 /* The tree's title is as wide as the tree, which hangs below it in view. */
-.heat-map-source-table- > :is(thead, tbody) > tr > th:first-child {
+.heat-map-source-table- > thead > tr > th:first-child,
+.heat-map-source-table- > tbody > tr > th:first-child {
   min-width: var(--heat-map-tree-width-);
 }
 /* The tree beside its bar, down to the main box bottom while titles stick. */
@@ -193,14 +203,14 @@ pre {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: minmax(0, 1fr);
-  height: calc(100cqh - 100%);
+  height: calc(var(--heat-map-main-height-) - 100%);
 }
 #heat-map-tree- {
   overflow-x: hidden;
   overflow-y: scroll;
 }
 
-/* No top inset: the status bar's half line gap is the room over a page. */
+/* No top inset, as the status bar's half line gap is the room over a page. */
 .page- {
   padding: 0 var(--page-inset-inline-) var(--page-inset-block-);
 }
@@ -237,7 +247,8 @@ pre {
 }
 #menu- .menu-status-bar-,
 #menu-preference- {
-  margin-block: var(--menu-strip-blank-line-height-);
+  margin-block-start: var(--menu-strip-blank-line-height-);
+  margin-block-end: var(--menu-strip-blank-line-height-);
 }
 #menu-preference- {
   padding-right: var(--menu-strip-padding-right-);
@@ -265,6 +276,7 @@ pre {
   display: inline-block;
   vertical-align: top;
   height: inherit;
+  overflow: hidden;
   overflow: clip;
   touch-action: none;
 }
@@ -284,7 +296,9 @@ pre {
 .menu-search-box- {
   display: flex;
   justify-content: flex-end;
-  contain: inline-size;
+  width: 0;
+  min-width: 100%;
+  overflow: hidden;
   overflow: clip;
 }
 /* A search that fits starts at the box start. */
@@ -318,6 +332,7 @@ pre {
 /* An entry clips its text box that overhangs its line, so a fit list fits. */
 .menu-pulldown-entry-list- > * {
   flex: none;
+  overflow-y: hidden;
   overflow-y: clip;
   padding: 0 var(--menu-pulldown-entry-padding-inline-);
 }
@@ -342,6 +357,7 @@ table.table- {
 /* A chunked table's titles and each chunk lay out as tables of their own. */
 table.table-chunked- {
   display: block;
+  width: -moz-max-content;
   width: max-content;
 }
 table.table-chunked- > thead {
@@ -354,13 +370,14 @@ table.table-chunked- > thead {
 table.table-chunked- > tbody {
   display: block;
   content-visibility: auto;
-  contain-intrinsic-block-size: auto calc(var(--table-chunk-rows-) * 1lh);
+  contain-intrinsic-block-size: auto
+    calc(var(--table-chunk-rows-) * var(--page-line-height-));
   /* A line's glyphs and frame lines cross its edge, as in a plain table. */
-  overflow-clip-margin: 1lh;
+  overflow-clip-margin: var(--page-line-height-);
 }
-/* A chunk waiting for its rows is skipped, its rows' lines its height. */
+/* A chunk waiting for its rows is its rows' lines high, drawing none. */
 table.table-chunked- > tbody.table-chunk-deferred- {
-  content-visibility: hidden;
+  height: calc(var(--table-chunk-rows-) * var(--page-line-height-));
 }
 /* A hovered row's frame draws over the chunks and cells it crosses. */
 table.table-::before {
@@ -377,21 +394,17 @@ tr.row-link- {
   cursor: pointer;
 }
 /* A cell whose right edge the pointer may drag shows the cursor. */
-.table- :is(th, td).column-edge-grab-,
-.table- :is(th, td).column-edge-grab- * {
+.table- th.column-edge-grab-,
+.table- td.column-edge-grab-,
+.table- th.column-edge-grab- *,
+.table- td.column-edge-grab- * {
   cursor: col-resize;
 }
-/* A tool tip hangs under its cell, wrapped, flipped to stay in the window. */
-[aria-description]:hover {
-  anchor-name: --tool-tip-anchor-;
-}
+/* A tool tip, wrapped, its place under its cell set as it shows. */
 .menu-button-.tool-tip- {
   position: fixed;
-  position-anchor: --tool-tip-anchor-;
-  position-try-fallbacks: flip-inline;
-  top: anchor(bottom);
-  right: anchor(right);
   z-index: var(--page-tool-tip-z-index-);
+  width: -moz-max-content;
   width: max-content;
   max-width: var(--page-tool-tip-max-width-);
   height: auto;
@@ -399,37 +412,24 @@ tr.row-link- {
   pointer-events: none;
 }
 /* An open pulldown hides the tool tip, its list shown in its place. */
-body:has(.menu-button-.open-) > .tool-tip- {
+body.holds-open-pulldown- > .tool-tip- {
   display: none;
 }
-/* A hovered link, source, box or call graph row anchors its frame. */
-.table- > tbody > :is(tr.row-link-, tr[data-line-number-]):hover,
-.heat-map-source-information-box-
-  .table-
-  > tbody
-  > tr:not(.table-title-row-):hover,
-#call-graph-table- > tbody > tr:hover {
-  anchor-name: --table-hover-row-;
-}
-table.table-:has(
-    > tbody > :is(tr.row-link-, tr[data-line-number-]):hover
-  )::before,
-.heat-map-source-information-box-
-  table.table-:has(> tbody > tr:not(.table-title-row-):hover)::before,
-#call-graph-table-:has(> tbody > tr:hover)::before {
-  content: "";
-  position: absolute;
-  position-anchor: --table-hover-row-;
-  top: anchor(top);
-  pointer-events: none;
-  border-style: solid;
-}
-/* A hovered row's frame, its sides on the row's sides, its bottom below. */
+/* The frame's box is always made, as making it on hover rebuilds the table. */
 table.table-::before,
 #call-graph-table-::before {
-  left: anchor(left);
-  right: anchor(right);
-  bottom: calc(anchor(bottom) - var(--page-line-width-));
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+/* A hovered row's frame, its sides on the row's sides, its bottom below. */
+table.table-.row-hovered-::before,
+#call-graph-table-.row-hovered-::before {
+  top: var(--table-hover-row-top-);
+  left: var(--table-hover-row-left-);
+  right: var(--table-hover-row-right-);
+  bottom: calc(var(--table-hover-row-bottom-) - var(--page-line-width-));
+  border-style: solid;
   border-width: var(--page-line-width-);
 }
 
@@ -438,7 +438,7 @@ table.table-::before,
 .heat-map-source- a,
 .menu-button- {
   display: inline-block;
-  height: 1lh;
+  height: var(--page-line-height-);
   align-content: unsafe end;
 }
 /* The raw data link takes a column cell's side room around its name. */
@@ -450,6 +450,7 @@ table.table-::before,
 .text-scrollbar- {
   display: flex;
   contain: size;
+  overflow: hidden;
   overflow: clip;
   white-space: pre;
   touch-action: none;

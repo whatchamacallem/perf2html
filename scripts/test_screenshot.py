@@ -5,15 +5,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from types import TracebackType
-from typing import Any, NamedTuple
+from typing import IO, Any, NamedTuple
 
-import argparse, base64, bisect, contextlib, fcntl, json, os, re, shutil
-import signal, subprocess, sys, urllib.parse
+import abc, argparse, base64, bisect, contextlib, fcntl, functools, hashlib
+import json, os, re, shutil, signal, socket, subprocess, sys, threading
+import urllib.parse
 
-import PIL.Image, PIL.ImageChops, PIL.ImageDraw, PIL.ImageEnhance
-import PIL.ImageFont
+import PIL.Image, PIL.ImageChops, PIL.ImageEnhance
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_settings
@@ -497,17 +497,17 @@ _HEAT_MAP_BOX_CLOSE_SELECTOR = (
 _HEAT_MAP_BOX_COPY_SELECTOR = (
     'tr.heat-map-source-line-detail-row- [data-entry-name-="copy"]'
 )
+# Selects a box heading's function links, its menu buttons holding no role.
 _HEAT_MAP_BOX_LINK_SELECTOR = (
-    "tr.heat-map-source-line-detail-row- .strip-line- > .menu-button-:has(> a)"
+    "tr.heat-map-source-line-detail-row- .strip-line-"
+    " > .menu-button-:not([role])"
 )
-_MENU_ROW_LAST_STOP = (
-    '#menu- > .strip-line- > :nth-last-child(1 of [tabindex="0"])'
-)
+_MENU_ROW_LAST_STOP = '#menu- > .strip-line- > [tabindex="0"]:last-child'
 _STATUS_ROW_FIRST_STOP = (
-    '#menu-preference- > .strip-line- > :nth-child(1 of [tabindex="0"])'
+    '#menu-preference- > .strip-line- > [tabindex="0"]:first-child'
 )
 _STATUS_ROW_LAST_STOP = (
-    '#menu-preference- > .strip-line- > :nth-last-child(1 of [tabindex="0"])'
+    '#menu-preference- > .strip-line- > [tabindex="0"]:last-child'
 )
 _TAPE_ENTRY_SELECTOR = ".heat-map-source-ticker-tape-entry-"
 
@@ -1205,7 +1205,7 @@ _CLICKS: tuple[ClickSet, ...] = (
                         "ArrowDown",
                         _MENU,
                         f"{_entry_cell('str_menu_test')}"
-                        " :nth-child(2 of [role=option])",
+                        " [role=option]:nth-child(2)",
                     ),
                 ),
                 _MENU,
@@ -1408,9 +1408,109 @@ _CLICKS: tuple[ClickSet, ...] = (
 )
 
 
-# Drives one browser over its DevTools pipe, each tab in a fresh profile.
-class BrowserSession:
-    def __init__(self) -> None:
+# A frame's script context, a number in Chrome, a realm name in Firefox.
+ScriptContext = int | str
+
+
+# A frame of a tab and the frames it holds, as its browser names them.
+class FrameNode(NamedTuple):
+    frame_id: str
+    # The frame holding this one, empty for the tab's top frame.
+    parent_id: str
+    child_nodes: tuple[FrameNode, ...]
+
+
+# Drives one browser, each tab in a fresh profile.
+class BrowserSession(abc.ABC):
+    # What an error message calls the browser.
+    browser_name = ""
+    # The largest channel change of a square's average color matching the gold.
+    compare_channel_change = test_settings.COMPARE_VAGUE_CHANNEL_CHANGE
+    # The side of the squares a gold comparison averages each shot over.
+    compare_square_px = test_settings.COMPARE_VAGUE_SQUARE_PX
+    # The dir of the project root the browser's shots go to.
+    shot_dir_name = ""
+    # Whether the browser writes the trace every timing reads.
+    traces_pages = False
+    # The views the browser lacks, which its runs neither shoot nor open.
+    unsupported_views: tuple[str, ...] = ()
+
+    # Starts the browser, whatever files it keeps under the build root.
+    @abc.abstractmethod
+    def __init__(self, build_root: str) -> None: ...
+
+    def __enter__(self) -> BrowserSession:
+        return self
+
+    @abc.abstractmethod
+    def __exit__(
+        self,
+        error_type: type[BaseException] | None,
+        error: BaseException | None,
+        error_traceback: TracebackType | None,
+    ) -> None: ...
+
+    # Reads the next message, handing an open tab's event to that tab.
+    @abc.abstractmethod
+    def message_read(self) -> dict[str, Any]: ...
+
+    # Returns the first line of each page's error report, tabs loading at once.
+    def pages_error_messages(self, page_urls: list[str]) -> list[str]:
+        _, width_px, height_px = test_settings.SCREENSHOT_VIEWPORTS[0]
+        error_messages = [""] * len(page_urls)
+        loading_tabs: dict[PageTab, int] = {}
+
+        # Keeps the error message of the first tab to settle, closing it.
+        def settled_tab_close() -> None:
+            settled_tab = self.settled_tab_wait(list(loading_tabs))
+            error_messages[loading_tabs.pop(settled_tab)] = (
+                settled_tab.error_message()
+            )
+            settled_tab.close()
+
+        for url_index, page_url in enumerate(page_urls):
+            if len(loading_tabs) == test_settings.PAGE_CHECK_TABS_AT_ONCE:
+                settled_tab_close()
+            page_tab = self.tab_open(width_px, height_px)
+            page_tab.page_navigate(page_url)
+            loading_tabs[page_tab] = url_index
+        while loading_tabs:
+            settled_tab_close()
+        return error_messages
+
+    # Returns the first tab whose page settled, reading while none has news.
+    def settled_tab_wait(self, page_tabs: list[PageTab]) -> PageTab:
+        while True:
+            for page_tab in page_tabs:
+                if page_tab.has_news and page_tab.settle_step():
+                    return page_tab
+            # A check's own commands may have kept events, read only after.
+            if not any(page_tab.has_news for page_tab in page_tabs):
+                self.message_read()
+
+    # Opens a blank tab of a size in a fresh profile, closing it after.
+    @contextlib.contextmanager
+    def tab(self, width_px: int, height_px: int) -> Iterator[PageTab]:
+        page_tab = self.tab_open(width_px, height_px)
+        yield page_tab
+        page_tab.close()
+
+    # Opens a blank tab of a size in a fresh profile.
+    @abc.abstractmethod
+    def tab_open(self, width_px: int, height_px: int) -> PageTab: ...
+
+
+# Drives one Chrome over its DevTools pipe, each tab in a fresh profile.
+class ChromeSession(BrowserSession):
+    browser_name = "Chrome"
+    # Chrome's shots are the one gold, which its own match pixel by pixel.
+    compare_channel_change = test_settings.COMPARE_EXACT_CHANNEL_CHANGE
+    compare_square_px = test_settings.COMPARE_EXACT_SQUARE_PX
+    shot_dir_name = test_settings.SCREENSHOT_DIR_NAME
+    traces_pages = True
+
+    # Chrome keeps each tab's profile in memory, none under the build root.
+    def __init__(self, build_root: str) -> None:
         command_read_fd, command_write_fd = os.pipe()
         self.reply_read_fd, reply_write_fd = os.pipe()
 
@@ -1457,11 +1557,8 @@ class BrowserSession:
         self.command_file = os.fdopen(command_write_fd, "wb")
         self.command_count = 0
         # The open tabs, by the session their commands and events go through.
-        self.page_tabs: dict[str, PageTab] = {}
+        self.page_tabs: dict[str, ChromeTab] = {}
         self.unread_bytes = b""
-
-    def __enter__(self) -> BrowserSession:
-        return self
 
     def __exit__(
         self,
@@ -1508,7 +1605,6 @@ class BrowserSession:
                 raise RuntimeError(f"{method}: {reply_message['error']}")
             return reply_message["result"]
 
-    # Reads the next message, handing an open tab's event to that tab.
     def message_read(self) -> dict[str, Any]:
         while test_settings.BROWSER_PIPE_MESSAGE_END not in self.unread_bytes:
             read_bytes = os.read(
@@ -1530,49 +1626,7 @@ class BrowserSession:
             page_tab.event_take(message)
         return message
 
-    # Returns the first line of each page's error report, tabs loading at once.
-    def pages_error_messages(self, page_urls: list[str]) -> list[str]:
-        _, width_px, height_px = test_settings.SCREENSHOT_VIEWPORTS[0]
-        error_messages = [""] * len(page_urls)
-        loading_tabs: dict[PageTab, int] = {}
-
-        # Keeps the error message of the first tab to settle, closing it.
-        def settled_tab_close() -> None:
-            settled_tab = self.settled_tab_wait(list(loading_tabs))
-            error_messages[loading_tabs.pop(settled_tab)] = (
-                settled_tab.error_message()
-            )
-            settled_tab.close()
-
-        for url_index, page_url in enumerate(page_urls):
-            if len(loading_tabs) == test_settings.PAGE_CHECK_TABS_AT_ONCE:
-                settled_tab_close()
-            page_tab = self.tab_open(width_px, height_px)
-            page_tab.page_navigate(page_url)
-            loading_tabs[page_tab] = url_index
-        while loading_tabs:
-            settled_tab_close()
-        return error_messages
-
-    # Returns the first tab whose page settled, reading while none has news.
-    def settled_tab_wait(self, page_tabs: list[PageTab]) -> PageTab:
-        while True:
-            for page_tab in page_tabs:
-                if page_tab.has_news and page_tab.settle_step():
-                    return page_tab
-            # A check's own commands may have kept events, read only after.
-            if not any(page_tab.has_news for page_tab in page_tabs):
-                self.message_read()
-
-    # Opens a blank tab of a size in a fresh profile, closing it after.
-    @contextlib.contextmanager
-    def tab(self, width_px: int, height_px: int) -> Iterator[PageTab]:
-        page_tab = self.tab_open(width_px, height_px)
-        yield page_tab
-        page_tab.close()
-
-    # Opens a blank tab of a size in a fresh profile.
-    def tab_open(self, width_px: int, height_px: int) -> PageTab:
+    def tab_open(self, width_px: int, height_px: int) -> ChromeTab:
         browser_context_id = self.command("Target.createBrowserContext")[
             "browserContextId"
         ]
@@ -1588,7 +1642,7 @@ class BrowserSession:
         session_id = self.command(
             "Target.attachToTarget", {"targetId": target_id, "flatten": True}
         )["sessionId"]
-        page_tab = PageTab(
+        page_tab = ChromeTab(
             self, session_id, browser_context_id, (width_px, height_px)
         )
         self.page_tabs[session_id] = page_tab
@@ -1598,35 +1652,598 @@ class BrowserSession:
             "Runtime.addBinding",
             {"name": test_settings.PAGE_DRAWN_BINDING_NAME},
         )
+        # Sizes the page as the tab, as hidden toolbars take window rows.
+        page_tab.command(
+            "Emulation.setDeviceMetricsOverride",
+            {
+                "width": width_px,
+                "height": height_px,
+                "deviceScaleFactor": 0,
+                "mobile": False,
+            },
+        )
         return page_tab
 
 
-# Holds one tab's page: its frames, their script contexts and error reports.
-class PageTab:
-    def __init__(
+# Runs one X server, the display a browser draws through, until it ends.
+class DisplayServer:
+    def __init__(self) -> None:
+        display_read_fd, display_write_fd = os.pipe()
+        self.server_process = subprocess.Popen(
+            [
+                test_settings.SCREENSHOT_DISPLAY_SERVER_NAME,
+                "-displayfd",
+                str(display_write_fd),
+                *test_settings.SCREENSHOT_DISPLAY_SERVER_ARGUMENTS,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            pass_fds=(display_write_fd,),
+            start_new_session=True,
+        )
+        os.close(display_write_fd)
+        # The server writes its display number once it takes clients.
+        with os.fdopen(display_read_fd) as display_file:
+            display_number = display_file.readline().strip()
+        if not display_number:
+            raise RuntimeError(
+                f"{test_settings.SCREENSHOT_DISPLAY_SERVER_NAME} wrote no"
+                f" display, exit {self.server_process.wait()}"
+            )
+        self.display_name = f":{display_number}"
+
+    # Ends the server, its display with it.
+    def end(self) -> None:
+        self.server_process.terminate()
+        self.server_process.wait()
+
+
+# Drives one Gecko browser, drawing through a display server of its own.
+class GeckoSession(BrowserSession):
+    browser_process: subprocess.Popen[bytes]
+    # The pipe the browser writes its output to, the line saying it listens.
+    output_pipe: IO[bytes]
+    # The browser's profile dir, under the build root.
+    profile_dir_path = ""
+
+    # Makes the browser's empty profile dir and starts its display server.
+    def __init__(self, build_root: str) -> None:
+        self.profile_dir = os.path.abspath(
+            os.path.join(build_root, self.profile_dir_path)
+        )
+        if os.path.exists(self.profile_dir):
+            shutil.rmtree(self.profile_dir)
+        # Only the user reaches its socket, whose scripts run as the browser.
+        os.makedirs(self.profile_dir, mode=0o700)
+        self.display_server = DisplayServer()
+
+    # Kills a browser still running, ends its display, deletes its profile.
+    def browser_end(self) -> None:
+        if self.browser_process.poll() is None:
+            os.killpg(self.browser_process.pid, signal.SIGKILL)
+        self.browser_process.wait()
+        self.output_pipe.close()
+        self.display_server.end()
+        shutil.rmtree(self.profile_dir)
+
+    # Reads the rest of the browser's output, so a full pipe never stops it.
+    def output_drain_begin(self) -> None:
+        def output_drain() -> None:
+            for _ in self.output_pipe:
+                pass
+
+        threading.Thread(target=output_drain, daemon=True).start()
+
+
+# Drives one Firefox over WebDriver BiDi, each tab in a fresh user context.
+class FirefoxSession(GeckoSession):
+    browser_name = "Firefox"
+    profile_dir_path = test_settings.SCREENSHOT_FIREFOX_PROFILE_DIR_PATH
+    shot_dir_name = test_settings.SCREENSHOT_FIREFOX_DIR_NAME
+
+    def __init__(self, build_root: str) -> None:
+        super().__init__(build_root)
+        self.browser_process = subprocess.Popen(
+            [
+                test_settings.SCREENSHOT_FIREFOX_PATH,
+                "--headless",
+                "--no-remote",
+                "--profile",
+                self.profile_dir,
+                "--remote-debugging-port=0",
+                test_settings.BLANK_PAGE_URL,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            env={
+                **os.environ,
+                # Gives the flame graph WebGL, which needs an X display.
+                "DISPLAY": self.display_server.display_name,
+                # Lets a key walk hand the focus back from the controls.
+                "MOZ_REMOTE_ALLOW_SYSTEM_ACCESS": "1",
+            },
+        )
+        assert self.browser_process.stderr, "Firefox writes stderr to a pipe"
+        self.output_pipe = self.browser_process.stderr
+        self.command_count = 0
+        # The open tabs, by each frame's browsing context.
+        self.context_tabs: dict[str, FirefoxTab] = {}
+        # The open tabs, by each script realm of their frames.
+        self.realm_tabs: dict[str, FirefoxTab] = {}
+        # A start failing before the with statement ends the browser itself.
+        try:
+            self.web_socket = WebSocketChannel(
+                self.listening_url_read()
+                + test_settings.SCREENSHOT_FIREFOX_SESSION_PATH
+            )
+            self.command("session.new", {"capabilities": {}})
+            self.command(
+                "session.subscribe",
+                {
+                    "events": [
+                        "browsingContext.contextCreated",
+                        "browsingContext.contextDestroyed",
+                        "browsingContext.fragmentNavigated",
+                        "browsingContext.load",
+                        "browsingContext.navigationFailed",
+                        "browsingContext.navigationStarted",
+                        "log.entryAdded",
+                        "script.message",
+                        "script.realmCreated",
+                        "script.realmDestroyed",
+                    ]
+                },
+            )
+        except BaseException:
+            self.browser_end()
+            raise
+
+    def __exit__(
         self,
-        browser_session: BrowserSession,
-        session_id: str,
-        browser_context_id: str,
-        tab_size: tuple[int, int],
+        error_type: type[BaseException] | None,
+        error: BaseException | None,
+        error_traceback: TracebackType | None,
+    ) -> None:
+        if error_type is None:
+            self.command("browser.close")
+            self.browser_process.wait()
+        self.web_socket.close()
+        self.browser_end()
+
+    # Sends a command, returning its result once its reply comes.
+    def command(
+        self, method: str, parameters: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        self.command_count += 1
+        self.web_socket.message_send(
+            json.dumps(
+                {
+                    "id": self.command_count,
+                    "method": method,
+                    "params": parameters or {},
+                }
+            )
+        )
+        while True:
+            reply_message = self.message_read()
+            if reply_message.get("id") != self.command_count:
+                continue
+            if reply_message["type"] == "error":
+                raise RuntimeError(
+                    f"{method}: {reply_message['error']}:"
+                    f" {reply_message['message']}"
+                )
+            return reply_message["result"]
+
+    # Returns the tab an event belongs to, keeping the frames and realms made.
+    def event_tab(self, message: dict[str, Any]) -> FirefoxTab | None:
+        method = message["method"]
+        event_parameters = message["params"]
+        if method == "browsingContext.contextCreated":
+            page_tab = self.context_tabs.get(event_parameters["parent"])
+            if page_tab:
+                self.context_tabs[event_parameters["context"]] = page_tab
+            return page_tab
+        if method == "browsingContext.contextDestroyed":
+            return self.context_tabs.get(event_parameters["context"])
+        if method == "script.realmCreated":
+            page_tab = self.context_tabs.get(event_parameters["context"])
+            if page_tab:
+                self.realm_tabs[event_parameters["realm"]] = page_tab
+            return page_tab
+        if method == "script.realmDestroyed":
+            return self.realm_tabs.pop(event_parameters["realm"], None)
+        if method in ("log.entryAdded", "script.message"):
+            return self.realm_tabs.get(event_parameters["source"]["realm"])
+        return self.context_tabs.get(event_parameters["context"])
+
+    # Moves the focus through the browser's controls back into its page.
+    def focus_return(self, is_backward: bool) -> None:
+        chrome_contexts = self.command(
+            "browsingContext.getTree", {"moz:scope": "chrome"}
+        )["contexts"]
+        focus_call = self.command(
+            "script.callFunction",
+            {
+                "functionDeclaration": (
+                    test_settings.FIREFOX_FOCUS_RETURN_FUNCTION
+                ),
+                "arguments": [
+                    {"type": "boolean", "value": is_backward},
+                    {
+                        "type": "number",
+                        "value": test_settings.CLICK_WALK_PRESS_LIMIT,
+                    },
+                ],
+                "target": {"context": chrome_contexts[0]["context"]},
+                "awaitPromise": False,
+            },
+        )
+        if focus_call["type"] == "exception":
+            raise RuntimeError(
+                f"focus return: {focus_call['exceptionDetails']['text']}"
+            )
+
+    # Reads the browser's stderr up to the address it listens at.
+    def listening_url_read(self) -> str:
+        for stderr_line in self.output_pipe:
+            listening_match = (
+                test_settings.SCREENSHOT_FIREFOX_LISTENING_PATTERN.search(
+                    stderr_line.decode()
+                )
+            )
+            if listening_match:
+                self.output_drain_begin()
+                return listening_match.group(1)
+        raise RuntimeError(
+            "Firefox closed its stderr before it listened, exit"
+            f" {self.browser_process.wait()}"
+        )
+
+    def message_read(self) -> dict[str, Any]:
+        try:
+            message = json.loads(self.web_socket.message_read())
+        except ConnectionError as error:
+            raise RuntimeError(
+                f"the browser closed its socket, exit"
+                f" {self.browser_process.wait()}"
+            ) from error
+        if message["type"] == "event":
+            page_tab = self.event_tab(message)
+            # A closed tab's late event and a browser event belong to no page.
+            if page_tab:
+                page_tab.event_take(message)
+        return message
+
+    def tab_open(self, width_px: int, height_px: int) -> FirefoxTab:
+        user_context = self.command("browser.createUserContext")["userContext"]
+        top_context = self.command(
+            "browsingContext.create",
+            # Its own window keeps the tab shown, a hidden tab never drawing.
+            {"type": "window", "userContext": user_context},
+        )["context"]
+        page_tab = FirefoxTab(
+            self, top_context, user_context, (width_px, height_px)
+        )
+        self.context_tabs[top_context] = page_tab
+        self.command(
+            "browsingContext.setViewport",
+            {
+                "context": top_context,
+                "viewport": {"width": width_px, "height": height_px},
+            },
+        )
+        page_tab.preload_script = self.command(
+            "script.addPreloadScript",
+            {
+                "functionDeclaration": (
+                    test_settings.PAGE_DRAWN_CHANNEL_FUNCTION
+                ),
+                "arguments": [
+                    {
+                        "type": "channel",
+                        "value": {
+                            "channel": test_settings.PAGE_DRAWN_BINDING_NAME
+                        },
+                    }
+                ],
+                "userContexts": [user_context],
+            },
+        )["script"]
+        return page_tab
+
+
+# Drives one SeaMonkey over its DevTools server, each tab in a fresh context.
+class SeaMonkeySession(GeckoSession):
+    browser_name = "SeaMonkey"
+    profile_dir_path = test_settings.SCREENSHOT_SEAMONKEY_PROFILE_DIR_PATH
+    shot_dir_name = test_settings.SCREENSHOT_SEAMONKEY_DIR_NAME
+    unsupported_views = test_settings.SCREENSHOT_SEAMONKEY_UNSUPPORTED_VIEWS
+
+    def __init__(self, build_root: str) -> None:
+        super().__init__(build_root)
+        with open(
+            os.path.join(
+                self.profile_dir,
+                test_settings.SCREENSHOT_SEAMONKEY_PREFERENCES_FILE_NAME,
+            ),
+            "w",
+            encoding="utf-8",
+        ) as preferences_file:
+            preferences_file.writelines(
+                f"user_pref({json.dumps(name)}, {json.dumps(value)});\n"
+                for name, value in (
+                    test_settings.SCREENSHOT_SEAMONKEY_PREFERENCES.items()
+                )
+            )
+        socket_path = os.path.join(
+            self.profile_dir, test_settings.SCREENSHOT_SEAMONKEY_SOCKET_NAME
+        )
+        self.browser_process = subprocess.Popen(
+            [
+                test_settings.SCREENSHOT_SEAMONKEY_PATH,
+                "-headless",
+                "-no-remote",
+                "-profile",
+                self.profile_dir,
+                "-start-debugger-server",
+                socket_path,
+                test_settings.BLANK_PAGE_URL,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            env={**os.environ, "DISPLAY": self.display_server.display_name},
+        )
+        assert self.browser_process.stdout, "SeaMonkey writes stdout to a pipe"
+        self.output_pipe = self.browser_process.stdout
+        # Numbers each tab open and each awaited script.
+        self.call_count = 0
+        # The event of each tab open, by its number, until the open reads it.
+        self.opened_tabs: dict[int, dict[str, Any]] = {}
+        # The open tabs, by the top frame each one's page fills.
+        self.page_tabs: dict[str, SeaMonkeyTab] = {}
+        self.unread_bytes = bytearray()
+        # A start failing before the with statement ends the browser itself.
+        try:
+            self.listening_wait()
+            self.socket_connection = socket.socket(socket.AF_UNIX)
+            self.socket_connection.connect(socket_path)
+            self.packet_read()
+            process_form = self.command(
+                "root",
+                "getProcess",
+                {"id": test_settings.SCREENSHOT_SEAMONKEY_PROCESS_ID},
+            )["form"]
+            self.command(
+                process_form["actor"], "attach", reply_type="tabAttached"
+            )
+            self.console_actor = process_form["consoleActor"]
+            self.command(
+                self.console_actor,
+                "startListeners",
+                {
+                    "listeners": list(
+                        test_settings.SCREENSHOT_SEAMONKEY_LISTENERS
+                    )
+                },
+            )
+            self.evaluate(
+                "driver install",
+                f"({test_settings.SCREENSHOT_SEAMONKEY_DRIVER_FUNCTION})("
+                + json.dumps(test_settings.SCREENSHOT_SEAMONKEY_EVENT_MARKER)
+                + ", "
+                + json.dumps(test_settings.PAGE_DRAWN_BINDING_NAME)
+                + ", "
+                + json.dumps(
+                    test_settings.SCREENSHOT_SEAMONKEY_EVENT_CHUNK_LENGTH
+                )
+                + ")",
+            )
+        except BaseException:
+            self.browser_end()
+            raise
+
+    def __exit__(
+        self,
+        error_type: type[BaseException] | None,
+        error: BaseException | None,
+        error_traceback: TracebackType | None,
+    ) -> None:
+        if error_type is None:
+            # SeaMonkey quits before it replies, so no reply is read.
+            self.packet_send(
+                {
+                    "to": self.console_actor,
+                    "type": "evaluateJS",
+                    "text": self.driver_text("quit"),
+                }
+            )
+            self.browser_process.wait()
+        self.socket_connection.close()
+        self.browser_end()
+
+    # Receives the bytes the socket holds, waiting for some.
+    def bytes_receive(self) -> None:
+        received_bytes = self.socket_connection.recv(
+            test_settings.SCREENSHOT_SEAMONKEY_READ_BYTES
+        )
+        if not received_bytes:
+            raise RuntimeError(
+                "the browser closed its socket, exit"
+                f" {self.browser_process.wait()}"
+            )
+        self.unread_bytes += received_bytes
+
+    # Sends a request to an actor, returning its reply once it comes.
+    def command(
+        self,
+        actor: str,
+        packet_type: str,
+        fields: dict[str, Any] | None = None,
+        reply_type: str = "",
+    ) -> dict[str, Any]:
+        self.packet_send({"to": actor, "type": packet_type, **(fields or {})})
+        while True:
+            packet = self.message_read()
+            # An actor's event names its type, a reply none but an attach's.
+            if (
+                packet.get("from") != actor
+                or packet.get("type", "") != reply_type
+            ):
+                continue
+            if "error" in packet:
+                raise RuntimeError(f"{packet_type}: {packet}")
+            return packet
+
+    # Hands a driver event the browser console reports to its tab.
+    def console_message_take(self, console_message: dict[str, Any]) -> None:
+        marker_argument, *event_chunks = console_message["arguments"]
+        # A browser window's own line is no driver event.
+        if marker_argument != test_settings.SCREENSHOT_SEAMONKEY_EVENT_MARKER:
+            return
+        driver_event = json.loads("".join(event_chunks))
+        if driver_event["event"] == "tab_opened":
+            self.opened_tabs[driver_event["open_number"]] = driver_event
+            return
+        page_tab = self.page_tabs.get(driver_event["tab"])
+        # A closed tab's late event belongs to no page.
+        if page_tab:
+            page_tab.event_take(driver_event)
+
+    # Calls a driver function, returning the JSON its text holds, if any.
+    def driver_call(self, function_name: str, *call_arguments: Any) -> Any:
+        result = self.evaluate(
+            function_name, self.driver_text(function_name, *call_arguments)
+        )
+        if isinstance(result, dict) and result["type"] == "undefined":
+            return None
+        return json.loads(self.text_read(result))
+
+    # Returns the script text calling a driver function with its arguments.
+    def driver_text(self, function_name: str, *call_arguments: Any) -> str:
+        return (
+            f"screenshot_driver.{function_name}("
+            + ", ".join(
+                json.dumps(call_argument) for call_argument in call_arguments
+            )
+            + ")"
+        )
+
+    # Returns the value a browser window script evaluates to, as its grip.
+    def evaluate(self, script_label: str, script_text: str) -> Any:
+        reply = self.command(
+            self.console_actor, "evaluateJS", {"text": script_text}
+        )
+        if reply["exception"] is not None:
+            raise RuntimeError(f"{script_label}: {reply['exceptionMessage']}")
+        return reply["result"]
+
+    # Reads the browser's stdout up to the line saying its server opened.
+    def listening_wait(self) -> None:
+        for stdout_line in self.output_pipe:
+            line_text = stdout_line.decode()
+            if test_settings.SCREENSHOT_SEAMONKEY_LISTEN_FAILED_PATTERN.search(
+                line_text
+            ):
+                raise RuntimeError(f"SeaMonkey: {line_text.strip()}")
+            if test_settings.SCREENSHOT_SEAMONKEY_LISTENING_PATTERN.search(
+                line_text
+            ):
+                self.output_drain_begin()
+                return
+        raise RuntimeError(
+            "SeaMonkey closed its stdout before it listened, exit"
+            f" {self.browser_process.wait()}"
+        )
+
+    def message_read(self) -> dict[str, Any]:
+        packet = self.packet_read()
+        if packet.get("type") == "consoleAPICall":
+            self.console_message_take(packet["message"])
+        return packet
+
+    # Reads one packet, its length in digits, a colon, then its JSON.
+    def packet_read(self) -> dict[str, Any]:
+        length_end = test_settings.SCREENSHOT_SEAMONKEY_PACKET_LENGTH_END
+        while length_end not in self.unread_bytes:
+            self.bytes_receive()
+        length_text, _, self.unread_bytes = self.unread_bytes.partition(
+            length_end
+        )
+        packet_length = int(length_text)
+        while len(self.unread_bytes) < packet_length:
+            self.bytes_receive()
+        packet_bytes = bytes(self.unread_bytes[:packet_length])
+        del self.unread_bytes[:packet_length]
+        return json.loads(packet_bytes)
+
+    def packet_send(self, packet: dict[str, Any]) -> None:
+        packet_bytes = json.dumps(packet).encode()
+        self.socket_connection.sendall(
+            str(len(packet_bytes)).encode()
+            + test_settings.SCREENSHOT_SEAMONKEY_PACKET_LENGTH_END
+            + packet_bytes
+        )
+
+    # Forgets a closing tab, so its late events belong to no page.
+    def tab_forget(self, page_tab: SeaMonkeyTab) -> None:
+        del self.page_tabs[page_tab.tab_key]
+
+    def tab_open(self, width_px: int, height_px: int) -> SeaMonkeyTab:
+        self.call_count += 1
+        open_number = self.call_count
+        self.driver_call("tab_open", open_number, width_px, height_px)
+        while open_number not in self.opened_tabs:
+            self.message_read()
+        opened_event = self.opened_tabs.pop(open_number)
+        if "error" in opened_event:
+            raise RuntimeError(f"tab open: {opened_event['error']}")
+        page_tab = SeaMonkeyTab(
+            self, opened_event["tab"], (width_px, height_px)
+        )
+        self.page_tabs[page_tab.tab_key] = page_tab
+        return page_tab
+
+    # Returns a reply's text, reading a long one from its actor.
+    def text_read(self, text_value: Any) -> str:
+        if isinstance(text_value, str):
+            return text_value
+        if text_value["type"] != "longString":
+            raise RuntimeError(f"a value of no text: {text_value}")
+        text = self.command(
+            text_value["actor"],
+            "substring",
+            {"start": 0, "end": text_value["length"]},
+        )["substring"]
+        self.command(text_value["actor"], "release")
+        return text
+
+
+# Holds one tab's page: its frames, their script contexts and error reports.
+class PageTab(abc.ABC):
+    def __init__(
+        self, browser_session: BrowserSession, tab_size: tuple[int, int]
     ) -> None:
         self.browser_session = browser_session
-        self.session_id = session_id
-        self.browser_context_id = browser_context_id
         self.tab_size = tab_size
         # The contexts whose drawn check this settle started.
-        self.checked_contexts: set[int] = set()
+        self.checked_contexts: set[ScriptContext] = set()
         # The contexts the page left, read before any failed reply.
-        self.destroyed_contexts: set[int] = set()
+        self.destroyed_contexts: set[ScriptContext] = set()
         # The frames the page removed, read before any failed reply.
         self.detached_frames: set[str] = set()
         # The contexts whose drawn check of this settle passed.
-        self.drawn_contexts: set[int] = set()
+        self.drawn_contexts: set[ScriptContext] = set()
         # The contexts from before this settle, whose load renders are logged.
-        self.earlier_contexts: set[int] = set()
+        self.earlier_contexts: set[ScriptContext] = set()
         # The first line of each error report, by the context drawing it.
-        self.error_reports: dict[int, str] = {}
-        self.frame_contexts: dict[str, int] = {}
+        self.error_reports: dict[ScriptContext, str] = {}
+        self.frame_contexts: dict[str, ScriptContext] = {}
         # Whether an event came since the last settle step.
         self.has_news = False
         # The frames out of view, which no shot shows.
@@ -1635,30 +2252,56 @@ class PageTab:
         self.is_started = False
         self.loading_frames: set[str] = set()
         self.navigation_frame_id = ""
-        self.pending_events: list[dict[str, Any]] = []
+        # The settle steps the tab's events call for, in their order.
+        self.pending_events: list[Callable[[], None]] = []
         # Numbers the settles, so a drawn check reports to its own alone.
         self.settle_count = 0
         self.thrown_texts: list[str] = []
 
-    # Closes the tab with its profile, any late event of it unread.
-    def close(self) -> None:
-        del self.browser_session.page_tabs[self.session_id]
-        self.browser_session.command(
-            "Target.disposeBrowserContext",
-            {"browserContextId": self.browser_context_id},
-        )
+    # Types each character, a key's press and release each.
+    @abc.abstractmethod
+    def characters_send(self, typed_text: str) -> None: ...
 
-    # Sends a command to the tab, returning its result once its reply comes.
-    def command(
-        self, method: str, parameters: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        return self.browser_session.command(
-            method, parameters, self.session_id
+    # Writes text to the clipboard from a frame, as a copy there would.
+    def clipboard_write(self, frame_name: str, pasted_text: str) -> None:
+        write_function = test_settings.CLICK_CLIPBOARD_WRITE_FUNCTION
+        _, exception_text = self.script_run(
+            self.frame_context(frame_name),
+            f"({write_function})({json.dumps(pasted_text)})",
+            is_awaited=True,
+            is_activated=True,
         )
+        if exception_text:
+            raise RuntimeError(
+                f"{frame_name}: clipboard write: {exception_text}"
+            )
+
+    # Closes the tab with its profile, any late event of it unread.
+    @abc.abstractmethod
+    def close(self) -> None: ...
+
+    # Forgets a script context the page left.
+    def context_end(self, context_id: ScriptContext) -> None:
+        self.destroyed_contexts.add(context_id)
+        self.frame_contexts = {
+            frame_id: frame_context
+            for frame_id, frame_context in self.frame_contexts.items()
+            if frame_context != context_id
+        }
 
     # Returns the first line of the page's first error report, if any.
     def error_message(self) -> str:
         return next(iter(self.error_reports.values()), "")
+
+    # Keeps the first line of an error report a context writes to its console.
+    def error_report_keep(
+        self, context_id: ScriptContext, console_text: str
+    ) -> None:
+        error_match = test_settings.CONSOLE_ERROR_REPORT_PATTERN.search(
+            console_text
+        )
+        if error_match:
+            self.error_reports.setdefault(context_id, error_match.group(1))
 
     # Refuses an error report or an uncaught exception of the page.
     def errors_refuse(self, fault_label: str) -> None:
@@ -1667,78 +2310,16 @@ class PageTab:
         if self.thrown_texts:
             raise RuntimeError(f"{fault_label}: {self.thrown_texts[0]}")
 
-    # Keeps an event of the tab, its error reports and script contexts.
-    def event_take(self, message: dict[str, Any]) -> None:
-        self.has_news = True
-        method = message["method"]
-        event_parameters = message["params"]
-        if method == "Runtime.exceptionThrown":
-            exception_details = event_parameters["exceptionDetails"]
-            self.thrown_texts.append(
-                exception_details.get("exception", {}).get(
-                    "description", exception_details["text"]
-                )
-            )
-        elif method == "Runtime.consoleAPICalled":
-            console_text = " ".join(
-                str(console_argument.get("value", ""))
-                for console_argument in event_parameters["args"]
-            )
-            error_match = test_settings.CONSOLE_ERROR_REPORT_PATTERN.search(
-                console_text
-            )
-            if error_match:
-                self.error_reports.setdefault(
-                    event_parameters["executionContextId"],
-                    error_match.group(1),
-                )
-        elif method == "Runtime.executionContextCreated":
-            context = event_parameters["context"]
-            if context["auxData"]["isDefault"]:
-                self.frame_contexts[context["auxData"]["frameId"]] = context[
-                    "id"
-                ]
-        elif method == "Runtime.executionContextDestroyed":
-            self.destroyed_contexts.add(event_parameters["executionContextId"])
-            self.frame_contexts = {
-                frame_id: context_id
-                for frame_id, context_id in self.frame_contexts.items()
-                if context_id != event_parameters["executionContextId"]
-            }
-        elif method == "Runtime.executionContextsCleared":
-            self.destroyed_contexts.update(self.frame_contexts.values())
-            self.frame_contexts = {}
-        else:
-            if method == "Page.frameDetached":
-                self.detached_frames.add(event_parameters["frameId"])
-            self.pending_events.append(message)
-
-    # Returns the next event of a method, reading messages until one comes.
-    def event_wait(self, method: str) -> dict[str, Any]:
-        while True:
-            for event_index, pending_event in enumerate(self.pending_events):
-                if pending_event["method"] == method:
-                    return self.pending_events.pop(event_index)["params"]
-            self.browser_session.message_read()
-
     # Returns the value an expression evaluates to in a frame.
     def frame_evaluate(self, frame_name: str, expression: str) -> Any:
-        evaluation = self.command(
-            "Runtime.evaluate",
-            {
-                "expression": expression,
-                "contextId": self.frame_context(frame_name),
-                "returnByValue": True,
-            },
+        value, exception_text = self.script_run(
+            self.frame_context(frame_name), expression
         )
-        if "exceptionDetails" in evaluation:
-            raise RuntimeError(
-                f"{frame_name}: {expression}:"
-                f" {evaluation['exceptionDetails']['text']}"
-            )
-        return evaluation["result"].get("value")
+        if exception_text:
+            raise RuntimeError(f"{frame_name}: {expression}: {exception_text}")
+        return value
 
-    def frame_context(self, frame_name: str) -> int:
+    def frame_context(self, frame_name: str) -> ScriptContext:
         frame_id = self.frame_id(frame_name)
         if frame_id not in self.frame_contexts:
             raise RuntimeError(f"{frame_name}: no script context")
@@ -1746,80 +2327,48 @@ class PageTab:
 
     # Returns the frame of the menu's top page or of its one view.
     def frame_id(self, frame_name: str) -> str:
-        frame_tree = self.command("Page.getFrameTree")["frameTree"]
+        frame_tree = self.frame_tree()
         if frame_name == test_settings.CLICK_MENU_FRAME_NAME:
-            return frame_tree["frame"]["id"]
-        child_frames = frame_tree.get("childFrames", [])
-        if len(child_frames) != 1:
-            raise RuntimeError(f"the page holds {len(child_frames)} views")
-        return child_frames[0]["frame"]["id"]
+            return frame_tree.frame_id
+        if len(frame_tree.child_nodes) != 1:
+            raise RuntimeError(
+                f"the page holds {len(frame_tree.child_nodes)} views"
+            )
+        return frame_tree.child_nodes[0].frame_id
 
     # Returns whether a child frame's element shows in the tab's view.
-    def frame_shown(self, frame: dict[str, Any]) -> bool:
-        try:
-            owner_node_id = self.command(
-                "DOM.getFrameOwner", {"frameId": frame["id"]}
-            )["backendNodeId"]
-            owner_object = self.command(
-                "DOM.resolveNode",
-                {
-                    "backendNodeId": owner_node_id,
-                    "executionContextId": self.frame_contexts[
-                        frame["parentId"]
-                    ],
-                },
-            )["object"]
-            if not self.object_call(
-                owner_object["objectId"],
-                test_settings.FRAME_LAID_OUT_FUNCTION,
-            ):
-                return False
-            frame_quads = self.command(
-                "DOM.getContentQuads", {"backendNodeId": owner_node_id}
-            )["quads"]
-        except RuntimeError:
-            # A frame its page removed meanwhile is out of view.
-            if frame["id"] in self.detached_frames:
-                return False
-            raise
-        width_px, height_px = self.tab_size
-        return any(
-            max(quad[0::2]) > 0
-            and max(quad[1::2]) > 0
-            and min(quad[0::2]) < width_px
-            and min(quad[1::2]) < height_px
-            for quad in frame_quads
-        )
+    @abc.abstractmethod
+    def frame_shown(self, frame_node: FrameNode) -> bool: ...
+
+    # Returns the tab's frames, its top frame the root.
+    @abc.abstractmethod
+    def frame_tree(self) -> FrameNode: ...
 
     # Returns whether each shown frame drew or erred, a child after its parent.
-    def frames_drawn(self, frame_tree: dict[str, Any]) -> bool:
-        if frame_tree["frame"]["id"] in self.hidden_frames:
+    def frames_drawn(self, frame_node: FrameNode) -> bool:
+        if frame_node.frame_id in self.hidden_frames:
             return True
-        context_id = self.frame_contexts.get(frame_tree["frame"]["id"])
+        context_id = self.frame_contexts.get(frame_node.frame_id)
         if context_id is None:
             return False
         # The error handler's page replaces the frame's own and its frames.
         if context_id in self.error_reports:
             return True
-        child_trees = frame_tree.get("childFrames", [])
         is_new = context_id not in self.earlier_contexts
         if context_id not in self.checked_contexts:
             self.checked_contexts.add(context_id)
             # A frame out of view never paints, so no shot shows it drawn.
-            for child_tree in child_trees:
-                if not self.frame_shown(child_tree["frame"]):
-                    self.hidden_frames.add(child_tree["frame"]["id"])
+            for child_node in frame_node.child_nodes:
+                if not self.frame_shown(child_node):
+                    self.hidden_frames.add(child_node.frame_id)
             try:
-                self.command(
-                    "Runtime.evaluate",
-                    {
-                        "expression": self.wait_expression(
-                            test_settings.PAGE_DRAWN_FUNCTION,
-                            json.dumps(test_settings.PAGE_DRAWN_BINDING_NAME),
-                            json.dumps(str(self.settle_count)),
-                        ),
-                        "contextId": context_id,
-                    },
+                self.script_run(
+                    context_id,
+                    self.wait_expression(
+                        test_settings.PAGE_DRAWN_FUNCTION,
+                        json.dumps(test_settings.PAGE_DRAWN_BINDING_NAME),
+                        json.dumps(str(self.settle_count)),
+                    ),
                 )
             except RuntimeError:
                 # A page left meanwhile is checked in its next context.
@@ -1830,58 +2379,18 @@ class PageTab:
             return False
         # Every child is checked, so their drawn checks all start at once.
         child_states = [
-            self.frames_drawn(child_tree) for child_tree in child_trees
+            self.frames_drawn(child_node)
+            for child_node in frame_node.child_nodes
         ]
         return context_id in self.drawn_contexts and all(child_states)
 
-    # Writes text to the clipboard from a frame, as a copy there would.
-    def clipboard_write(self, frame_name: str, pasted_text: str) -> None:
-        write_function = test_settings.CLICK_CLIPBOARD_WRITE_FUNCTION
-        clipboard_write = self.command(
-            "Runtime.evaluate",
-            {
-                "expression": f"({write_function})({json.dumps(pasted_text)})",
-                "contextId": self.frame_context(frame_name),
-                "awaitPromise": True,
-                "userGesture": True,
-            },
-        )
-        if "exceptionDetails" in clipboard_write:
-            raise RuntimeError(
-                f"{frame_name}: clipboard write:"
-                f" {clipboard_write['exceptionDetails']['text']}"
-            )
-
     # Writes the page as drawn to an image file.
-    def image_write(self, image_path: str) -> None:
-        # The fast encoding writes the same pixels to a larger file.
-        image_data = self.command(
-            "Page.captureScreenshot", {"optimizeForSpeed": True}
-        )["data"]
-        with open(image_path, "wb") as image_file:
-            image_file.write(base64.b64decode(image_data))
+    @abc.abstractmethod
+    def image_write(self, image_path: str) -> None: ...
 
     # Sends a key's press and release to whatever holds the focus.
-    def key_send(self, key_name: str) -> None:
-        key_press = test_settings.CLICK_KEY_PRESSES[key_name]
-        self.command(
-            "Input.dispatchKeyEvent",
-            {
-                "type": "keyDown" if "text" in key_press else "rawKeyDown",
-                **key_press,
-            },
-        )
-        self.command(
-            "Input.dispatchKeyEvent",
-            {
-                "type": "keyUp",
-                **{
-                    part_name: part_value
-                    for part_name, part_value in key_press.items()
-                    if part_name not in ("commands", "text")
-                },
-            },
-        )
+    @abc.abstractmethod
+    def key_send(self, key_name: str) -> None: ...
 
     # Presses a key, returning once each frame drew after it.
     def key_settle(self, key_name: str) -> None:
@@ -1889,36 +2398,47 @@ class PageTab:
         self.key_send(key_name)
         self.browser_session.settled_tab_wait([self])
 
-    # Returns what a function returns called on an object with arguments.
-    def object_call(
-        self, object_id: str, function_text: str, *call_arguments: Any
-    ) -> Any:
-        return self.command(
-            "Runtime.callFunctionOn",
-            {
-                "objectId": object_id,
-                "functionDeclaration": function_text,
-                "arguments": [
-                    {"value": call_argument}
-                    for call_argument in call_arguments
-                ],
-                "returnByValue": True,
-            },
-        )["result"].get("value")
+    # Counts a frame's load begun, the navigation's frame starting it.
+    def load_begin(self, frame_id: str) -> None:
+        self.loading_frames.add(frame_id)
+        self.is_started |= frame_id == self.navigation_frame_id
+
+    # Counts a frame's load ended, a frame removed while loading too.
+    def load_end(self, frame_id: str) -> None:
+        self.loading_frames.discard(frame_id)
+
+    # Starts opening a page, returning the frame whose load starts it.
+    @abc.abstractmethod
+    def navigation_begin(self, page_url: str) -> str: ...
+
+    # Counts a context drawn when its check of this settle reports.
+    def page_drawn_mark(
+        self, context_id: ScriptContext, settle_text: str
+    ) -> None:
+        # A check begun before this settle reports nothing about it.
+        if settle_text == str(self.settle_count):
+            self.drawn_contexts.add(context_id)
 
     # Starts opening a page, which a settle then waits on.
     def page_navigate(self, page_url: str) -> None:
         self.settle_begin()
-        navigation = self.command("Page.navigate", {"url": page_url})
-        if "errorText" in navigation:
-            raise RuntimeError(f"{page_url}: {navigation['errorText']}")
-        self.navigation_frame_id = navigation["frameId"]
+        self.navigation_frame_id = self.navigation_begin(page_url)
         self.is_started = False
 
     # Opens a page, returning once its frames stopped loading and each drew.
     def page_open(self, page_url: str) -> None:
         self.page_navigate(page_url)
         self.browser_session.settled_tab_wait([self])
+
+    # Returns once a frame painted again, after a task following the paint.
+    def paint_wait(self, frame_name: str) -> None:
+        _, exception_text = self.script_run(
+            self.frame_context(frame_name),
+            self.wait_expression("(after_paint) => after_paint()"),
+            is_awaited=True,
+        )
+        if exception_text:
+            raise RuntimeError(f"{frame_name}: paint wait: {exception_text}")
 
     # Presses a key, returning once the state changed and each frame drew.
     def press(
@@ -1932,29 +2452,35 @@ class PageTab:
         self.settle_begin()
         self.key_send(key_name)
         try:
-            state_change = self.command(
-                "Runtime.evaluate",
-                {
-                    "expression": self.wait_expression(
-                        test_settings.STATE_CHANGE_FUNCTION,
-                        f"() => ({state_expression})",
-                        json.dumps(state_before),
-                    ),
-                    "contextId": state_context,
-                    "awaitPromise": True,
-                },
+            _, exception_text = self.script_run(
+                state_context,
+                self.wait_expression(
+                    test_settings.STATE_CHANGE_FUNCTION,
+                    f"() => ({state_expression})",
+                    json.dumps(state_before),
+                ),
+                is_awaited=True,
             )
         except RuntimeError:
             # A state frame the press reloads is read again once it drew.
             if state_context not in self.destroyed_contexts:
                 raise
         else:
-            if "exceptionDetails" in state_change:
+            if exception_text:
                 raise RuntimeError(
-                    f"{state_frame_name}: {state_expression}:"
-                    f" {state_change['exceptionDetails']['text']}"
+                    f"{state_frame_name}: {state_expression}: {exception_text}"
                 )
         self.browser_session.settled_tab_wait([self])
+
+    # Returns an expression's value in a context and its exception's text.
+    @abc.abstractmethod
+    def script_run(
+        self,
+        context_id: ScriptContext,
+        expression: str,
+        is_awaited: bool = False,
+        is_activated: bool = False,
+    ) -> tuple[Any, str]: ...
 
     # Forgets the drawn checks, so each frame draws again after what follows.
     def settle_begin(self) -> None:
@@ -1974,84 +2500,26 @@ class PageTab:
     def settle_step(self) -> bool:
         self.has_news = False
         while self.pending_events:
-            event = self.pending_events.pop(0)
-            event_parameters = event["params"]
-            if event["method"] == "Page.frameStartedLoading":
-                self.loading_frames.add(event_parameters["frameId"])
-                self.is_started |= (
-                    event_parameters["frameId"] == self.navigation_frame_id
-                )
-            # A frame removed while loading never stops loading.
-            elif event["method"] in (
-                "Page.frameDetached",
-                "Page.frameStoppedLoading",
-            ):
-                self.loading_frames.discard(event_parameters["frameId"])
-            elif event["method"] == "Runtime.bindingCalled":
-                # A check begun before this settle reports nothing about it.
-                if event_parameters["payload"] == str(self.settle_count):
-                    self.drawn_contexts.add(
-                        event_parameters["executionContextId"]
-                    )
+            self.pending_events.pop(0)()
         return (
             self.is_started
             and not self.loading_frames
-            and self.frames_drawn(
-                self.command("Page.getFrameTree")["frameTree"]
-            )
+            and self.frames_drawn(self.frame_tree())
         )
 
     # Types text a key per character, returning once each frame drew after it.
     def text_type(self, typed_text: str) -> None:
         self.settle_begin()
-        for typed_character in typed_text:
-            self.command(
-                "Input.dispatchKeyEvent",
-                {
-                    "type": "keyDown",
-                    "key": typed_character,
-                    "text": typed_character,
-                },
-            )
-            self.command(
-                "Input.dispatchKeyEvent",
-                {"type": "keyUp", "key": typed_character},
-            )
+        self.characters_send(typed_text)
         self.browser_session.settled_tab_wait([self])
 
+    # Starts the trace a timing reads, which only Chrome writes.
     def trace_begin(self) -> None:
-        self.command(
-            "Tracing.start",
-            {
-                "traceConfig": {
-                    "includedCategories": list(test_settings.TRACE_CATEGORIES)
-                },
-                "transferMode": "ReturnAsStream",
-            },
-        )
+        raise RuntimeError(f"{type(self).__name__} writes no trace")
 
     # Ends the trace, returning its events.
     def trace_end(self) -> list[Any]:
-        self.command("Tracing.end")
-        trace_stream = self.event_wait("Tracing.tracingComplete")["stream"]
-        trace_chunks: list[bytes] = []
-        while True:
-            stream_read = self.command(
-                "IO.read",
-                {
-                    "handle": trace_stream,
-                    "size": test_settings.TRACE_READ_BYTES,
-                },
-            )
-            trace_chunks.append(
-                base64.b64decode(stream_read["data"])
-                if stream_read.get("base64Encoded")
-                else stream_read["data"].encode()
-            )
-            if stream_read["eof"]:
-                break
-        self.command("IO.close", {"handle": trace_stream})
-        return json.loads(b"".join(trace_chunks))["traceEvents"]
+        raise RuntimeError(f"{type(self).__name__} writes no trace")
 
     # Presses each walk's key until the walk reaches its element.
     def walks_take(
@@ -2084,6 +2552,865 @@ class PageTab:
         )
 
 
+# Drives one Chrome tab through its DevTools session.
+class ChromeTab(PageTab):
+    def __init__(
+        self,
+        chrome_session: ChromeSession,
+        session_id: str,
+        browser_context_id: str,
+        tab_size: tuple[int, int],
+    ) -> None:
+        super().__init__(chrome_session, tab_size)
+        self.chrome_session = chrome_session
+        self.session_id = session_id
+        self.browser_context_id = browser_context_id
+        # The events no settle step reads, which a wait may take.
+        self.waited_events: list[dict[str, Any]] = []
+
+    def characters_send(self, typed_text: str) -> None:
+        for typed_character in typed_text:
+            self.command(
+                "Input.dispatchKeyEvent",
+                {
+                    "type": "keyDown",
+                    "key": typed_character,
+                    "text": typed_character,
+                },
+            )
+            self.command(
+                "Input.dispatchKeyEvent",
+                {"type": "keyUp", "key": typed_character},
+            )
+
+    def close(self) -> None:
+        del self.chrome_session.page_tabs[self.session_id]
+        self.chrome_session.command(
+            "Target.disposeBrowserContext",
+            {"browserContextId": self.browser_context_id},
+        )
+
+    # Sends a command to the tab, returning its result once its reply comes.
+    def command(
+        self, method: str, parameters: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        return self.chrome_session.command(method, parameters, self.session_id)
+
+    # Keeps an event of the tab, its error reports and script contexts.
+    def event_take(self, message: dict[str, Any]) -> None:
+        self.has_news = True
+        method = message["method"]
+        event_parameters = message["params"]
+        if method == "Runtime.exceptionThrown":
+            exception_details = event_parameters["exceptionDetails"]
+            self.thrown_texts.append(
+                exception_details.get("exception", {}).get(
+                    "description", exception_details["text"]
+                )
+            )
+        elif method == "Runtime.consoleAPICalled":
+            self.error_report_keep(
+                event_parameters["executionContextId"],
+                " ".join(
+                    str(console_argument.get("value", ""))
+                    for console_argument in event_parameters["args"]
+                ),
+            )
+        elif method == "Runtime.executionContextCreated":
+            context = event_parameters["context"]
+            if context["auxData"]["isDefault"]:
+                self.frame_contexts[context["auxData"]["frameId"]] = context[
+                    "id"
+                ]
+        elif method == "Runtime.executionContextDestroyed":
+            self.context_end(event_parameters["executionContextId"])
+        elif method == "Runtime.executionContextsCleared":
+            self.destroyed_contexts.update(self.frame_contexts.values())
+            self.frame_contexts = {}
+        elif method == "Page.frameStartedLoading":
+            self.pending_events.append(
+                functools.partial(self.load_begin, event_parameters["frameId"])
+            )
+        # A frame removed while loading never stops loading.
+        elif method in ("Page.frameDetached", "Page.frameStoppedLoading"):
+            if method == "Page.frameDetached":
+                self.detached_frames.add(event_parameters["frameId"])
+            self.pending_events.append(
+                functools.partial(self.load_end, event_parameters["frameId"])
+            )
+        elif method == "Runtime.bindingCalled":
+            self.pending_events.append(
+                functools.partial(
+                    self.page_drawn_mark,
+                    event_parameters["executionContextId"],
+                    event_parameters["payload"],
+                )
+            )
+        else:
+            self.waited_events.append(message)
+
+    # Returns the next event of a method, reading messages until one comes.
+    def event_wait(self, method: str) -> dict[str, Any]:
+        while True:
+            for event_index, waited_event in enumerate(self.waited_events):
+                if waited_event["method"] == method:
+                    return self.waited_events.pop(event_index)["params"]
+            self.chrome_session.message_read()
+
+    def frame_shown(self, frame_node: FrameNode) -> bool:
+        try:
+            owner_node_id = self.command(
+                "DOM.getFrameOwner", {"frameId": frame_node.frame_id}
+            )["backendNodeId"]
+            owner_object = self.command(
+                "DOM.resolveNode",
+                {
+                    "backendNodeId": owner_node_id,
+                    "executionContextId": self.frame_contexts[
+                        frame_node.parent_id
+                    ],
+                },
+            )["object"]
+            if not self.object_call(
+                owner_object["objectId"],
+                test_settings.FRAME_LAID_OUT_FUNCTION,
+            ):
+                return False
+            frame_quads = self.command(
+                "DOM.getContentQuads", {"backendNodeId": owner_node_id}
+            )["quads"]
+        except RuntimeError:
+            # A frame its page removed meanwhile is out of view.
+            if frame_node.frame_id in self.detached_frames:
+                return False
+            raise
+        width_px, height_px = self.tab_size
+        return any(
+            max(quad[0::2]) > 0
+            and max(quad[1::2]) > 0
+            and min(quad[0::2]) < width_px
+            and min(quad[1::2]) < height_px
+            for quad in frame_quads
+        )
+
+    def frame_tree(self) -> FrameNode:
+        return self.frame_node_of(
+            self.command("Page.getFrameTree")["frameTree"]
+        )
+
+    # Returns the node of a frame tree DevTools reports.
+    def frame_node_of(self, frame_tree: dict[str, Any]) -> FrameNode:
+        return FrameNode(
+            frame_tree["frame"]["id"],
+            frame_tree["frame"].get("parentId", ""),
+            tuple(
+                self.frame_node_of(child_tree)
+                for child_tree in frame_tree.get("childFrames", [])
+            ),
+        )
+
+    def image_write(self, image_path: str) -> None:
+        # The fast encoding writes the same pixels to a larger file.
+        image_data = self.command(
+            "Page.captureScreenshot", {"optimizeForSpeed": True}
+        )["data"]
+        with open(image_path, "wb") as image_file:
+            image_file.write(base64.b64decode(image_data))
+
+    def key_send(self, key_name: str) -> None:
+        key_press = test_settings.CLICK_KEY_PRESSES[key_name]
+        self.command(
+            "Input.dispatchKeyEvent",
+            {
+                "type": "keyDown" if "text" in key_press else "rawKeyDown",
+                **key_press,
+            },
+        )
+        self.command(
+            "Input.dispatchKeyEvent",
+            {
+                "type": "keyUp",
+                **{
+                    part_name: part_value
+                    for part_name, part_value in key_press.items()
+                    if part_name not in ("commands", "text")
+                },
+            },
+        )
+
+    def navigation_begin(self, page_url: str) -> str:
+        navigation = self.command("Page.navigate", {"url": page_url})
+        if "errorText" in navigation:
+            raise RuntimeError(f"{page_url}: {navigation['errorText']}")
+        return navigation["frameId"]
+
+    # Returns what a function returns called on an object with arguments.
+    def object_call(
+        self, object_id: str, function_text: str, *call_arguments: Any
+    ) -> Any:
+        return self.command(
+            "Runtime.callFunctionOn",
+            {
+                "objectId": object_id,
+                "functionDeclaration": function_text,
+                "arguments": [
+                    {"value": call_argument}
+                    for call_argument in call_arguments
+                ],
+                "returnByValue": True,
+            },
+        )["result"].get("value")
+
+    def script_run(
+        self,
+        context_id: ScriptContext,
+        expression: str,
+        is_awaited: bool = False,
+        is_activated: bool = False,
+    ) -> tuple[Any, str]:
+        evaluation = self.command(
+            "Runtime.evaluate",
+            {
+                "expression": expression,
+                "contextId": context_id,
+                "returnByValue": True,
+                "awaitPromise": is_awaited,
+                "userGesture": is_activated,
+            },
+        )
+        if "exceptionDetails" in evaluation:
+            return None, evaluation["exceptionDetails"]["text"]
+        return evaluation["result"].get("value"), ""
+
+    def trace_begin(self) -> None:
+        self.command(
+            "Tracing.start",
+            {
+                "traceConfig": {
+                    "includedCategories": list(test_settings.TRACE_CATEGORIES)
+                },
+                "transferMode": "ReturnAsStream",
+            },
+        )
+
+    def trace_end(self) -> list[Any]:
+        self.command("Tracing.end")
+        trace_stream = self.event_wait("Tracing.tracingComplete")["stream"]
+        trace_chunks: list[bytes] = []
+        while True:
+            stream_read = self.command(
+                "IO.read",
+                {
+                    "handle": trace_stream,
+                    "size": test_settings.TRACE_READ_BYTES,
+                },
+            )
+            trace_chunks.append(
+                base64.b64decode(stream_read["data"])
+                if stream_read.get("base64Encoded")
+                else stream_read["data"].encode()
+            )
+            if stream_read["eof"]:
+                break
+        self.command("IO.close", {"handle": trace_stream})
+        return json.loads(b"".join(trace_chunks))["traceEvents"]
+
+
+# Drives one Firefox tab through its top browsing context.
+class FirefoxTab(PageTab):
+    def __init__(
+        self,
+        firefox_session: FirefoxSession,
+        top_context: str,
+        user_context: str,
+        tab_size: tuple[int, int],
+    ) -> None:
+        super().__init__(firefox_session, tab_size)
+        self.firefox_session = firefox_session
+        # The navigation each frame started last, whose end alone counts.
+        self.frame_navigations: dict[str, str] = {}
+        # The script handing the drawn channel to each page of the tab.
+        self.preload_script = ""
+        self.top_context = top_context
+        self.user_context = user_context
+
+    def characters_send(self, typed_text: str) -> None:
+        self.key_actions_send(
+            [
+                {"type": key_action, "value": typed_character}
+                for typed_character in typed_text
+                for key_action in ("keyDown", "keyUp")
+            ]
+        )
+
+    def close(self) -> None:
+        for frame_tabs in (
+            self.firefox_session.context_tabs,
+            self.firefox_session.realm_tabs,
+        ):
+            for frame_key in [
+                frame_key
+                for frame_key, page_tab in frame_tabs.items()
+                if page_tab is self
+            ]:
+                del frame_tabs[frame_key]
+        self.firefox_session.command(
+            "script.removePreloadScript", {"script": self.preload_script}
+        )
+        self.firefox_session.command(
+            "browser.removeUserContext", {"userContext": self.user_context}
+        )
+
+    # Ends the loads of a removed frame and of every frame it held.
+    def context_remove(self, context_info: dict[str, Any]) -> None:
+        self.detached_frames.add(context_info["context"])
+        self.frame_navigations.pop(context_info["context"], None)
+        self.pending_events.append(
+            functools.partial(self.load_end, context_info["context"])
+        )
+        for child_info in context_info["children"] or ():
+            self.context_remove(child_info)
+
+    # Keeps an event of the tab, its error reports and script realms.
+    def event_take(self, message: dict[str, Any]) -> None:
+        self.has_news = True
+        method = message["method"]
+        event_parameters = message["params"]
+        if method == "log.entryAdded":
+            if event_parameters["type"] == "console":
+                self.error_report_keep(
+                    event_parameters["source"]["realm"],
+                    event_parameters["text"],
+                )
+            elif event_parameters["level"] == "error":
+                self.thrown_texts.append(event_parameters["text"])
+        elif method == "script.realmCreated":
+            if (
+                event_parameters["type"] == "window"
+                and "sandbox" not in event_parameters
+            ):
+                self.frame_contexts[event_parameters["context"]] = (
+                    event_parameters["realm"]
+                )
+        elif method == "script.realmDestroyed":
+            self.context_end(event_parameters["realm"])
+        elif method == "script.message":
+            self.pending_events.append(
+                functools.partial(
+                    self.page_drawn_mark,
+                    event_parameters["source"]["realm"],
+                    event_parameters["data"]["value"],
+                )
+            )
+        elif method == "browsingContext.navigationStarted":
+            self.frame_navigations[event_parameters["context"]] = (
+                event_parameters["navigation"]
+            )
+            self.pending_events.append(
+                functools.partial(self.load_begin, event_parameters["context"])
+            )
+        elif method == "browsingContext.contextDestroyed":
+            self.context_remove(event_parameters)
+        # A late end of a navigation a later one replaced ends nothing.
+        elif (
+            method != "browsingContext.contextCreated"
+            and self.frame_navigations.get(event_parameters["context"])
+            == event_parameters["navigation"]
+        ):
+            self.pending_events.append(
+                functools.partial(self.load_end, event_parameters["context"])
+            )
+
+    def frame_shown(self, frame_node: FrameNode) -> bool:
+        try:
+            shown_call = self.firefox_session.command(
+                "script.callFunction",
+                {
+                    "functionDeclaration": (
+                        test_settings.FRAME_WINDOWS_SHOWN_FUNCTION
+                    ),
+                    "target": {"context": frame_node.parent_id},
+                    "awaitPromise": True,
+                },
+            )
+        except RuntimeError:
+            # A frame its page removed meanwhile is out of view.
+            if frame_node.frame_id in self.detached_frames:
+                return False
+            raise
+        if shown_call["type"] == "exception":
+            raise RuntimeError(
+                f"{frame_node.frame_id}: frame shown check:"
+                f" {shown_call['exceptionDetails']['text']}"
+            )
+        for frame_entry in shown_call["result"]["value"]:
+            frame_window, frame_shown = frame_entry["value"]
+            # An element holding no page yet has a null window.
+            if (
+                frame_window["type"] == "window"
+                and frame_window["value"]["context"] == frame_node.frame_id
+            ):
+                return frame_shown["value"]
+        # A frame its page removed meanwhile is out of view.
+        if frame_node.frame_id in self.detached_frames:
+            return False
+        raise RuntimeError(f"{frame_node.frame_id}: no frame element shows it")
+
+    def frame_tree(self) -> FrameNode:
+        (top_info,) = self.firefox_session.command(
+            "browsingContext.getTree", {"root": self.top_context}
+        )["contexts"]
+        return self.frame_node_of(top_info, "")
+
+    # Returns the node of a browsing context tree Firefox reports.
+    def frame_node_of(
+        self, context_info: dict[str, Any], parent_id: str
+    ) -> FrameNode:
+        return FrameNode(
+            context_info["context"],
+            parent_id,
+            tuple(
+                self.frame_node_of(child_info, context_info["context"])
+                for child_info in context_info["children"]
+            ),
+        )
+
+    def image_write(self, image_path: str) -> None:
+        image_data = self.firefox_session.command(
+            "browsingContext.captureScreenshot", {"context": self.top_context}
+        )["data"]
+        with open(image_path, "wb") as image_file:
+            image_file.write(base64.b64decode(image_data))
+
+    # Performs key actions on the keyboard input source, in order.
+    def key_actions_send(self, key_actions: list[dict[str, str]]) -> None:
+        self.firefox_session.command(
+            "input.performActions",
+            {
+                "context": self.top_context,
+                "actions": [
+                    {"type": "key", "id": "keyboard", "actions": key_actions}
+                ],
+            },
+        )
+
+    def key_send(self, key_name: str) -> None:
+        key_values = test_settings.CLICK_FIREFOX_KEY_VALUES[key_name]
+        self.key_actions_send(
+            [
+                {"type": "keyDown", "value": key_value}
+                for key_value in key_values
+            ]
+            + [
+                {"type": "keyUp", "value": key_value}
+                for key_value in reversed(key_values)
+            ]
+        )
+        if key_name not in test_settings.CLICK_FOCUS_MOVES_BACKWARD:
+            return
+        top_focus = self.firefox_session.command(
+            "script.evaluate",
+            {
+                "expression": "document.hasFocus()",
+                "target": {"context": self.top_context},
+                "awaitPromise": False,
+            },
+        )
+        # A move past the page's end puts the focus on the browser's controls.
+        if not top_focus["result"]["value"]:
+            self.firefox_session.focus_return(
+                test_settings.CLICK_FOCUS_MOVES_BACKWARD[key_name]
+            )
+            self.firefox_session.command(
+                "script.evaluate",
+                {
+                    "expression": self.wait_expression(
+                        test_settings.FIREFOX_PAGE_FOCUS_WAIT_FUNCTION
+                    ),
+                    "target": {"context": self.top_context},
+                    "awaitPromise": True,
+                },
+            )
+
+    def navigation_begin(self, page_url: str) -> str:
+        self.firefox_session.command(
+            "browsingContext.navigate",
+            {"context": self.top_context, "url": page_url, "wait": "none"},
+        )
+        return self.top_context
+
+    # Returns the value a serialized script value holds.
+    def remote_value_read(self, remote_value: dict[str, Any]) -> Any:
+        value_type = remote_value["type"]
+        # A promise not awaited holds no value yet.
+        if value_type in ("null", "promise", "undefined"):
+            return None
+        if value_type in ("boolean", "string"):
+            return remote_value["value"]
+        if value_type == "array":
+            return [
+                self.remote_value_read(item_value)
+                for item_value in remote_value["value"]
+            ]
+        if value_type == "object":
+            return {
+                item_key: self.remote_value_read(item_value)
+                for item_key, item_value in remote_value["value"]
+            }
+        # NaN, an infinity and minus zero come as text, which no check reads.
+        if value_type == "number" and not isinstance(
+            remote_value["value"], str
+        ):
+            return remote_value["value"]
+        raise RuntimeError(f"a script value of no plain value: {remote_value}")
+
+    def script_run(
+        self,
+        context_id: ScriptContext,
+        expression: str,
+        is_awaited: bool = False,
+        is_activated: bool = False,
+    ) -> tuple[Any, str]:
+        # Firefox loses the realm of a page that rewrote itself, not its frame.
+        realm_frames = [
+            frame_id
+            for frame_id, frame_realm in self.frame_contexts.items()
+            if frame_realm == context_id
+        ]
+        if not realm_frames:
+            raise RuntimeError(f"{context_id}: a realm its page left")
+        (frame_id,) = realm_frames
+        evaluation = self.firefox_session.command(
+            "script.evaluate",
+            {
+                "expression": expression,
+                "target": {"context": frame_id},
+                "awaitPromise": is_awaited,
+                "userActivation": is_activated,
+            },
+        )
+        if evaluation["type"] == "exception":
+            return None, evaluation["exceptionDetails"]["text"]
+        return self.remote_value_read(evaluation["result"]), ""
+
+
+# Drives one SeaMonkey window through the driver, its page the tab's.
+class SeaMonkeyTab(PageTab):
+    def __init__(
+        self,
+        seamonkey_session: SeaMonkeySession,
+        tab_key: str,
+        tab_size: tuple[int, int],
+    ) -> None:
+        super().__init__(seamonkey_session, tab_size)
+        self.seamonkey_session = seamonkey_session
+        # The value or exception of each awaited script, by its call number.
+        self.call_results: dict[int, dict[str, Any]] = {}
+        # The tab's top frame, which the driver names the tab by.
+        self.tab_key = tab_key
+
+    def characters_send(self, typed_text: str) -> None:
+        self.keys_send(
+            [
+                [action_name, {"key": typed_character}]
+                for typed_character in typed_text
+                for action_name in ("keydown", "keyup")
+            ]
+        )
+
+    # SeaMonkey's pages hold no clipboard, so its browser window writes it.
+    def clipboard_write(self, frame_name: str, pasted_text: str) -> None:
+        self.seamonkey_session.driver_call("clipboard_write", pasted_text)
+
+    def close(self) -> None:
+        self.seamonkey_session.tab_forget(self)
+        self.seamonkey_session.driver_call("tab_close", self.tab_key)
+
+    # Keeps a driver event of the tab, its error reports and script contexts.
+    def event_take(self, driver_event: dict[str, Any]) -> None:
+        self.has_news = True
+        event_name = driver_event["event"]
+        if event_name == "console":
+            self.error_report_keep(
+                driver_event["context"], driver_event["text"]
+            )
+        elif event_name == "thrown":
+            self.thrown_texts.append(driver_event["text"])
+        elif event_name == "context_created":
+            self.frame_contexts[driver_event["frame"]] = driver_event[
+                "context"
+            ]
+        elif event_name == "context_destroyed":
+            self.context_end(driver_event["context"])
+        elif event_name == "drawn":
+            self.pending_events.append(
+                functools.partial(
+                    self.page_drawn_mark,
+                    driver_event["context"],
+                    driver_event["payload"],
+                )
+            )
+        elif event_name == "frame_removed":
+            self.detached_frames.add(driver_event["frame"])
+            self.pending_events.append(
+                functools.partial(self.load_end, driver_event["frame"])
+            )
+        elif event_name == "load_begin":
+            self.pending_events.append(
+                functools.partial(self.load_begin, driver_event["frame"])
+            )
+        elif event_name == "load_end":
+            self.pending_events.append(
+                functools.partial(self.load_end, driver_event["frame"])
+            )
+        elif event_name == "result":
+            self.call_results[driver_event["call_number"]] = driver_event
+        else:
+            raise RuntimeError(f"a driver event of no kind: {driver_event}")
+
+    def frame_shown(self, frame_node: FrameNode) -> bool:
+        frame_shown = self.seamonkey_session.driver_call(
+            "frame_shown", frame_node.parent_id, frame_node.frame_id
+        )
+        if isinstance(frame_shown, bool):
+            return frame_shown
+        # A frame its page removed meanwhile is out of view.
+        if frame_node.frame_id in self.detached_frames:
+            return False
+        raise RuntimeError(f"{frame_node.frame_id}: no frame element shows it")
+
+    def frame_tree(self) -> FrameNode:
+        return self.frame_node_of(
+            self.seamonkey_session.driver_call("frame_tree", self.tab_key), ""
+        )
+
+    # Returns the node of a frame tree the driver reports.
+    def frame_node_of(
+        self, tree_entry: list[Any], parent_id: str
+    ) -> FrameNode:
+        frame_id, child_entries = tree_entry
+        return FrameNode(
+            frame_id,
+            parent_id,
+            tuple(
+                self.frame_node_of(child_entry, frame_id)
+                for child_entry in child_entries
+            ),
+        )
+
+    def image_write(self, image_path: str) -> None:
+        image_url = self.seamonkey_session.driver_call(
+            "image_data", self.tab_key, *self.tab_size
+        )
+        _, image_data = image_url.split(",", 1)
+        with open(image_path, "wb") as image_file:
+            image_file.write(base64.b64decode(image_data))
+
+    def key_send(self, key_name: str) -> None:
+        key_events = test_settings.CLICK_SEAMONKEY_KEY_EVENTS[key_name]
+        self.keys_send(
+            [["keydown", key_event] for key_event in key_events]
+            + [["keyup", key_event] for key_event in reversed(key_events)]
+        )
+        # A move past the page's end puts the focus on the browser's controls.
+        if key_name in test_settings.CLICK_FOCUS_MOVES_BACKWARD:
+            self.seamonkey_session.driver_call(
+                "focus_return",
+                self.tab_key,
+                test_settings.CLICK_FOCUS_MOVES_BACKWARD[key_name],
+                test_settings.CLICK_WALK_PRESS_LIMIT,
+            )
+
+    # Sends key actions to the window's focus, each a press or a release.
+    def keys_send(self, key_actions: list[list[Any]]) -> None:
+        self.seamonkey_session.driver_call(
+            "keys_send", self.tab_key, key_actions
+        )
+
+    def navigation_begin(self, page_url: str) -> str:
+        self.seamonkey_session.driver_call("navigate", self.tab_key, page_url)
+        return self.tab_key
+
+    def script_run(
+        self,
+        context_id: ScriptContext,
+        expression: str,
+        is_awaited: bool = False,
+        is_activated: bool = False,
+    ) -> tuple[Any, str]:
+        if is_activated:
+            raise RuntimeError(f"{context_id}: SeaMonkey activates no script")
+        call_number = None
+        if is_awaited:
+            self.seamonkey_session.call_count += 1
+            call_number = self.seamonkey_session.call_count
+        run_reply = self.seamonkey_session.driver_call(
+            "script_run", self.tab_key, context_id, expression, call_number
+        )
+        if "gone" in run_reply:
+            self.context_end(context_id)
+            raise RuntimeError(f"{context_id}: a context its page left")
+        if "exception" in run_reply:
+            return None, run_reply["exception"]
+        if call_number is None:
+            return run_reply.get("value"), ""
+        while call_number not in self.call_results:
+            self.seamonkey_session.message_read()
+        call_result = self.call_results.pop(call_number)
+        if "exception" in call_result:
+            return None, call_result["exception"]
+        return call_result.get("value"), ""
+
+
+# Sends and reads the text messages of one WebSocket, as its client.
+class WebSocketChannel:
+    def __init__(self, socket_url: str) -> None:
+        split_url = urllib.parse.urlsplit(socket_url)
+        if not split_url.hostname or not split_url.port:
+            raise RuntimeError(f"{socket_url}: names no host and port")
+        self.socket_connection = socket.create_connection(
+            (split_url.hostname, split_url.port)
+        )
+        self.unread_bytes = bytearray()
+        handshake_key = base64.b64encode(
+            os.urandom(test_settings.WEB_SOCKET_KEY_BYTES)
+        ).decode()
+        self.socket_connection.sendall(
+            (
+                f"GET {split_url.path} HTTP/1.1\r\n"
+                f"Host: {split_url.netloc}\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Key: {handshake_key}\r\n"
+                f"Sec-WebSocket-Version: {test_settings.WEB_SOCKET_VERSION}"
+                "\r\n\r\n"
+            ).encode()
+        )
+        while test_settings.WEB_SOCKET_HEADER_END not in self.unread_bytes:
+            self.bytes_receive()
+        header_bytes, _, self.unread_bytes = self.unread_bytes.partition(
+            test_settings.WEB_SOCKET_HEADER_END
+        )
+        status_line, *header_lines = header_bytes.decode().split("\r\n")
+        _, status_code, _ = status_line.split(" ", 2)
+        accept_key = base64.b64encode(
+            hashlib.sha1(
+                (handshake_key + test_settings.WEB_SOCKET_ACCEPT_GUID).encode()
+            ).digest()
+        ).decode()
+        accept_values = [
+            header_value.strip()
+            for header_name, _, header_value in (
+                header_line.partition(":") for header_line in header_lines
+            )
+            if header_name.strip().lower() == "sec-websocket-accept"
+        ]
+        if (
+            status_code != test_settings.WEB_SOCKET_SWITCH_STATUS
+            or accept_values != [accept_key]
+        ):
+            raise RuntimeError(f"{socket_url}: answered {status_line!r}")
+
+    # Receives the bytes the socket holds, waiting for some.
+    def bytes_receive(self) -> None:
+        received_bytes = self.socket_connection.recv(
+            test_settings.WEB_SOCKET_READ_BYTES
+        )
+        if not received_bytes:
+            raise ConnectionError("the socket closed")
+        self.unread_bytes += received_bytes
+
+    # Reads exactly a count of bytes, receiving until they came.
+    def bytes_take(self, byte_count: int) -> bytes:
+        while len(self.unread_bytes) < byte_count:
+            self.bytes_receive()
+        taken_bytes = bytes(self.unread_bytes[:byte_count])
+        del self.unread_bytes[:byte_count]
+        return taken_bytes
+
+    def close(self) -> None:
+        self.socket_connection.close()
+
+    # Sends one frame, its payload masked as a client's must be.
+    def frame_send(self, opcode: int, payload: bytes) -> None:
+        payload_length = len(payload)
+        if payload_length < test_settings.WEB_SOCKET_SHORT_LENGTH_MARK:
+            length_bytes = bytes(
+                [test_settings.WEB_SOCKET_MASK_BIT | payload_length]
+            )
+        elif payload_length < test_settings.WEB_SOCKET_SHORT_LENGTH_LIMIT:
+            length_bytes = bytes(
+                [
+                    test_settings.WEB_SOCKET_MASK_BIT
+                    | test_settings.WEB_SOCKET_SHORT_LENGTH_MARK
+                ]
+            ) + payload_length.to_bytes(
+                test_settings.WEB_SOCKET_SHORT_LENGTH_BYTES, "big"
+            )
+        else:
+            length_bytes = bytes(
+                [
+                    test_settings.WEB_SOCKET_MASK_BIT
+                    | test_settings.WEB_SOCKET_LONG_LENGTH_MARK
+                ]
+            ) + payload_length.to_bytes(
+                test_settings.WEB_SOCKET_LONG_LENGTH_BYTES, "big"
+            )
+        mask_key = os.urandom(test_settings.WEB_SOCKET_MASK_BYTES)
+        mask_repeats = payload_length // len(mask_key) + 1
+        repeated_mask = (mask_key * mask_repeats)[:payload_length]
+        masked_payload = (
+            int.from_bytes(payload, "big")
+            ^ int.from_bytes(repeated_mask, "big")
+        ).to_bytes(payload_length, "big")
+        self.socket_connection.sendall(
+            bytes([test_settings.WEB_SOCKET_FINAL_BIT | opcode])
+            + length_bytes
+            + mask_key
+            + masked_payload
+        )
+
+    # Reads the next text message, its fragments joined, answering pings.
+    def message_read(self) -> str:
+        message_bytes = bytearray()
+        while True:
+            first_byte, second_byte = self.bytes_take(
+                test_settings.WEB_SOCKET_FRAME_HEAD_BYTES
+            )
+            opcode = first_byte & test_settings.WEB_SOCKET_OPCODE_MASK
+            payload_length = second_byte & test_settings.WEB_SOCKET_LENGTH_MASK
+            if payload_length == test_settings.WEB_SOCKET_SHORT_LENGTH_MARK:
+                payload_length = int.from_bytes(
+                    self.bytes_take(
+                        test_settings.WEB_SOCKET_SHORT_LENGTH_BYTES
+                    ),
+                    "big",
+                )
+            elif payload_length == test_settings.WEB_SOCKET_LONG_LENGTH_MARK:
+                payload_length = int.from_bytes(
+                    self.bytes_take(
+                        test_settings.WEB_SOCKET_LONG_LENGTH_BYTES
+                    ),
+                    "big",
+                )
+            if second_byte & test_settings.WEB_SOCKET_MASK_BIT:
+                raise RuntimeError("the server masked a frame")
+            payload = self.bytes_take(payload_length)
+            if opcode == test_settings.WEB_SOCKET_CLOSE_OPCODE:
+                raise ConnectionError("the server closed the socket")
+            if opcode == test_settings.WEB_SOCKET_PING_OPCODE:
+                self.frame_send(test_settings.WEB_SOCKET_PONG_OPCODE, payload)
+            elif opcode != test_settings.WEB_SOCKET_PONG_OPCODE:
+                message_bytes += payload
+                if first_byte & test_settings.WEB_SOCKET_FINAL_BIT:
+                    return message_bytes.decode()
+
+    def message_send(self, message_text: str) -> None:
+        self.frame_send(
+            test_settings.WEB_SOCKET_TEXT_OPCODE, message_text.encode()
+        )
+
+
 class Screenshots:
     def __init__(
         self,
@@ -2093,6 +3420,7 @@ class Screenshots:
         compare_dir: str,
         scratch_dir: str,
         chosen_shot: str,
+        session_type: type[BrowserSession],
     ) -> None:
         # The browser session a shooting run opens, none in a compare only run.
         self.browser_session: BrowserSession | None = None
@@ -2103,19 +3431,21 @@ class Screenshots:
         self.out_dir = out_dir
         self.compare_dir = compare_dir
         self.scratch_dir = scratch_dir
+        # The browser's kind, which names how its shots compare and its views.
+        self.session_type = session_type
         self.report_views = self.report_views_select()
         self.click_timings: list[PageTiming] = []
         # The timings of each page drawn in two frames, every one kept.
         self.frame_timings: list[PageTiming] = []
         self.page_timings: list[PageTiming] = []
 
-    # Walks to a step's element, returning the time its key took to settle.
+    # Walks to a step's element and presses its key, timing it when traced.
     def click_time(
         self,
         page_tab: PageTab,
         set_name: str,
         click_step: ClickStep,
-    ) -> PageTiming:
+    ) -> None:
         fault_label = f"{set_name}: {click_step.label}"
         page_tab.walks_take(fault_label, click_step.key_walks)
         if not page_tab.frame_evaluate(
@@ -2146,14 +3476,16 @@ class Screenshots:
         hash_before = page_tab.frame_evaluate(
             test_settings.CLICK_MENU_FRAME_NAME, test_settings.CLICK_HASH_STATE
         )
-        page_tab.trace_begin()
+        is_traced = self.session().traces_pages
+        if is_traced:
+            page_tab.trace_begin()
         page_tab.press(
             click_step.key_name,
             click_step.state_frame_name,
             click_step.state_expression,
             state_before,
         )
-        trace_events = page_tab.trace_end()
+        trace_events = page_tab.trace_end() if is_traced else None
         page_tab.errors_refuse(f"{set_name}: {click_step.label}")
         state_after = page_tab.frame_evaluate(
             click_step.state_frame_name, state_text_expression
@@ -2174,20 +3506,24 @@ class Screenshots:
             raise RuntimeError(
                 f"{set_name}: {click_step.label} moved to {hash_after}"
             )
+        if trace_events is None:
+            return
         phase_name = (
             f"{test_settings.TIMING_CLICK_PHASE_NAME} {click_step.label}"
         )
-        return PageTiming(
-            page_file,
-            phase_name,
-            phase_name,
-            self.trace_press_span(
-                trace_events, f"{set_name}: {click_step.label}"
-            ),
-            set_name,
+        self.click_timings.append(
+            PageTiming(
+                page_file,
+                phase_name,
+                phase_name,
+                self.trace_press_span(
+                    trace_events, f"{set_name}: {click_step.label}"
+                ),
+                set_name,
+            )
         )
 
-    # Times every click of each click set this report runs.
+    # Presses every click of each click set this report runs, timing each.
     def clicks_time(self) -> None:
         _, width_px, height_px = test_settings.SCREENSHOT_VIEWPORTS[0]
         entry_url = self.file_url(
@@ -2202,11 +3538,7 @@ class Screenshots:
                 page_tab.page_open(entry_url + click_set.view_hash)
                 page_tab.errors_refuse(click_set.set_name)
                 for click_step in click_set.click_steps:
-                    self.click_timings.append(
-                        self.click_time(
-                            page_tab, click_set.set_name, click_step
-                        )
-                    )
+                    self.click_time(page_tab, click_set.set_name, click_step)
 
     def copy_shoot(
         self,
@@ -2224,60 +3556,45 @@ class Screenshots:
         finally:
             shutil.rmtree(self.scratch_dir)
 
-    # Groups changed pixels into boxes, a tile touching another joining it.
-    def changed_regions(
-        self, changed_mask: PIL.Image.Image
-    ) -> list[tuple[int, int, int, int]]:
-        tile_mask = changed_mask.reduce(test_settings.COMPARE_REGION_TILE_PX)
-        marked_tiles = {
-            (tile_index % tile_mask.width, tile_index // tile_mask.width)
-            for tile_index, tile_value in enumerate(tile_mask.tobytes())
-            if tile_value
-        }
-        changed_regions: list[tuple[int, int, int, int]] = []
-        while marked_tiles:
-            pending_tiles = [marked_tiles.pop()]
-            region_columns: list[int] = []
-            region_rows: list[int] = []
-            while pending_tiles:
-                tile_column, tile_row = pending_tiles.pop()
-                region_columns.append(tile_column)
-                region_rows.append(tile_row)
-                for neighbour_tile in (
-                    (tile_column + column_step, tile_row + row_step)
-                    for column_step in (-1, 0, 1)
-                    for row_step in (-1, 0, 1)
-                ):
-                    if neighbour_tile in marked_tiles:
-                        marked_tiles.remove(neighbour_tile)
-                        pending_tiles.append(neighbour_tile)
-            tile_left = (
-                min(region_columns) * test_settings.COMPARE_REGION_TILE_PX
+    # Masks each changed pixel of a square whose average color moved too far.
+    def changed_pixels(
+        self, new_shot: PIL.Image.Image, gold_shot: PIL.Image.Image
+    ) -> PIL.Image.Image:
+        square_px = self.session_type.compare_square_px
+        matching_change = self.session_type.compare_channel_change
+        square_change = self.channel_change(
+            new_shot.reduce(square_px), gold_shot.reduce(square_px)
+        )
+        square_mask = (
+            square_change.point(
+                [
+                    255 if channel_value > matching_change else 0
+                    for channel_value in range(256)
+                ]
             )
-            tile_top = min(region_rows) * test_settings.COMPARE_REGION_TILE_PX
-            inner_box = changed_mask.crop(
+            .resize(
                 (
-                    tile_left,
-                    tile_top,
-                    (max(region_columns) + 1)
-                    * test_settings.COMPARE_REGION_TILE_PX,
-                    (max(region_rows) + 1)
-                    * test_settings.COMPARE_REGION_TILE_PX,
-                )
-            ).getbbox()
-            assert inner_box is not None, "a marked tile holds no change"
-            inner_left, inner_top, inner_right, inner_bottom = inner_box
-            changed_regions.append(
-                (
-                    tile_left + inner_left,
-                    tile_top + inner_top,
-                    tile_left + inner_right,
-                    tile_top + inner_bottom,
-                )
+                    square_change.width * square_px,
+                    square_change.height * square_px,
+                ),
+                PIL.Image.Resampling.BOX,
             )
-        return sorted(
-            changed_regions,
-            key=lambda changed_region: (changed_region[1], changed_region[0]),
+            .crop((0, 0, new_shot.width, new_shot.height))
+        )
+        return PIL.ImageChops.multiply(
+            self.channel_change(new_shot, gold_shot).point(
+                lambda channel_value: 255 if channel_value else 0
+            ),
+            square_mask,
+        )
+
+    # Returns each pixel's largest color channel change between two images.
+    def channel_change(
+        self, new_image: PIL.Image.Image, gold_image: PIL.Image.Image
+    ) -> PIL.Image.Image:
+        return functools.reduce(
+            PIL.ImageChops.lighter,
+            PIL.ImageChops.difference(new_image, gold_image).split(),
         )
 
     # Returns the commit of a frame a time falls after, minus one for none.
@@ -2285,94 +3602,6 @@ class Screenshots:
         self, commit_times: dict[str, list[float]], frame: str, at_time: float
     ) -> int:
         return bisect.bisect_right(commit_times.get(frame, []), at_time) - 1
-
-    # Writes the dimmed shot with boxes, then each region gold and new.
-    def compare_image_write(
-        self,
-        new_shot: PIL.Image.Image,
-        gold_shot: PIL.Image.Image,
-        changed_mask: PIL.Image.Image,
-        changed_regions: list[tuple[int, int, int, int]],
-        compare_path: str,
-    ) -> None:
-        overview_image = PIL.ImageEnhance.Brightness(new_shot).enhance(
-            test_settings.COMPARE_KEPT_BRIGHTNESS_SHARE
-        )
-        overview_image.paste(
-            test_settings.COMPARE_HIGHLIGHT_COLOR, mask=changed_mask
-        )
-        box_drawing = PIL.ImageDraw.Draw(overview_image)
-        label_font = PIL.ImageFont.load_default(
-            size=test_settings.COMPARE_LABEL_FONT_PX
-        )
-        for region_number, (
-            region_left,
-            region_top,
-            region_right,
-            region_bottom,
-        ) in enumerate(changed_regions, 1):
-            box_drawing.rectangle(
-                (
-                    region_left - test_settings.COMPARE_BOX_LINE_PX,
-                    region_top - test_settings.COMPARE_BOX_LINE_PX,
-                    region_right - 1 + test_settings.COMPARE_BOX_LINE_PX,
-                    region_bottom - 1 + test_settings.COMPARE_BOX_LINE_PX,
-                ),
-                outline=test_settings.COMPARE_HIGHLIGHT_COLOR,
-                width=test_settings.COMPARE_BOX_LINE_PX,
-            )
-            box_drawing.text(
-                (
-                    max(region_left - test_settings.COMPARE_BOX_LINE_PX, 0),
-                    max(
-                        region_top
-                        - test_settings.COMPARE_BOX_LINE_PX
-                        - test_settings.COMPARE_LABEL_FONT_PX,
-                        0,
-                    ),
-                ),
-                str(region_number),
-                fill=test_settings.COMPARE_HIGHLIGHT_COLOR,
-                font=label_font,
-            )
-        region_panels: list[PIL.Image.Image] = []
-        panels_height = 0
-        for region_number, changed_region in enumerate(changed_regions, 1):
-            if any(
-                self.region_holds(other_region, changed_region)
-                for other_region in changed_regions
-                if other_region != changed_region
-            ):
-                continue
-            region_panel = self.region_panel(
-                region_number, changed_region, gold_shot, new_shot, label_font
-            )
-            if (
-                panels_height + region_panel.height
-                > test_settings.COMPARE_PANELS_MAX_HEIGHT_SHARE
-                * new_shot.height
-            ):
-                continue
-            region_panels.append(region_panel)
-            panels_height += region_panel.height + test_settings.COMPARE_GAP_PX
-        compare_image = PIL.Image.new(
-            "RGB",
-            (
-                max(
-                    [overview_image.width]
-                    + [region_panel.width for region_panel in region_panels]
-                ),
-                overview_image.height + panels_height,
-            ),
-            test_settings.COMPARE_BACKGROUND_COLOR,
-        )
-        compare_image.paste(overview_image, (0, 0))
-        panel_top = overview_image.height
-        for region_panel in region_panels:
-            compare_image.paste(region_panel, (0, panel_top))
-            panel_top += region_panel.height + test_settings.COMPARE_GAP_PX
-        os.makedirs(self.compare_dir, exist_ok=True)
-        compare_image.save(compare_path)
 
     # Refuses a call graph that draws past a limit of one with no error report.
     def draw_limit_check(self, test_name: str) -> None:
@@ -2439,60 +3668,33 @@ class Screenshots:
     def file_url(self, path: str) -> str:
         return "file://" + urllib.parse.quote(path)
 
-    # Names each shot that differs from its gold twin, each one missing.
+    # Names each shot that differs from its gold twin or has none.
     def gold_compare(
         self, gold_dir: str, prefix: str, verbose_level: int
     ) -> None:
-        shot_pattern = re.compile(
-            f"[0-9]{{{test_settings.SHOT_NUMBER_DIGITS}}}-[^-]+-[^-]+-[^-]+"
-            f"-{re.escape(prefix.rstrip('_'))}-.*"
-            + re.escape(test_settings.IMAGE_SUFFIX)
-        )
-        if os.path.isdir(self.compare_dir):
-            for file_name in os.listdir(self.compare_dir):
-                shot_file_name = file_name.removeprefix(
-                    test_settings.COMPARE_IMAGE_PREFIX
-                )
-                if (
-                    file_name.startswith(test_settings.COMPARE_IMAGE_PREFIX)
-                    and shot_pattern.fullmatch(shot_file_name)
-                    and self.shot_is_taken(
-                        shot_file_name.removesuffix(test_settings.IMAGE_SUFFIX)
-                    )
-                ):
-                    os.remove(os.path.join(self.compare_dir, file_name))
-        shot_names = [
-            shot
-            for shot in self.shot_names(prefix)
-            if self.shot_is_taken(shot)
-        ]
         is_same = True
-        for shot_name in shot_names:
-            if not self.gold_compare_one(
+        for shot_name in self.shot_names(prefix):
+            if self.shot_is_taken(shot_name) and not self.gold_compare_one(
                 shot_name + test_settings.IMAGE_SUFFIX, gold_dir, verbose_level
             ):
-                is_same = False
-        for file_name in sorted(os.listdir(gold_dir)):
-            gold_shot = file_name.removesuffix(test_settings.IMAGE_SUFFIX)
-            if (
-                shot_pattern.fullmatch(file_name)
-                and self.shot_is_taken(gold_shot)
-                and gold_shot not in shot_names
-            ):
-                print(
-                    f"{file_name}: in {gold_dir}, not among this run's shots"
-                )
                 is_same = False
         # A difference makes the compare directory, its one sign to the run.
         if not is_same:
             os.makedirs(self.compare_dir, exist_ok=True)
 
+    # Returns whether a shot matches its gold twin, writing its change if not.
     def gold_compare_one(
         self, file_name: str, gold_dir: str, verbose_level: int
     ) -> bool:
         new_path = os.path.join(self.out_dir, file_name)
         if not os.path.isfile(new_path):
             raise RuntimeError(f"{file_name}: absent from {self.out_dir}")
+        compare_path = os.path.join(
+            self.compare_dir, test_settings.COMPARE_IMAGE_PREFIX + file_name
+        )
+        # An earlier run's compare image goes, so none is left for a match.
+        if os.path.isfile(compare_path):
+            os.remove(compare_path)
         gold_path = os.path.join(gold_dir, file_name)
         if not os.path.isfile(gold_path):
             print(f"{file_name}: absent from {gold_dir}")
@@ -2505,48 +3707,20 @@ class Screenshots:
                 f" {gold_shot.width}x{gold_shot.height}"
             )
             return False
-        red_change, green_change, blue_change = PIL.ImageChops.difference(
-            new_shot, gold_shot
-        ).split()
-        channel_change = PIL.ImageChops.lighter(
-            PIL.ImageChops.lighter(red_change, green_change), blue_change
-        )
-        if channel_change.getbbox() is None:
+        changed_mask = self.changed_pixels(new_shot, gold_shot)
+        if changed_mask.getbbox() is None:
             if verbose_level:
                 verbose_print(verbose_level, [f"{file_name}: same as gold"])
             return True
-        changed_mask = channel_change.point(
-            lambda channel_value: 255 if channel_value else 0
+        compare_image = PIL.ImageEnhance.Brightness(new_shot).enhance(
+            test_settings.COMPARE_KEPT_BRIGHTNESS_SHARE
         )
-        changed_count = changed_mask.histogram()[255]
-        changed_regions = self.changed_regions(changed_mask)
-        compare_path = os.path.join(
-            self.compare_dir, test_settings.COMPARE_IMAGE_PREFIX + file_name
+        compare_image.paste(
+            test_settings.COMPARE_HIGHLIGHT_COLOR, mask=changed_mask
         )
-        self.compare_image_write(
-            new_shot, gold_shot, changed_mask, changed_regions, compare_path
-        )
-        listed_regions = "; ".join(
-            f"{region_left},{region_top} to {region_right},{region_bottom}"
-            for region_left, region_top, region_right, region_bottom in (
-                changed_regions[: test_settings.COMPARE_LISTED_REGION_COUNT]
-            )
-        )
-        unlisted_count = (
-            len(changed_regions) - test_settings.COMPARE_LISTED_REGION_COUNT
-        )
-        if unlisted_count > 0:
-            listed_regions += f"; {unlisted_count} more"
-        changed_percent = (
-            100 * changed_count / (new_shot.width * new_shot.height)
-        )
-        print(
-            f"{file_name}: {changed_count} pixels differ"
-            f" ({changed_percent:.2f}%),"
-            f" largest channel change {channel_change.getextrema()[1]},"
-            f" {len(changed_regions)} region(s) {listed_regions},"
-            f" compare image {compare_path}"
-        )
+        os.makedirs(self.compare_dir, exist_ok=True)
+        compare_image.save(compare_path)
+        print(f"{file_name}: differs from gold, compare image {compare_path}")
         return False
 
     # Merges this report's pages and timings into the index, returning all.
@@ -2731,75 +3905,6 @@ class Screenshots:
         )
         return self.file_url(page) + address
 
-    # Returns whether the outer region holds the whole inner region.
-    def region_holds(
-        self,
-        outer_region: tuple[int, int, int, int],
-        inner_region: tuple[int, int, int, int],
-    ) -> bool:
-        return (
-            outer_region[0] <= inner_region[0]
-            and outer_region[1] <= inner_region[1]
-            and inner_region[2] <= outer_region[2]
-            and inner_region[3] <= outer_region[3]
-        )
-
-    # Sets the gold and the new cut of one region side by side under a label.
-    def region_panel(
-        self,
-        region_number: int,
-        changed_region: tuple[int, int, int, int],
-        gold_shot: PIL.Image.Image,
-        new_shot: PIL.Image.Image,
-        label_font: PIL.ImageFont.FreeTypeFont | PIL.ImageFont.ImageFont,
-    ) -> PIL.Image.Image:
-        region_left, region_top, region_right, region_bottom = changed_region
-        crop_box = (
-            max(region_left - test_settings.COMPARE_CROP_MARGIN_PX, 0),
-            max(region_top - test_settings.COMPARE_CROP_MARGIN_PX, 0),
-            min(
-                region_right + test_settings.COMPARE_CROP_MARGIN_PX,
-                new_shot.width,
-            ),
-            min(
-                region_bottom + test_settings.COMPARE_CROP_MARGIN_PX,
-                new_shot.height,
-            ),
-        )
-        crop_width = crop_box[2] - crop_box[0]
-        crop_height = crop_box[3] - crop_box[1]
-        gold_label = (
-            f"{region_number} gold {region_left},{region_top}"
-            f" to {region_right},{region_bottom}"
-        )
-        gold_label_width = int(label_font.getlength(gold_label)) + 1
-        column_width = max(crop_width, gold_label_width)
-        label_height = (
-            test_settings.COMPARE_LABEL_FONT_PX + test_settings.COMPARE_GAP_PX
-        )
-        new_left = column_width + test_settings.COMPARE_GAP_PX
-        region_panel = PIL.Image.new(
-            "RGB",
-            (new_left + column_width, label_height + crop_height),
-            test_settings.COMPARE_BACKGROUND_COLOR,
-        )
-        region_panel.paste(gold_shot.crop(crop_box), (0, label_height))
-        region_panel.paste(new_shot.crop(crop_box), (new_left, label_height))
-        panel_drawing = PIL.ImageDraw.Draw(region_panel)
-        panel_drawing.text(
-            (0, 0),
-            gold_label,
-            fill=test_settings.COMPARE_LABEL_COLOR,
-            font=label_font,
-        )
-        panel_drawing.text(
-            (new_left, 0),
-            f"{region_number} new",
-            fill=test_settings.COMPARE_LABEL_COLOR,
-            font=label_font,
-        )
-        return region_panel
-
     # Returns the file an address names under a root, empty outside that.
     def relative_file_of(self, url: str, root_url: str) -> str:
         split_url = urllib.parse.urlsplit(url)
@@ -2819,6 +3924,7 @@ class Screenshots:
             (view_index, view)
             for view_index, view in enumerate(_VIEWS, 1)
             if view.shot_flags & self.report_flag
+            and self.view_is_supported(view.view_hash)
         ]
 
     # Returns the browser session, which a compare only run lacks.
@@ -2893,6 +3999,14 @@ class Screenshots:
     def shot_is_taken(self, shot: str) -> bool:
         return not self.chosen_shot or shot == self.chosen_shot
 
+    # Returns whether the browser supports the view an address part opens.
+    def view_is_supported(self, address_part: str) -> bool:
+        address_values = urllib.parse.parse_qs(address_part.removeprefix("#"))
+        # An address naming no view opens the overview.
+        return not set(address_values.get("view", ())) & set(
+            self.session_type.unsupported_views
+        )
+
     # Returns whether the run takes a shot of the view.
     def view_is_taken(
         self, view_index: int, prefix: str, view: ScreenshotSet
@@ -2938,6 +4052,7 @@ class Screenshots:
             for view_part in test_settings.SHOOT_TEST_VIEW_PARTS[
                 self.report_flag
             ]
+            if self.view_is_supported(view_part)
         ]
         # A page holding an error proves that DevTools shows the reports.
         error_address = (
@@ -3126,21 +4241,27 @@ class Screenshots:
         # A frame shows once the compositor draws after taking it.
         draw_times: list[float] = []
         for process_id, layer_tree_id, frame_number in painted_frames:
-            activation = next(
+            frame_activations = [
                 activation
                 for activation in activations
                 if activation["pid"] == process_id
                 and activation["args"]["layerTreeId"] == layer_tree_id
                 and activation["args"]["frameId"] == frame_number
-            )
-            screen_draw = next(
+            ]
+            # A frame replaced before the compositor took it never shows.
+            if not frame_activations:
+                continue
+            frame_draws = [
                 screen_draw
                 for screen_draw in screen_draws
                 if screen_draw["pid"] == process_id
                 and screen_draw["args"]["layerTreeId"] == layer_tree_id
-                and screen_draw["ts"] >= activation["ts"]
-            )
-            draw_times.append(screen_draw["ts"])
+                and screen_draw["ts"] >= frame_activations[0]["ts"]
+            ]
+            # A frame the trace ends before the compositor drew never shows.
+            if not frame_draws:
+                continue
+            draw_times.append(frame_draws[0]["ts"])
         if len(draw_times) != len(test_settings.TIMING_FRAME_PHASE_NAMES):
             raise RuntimeError(
                 f"{trace_name}: {page_file} drew {len(draw_times)} frames,"
@@ -3362,11 +4483,13 @@ class Screenshots:
         is_pictured = view.is_pictured(view_index)
         shot_variants = view.shot_variants(view_index)
         # The index page frames report pages, so only the report shots trace.
-        is_traced = not view.shot_flags & (
+        is_traced = browser_session.traces_pages and not view.shot_flags & (
             test_settings.SHOOT_INDEX_PAGE | test_settings.SHOOT_UNTIMED
         )
         # Every shot of a page drawn in two frames is taken after its second.
-        is_drawn_twice = bool(view.shot_flags & test_settings.SHOOT_TWO_FRAMES)
+        is_drawn_twice = browser_session.traces_pages and bool(
+            view.shot_flags & test_settings.SHOOT_TWO_FRAMES
+        )
         taken_count = 0
         for variant in shot_variants:
             shot = self.shot_name(
@@ -3393,6 +4516,8 @@ class Screenshots:
                     )
                 )
                 if is_drawn_twice:
+                    # The screen shows a frame after its paint, so one more.
+                    page_tab.paint_wait(test_settings.CLICK_MENU_FRAME_NAME)
                     try:
                         frame_timings = self.trace_frame_timings(
                             page_tab.trace_end(), shot, page_dir, shot
@@ -3457,12 +4582,27 @@ def main() -> int:
     parser.add_argument(
         "--diff", action="store_true", help="the report is a diff report"
     )
+    browser_group = parser.add_mutually_exclusive_group()
+    browser_group.add_argument(
+        "--firefox",
+        action="store_const",
+        const=FirefoxSession,
+        default=ChromeSession,
+        dest="session_type",
+    )
     parser.add_argument("--index-hash", default="", metavar="HASH")
     parser.add_argument(
         "--out",
         default="",
         help="where the PNGs go (default"
         f" tests/perf2html/{test_settings.SCREENSHOT_DIR_NAME})",
+    )
+    browser_group.add_argument(
+        "--seamonkey",
+        action="store_const",
+        const=SeaMonkeySession,
+        default=ChromeSession,
+        dest="session_type",
     )
     parser.add_argument("--shot", default="", metavar="NAME")
     parser.add_argument(
@@ -3512,10 +4652,11 @@ def main() -> int:
     perf2html_dir = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), ".."
     )
-    out_dir = namespace.out or os.path.join(
-        perf2html_dir, test_settings.SCREENSHOT_DIR_NAME
+    session_type: type[BrowserSession] = namespace.session_type
+    out_dir = os.path.abspath(
+        namespace.out
+        or os.path.join(perf2html_dir, session_type.shot_dir_name)
     )
-    out_dir = os.path.abspath(out_dir)
     scratch_dir = os.path.abspath(
         os.path.join(
             namespace.build_root, test_settings.SCREENSHOT_SCRATCH_DIR_PATH
@@ -3529,7 +4670,13 @@ def main() -> int:
     )
     compare_dir = os.path.abspath(namespace.compare_out or out_dir)
     shooter = Screenshots(
-        report, report_flag, out_dir, compare_dir, scratch_dir, namespace.shot
+        report,
+        report_flag,
+        out_dir,
+        compare_dir,
+        scratch_dir,
+        namespace.shot,
+        session_type,
     )
     if namespace.shot and namespace.shot not in shooter.shot_names(
         namespace.prefix
@@ -3545,14 +4692,27 @@ def main() -> int:
         return 0
 
     index_path = os.path.join(perf2html_dir, test_settings.INDEX_PAGE_NAME)
+    # A browser writing no timing shoots the index page Chrome's run wrote.
+    if (
+        not session_type.traces_pages
+        and not namespace.shot
+        and not os.path.isfile(index_path)
+    ):
+        print(
+            f"error: {session_type.browser_name} shoots {index_path},"
+            " which is no file",
+            file=sys.stderr,
+        )
+        return 2
     os.makedirs(out_dir, exist_ok=True)
     if namespace.verbose:
         verbose_print(
             namespace.verbose, [f"{os.path.basename(report)} -> {out_dir}"]
         )
+    browser_session = session_type(namespace.build_root)
     # A single shot run takes its shot alone, checking and timing nothing.
     if namespace.shot:
-        with BrowserSession() as browser_session:
+        with browser_session:
             shooter.browser_session = browser_session
             written = shooter.shoot_all(namespace.prefix)
             written += shooter.index_shoot(
@@ -3564,23 +4724,25 @@ def main() -> int:
             shooter.gold_compare(gold_dir, namespace.prefix, namespace.verbose)
         return 0
 
-    with BrowserSession() as browser_session:
+    timing_rows: list[TimingRow] = []
+    report_timings: list[dict[str, str]] = []
+    with browser_session:
         shooter.browser_session = browser_session
         shooter.test_views_check()
         written = shooter.shoot_all(namespace.prefix)
         shooter.clicks_time()
         shooter.logo_links_check()
-        timing_rows = shooter.timing_rows()
-
-        with open(
-            os.path.join(
-                perf2html_dir, "scripts", test_settings.INDEX_TEMPLATE_NAME
+        if browser_session.traces_pages:
+            timing_rows = shooter.timing_rows()
+            with open(
+                os.path.join(
+                    perf2html_dir, "scripts", test_settings.INDEX_TEMPLATE_NAME
+                )
+            ) as template_file:
+                index_template = template_file.read()
+            report_timings = shooter.index_write(
+                namespace.prefix, index_path, index_template, timing_rows
             )
-        ) as template_file:
-            index_template = template_file.read()
-        report_timings = shooter.index_write(
-            namespace.prefix, index_path, index_template, timing_rows
-        )
         written += shooter.index_shoot(
             namespace.prefix, index_path, namespace.index_hash
         )
@@ -3588,6 +4750,8 @@ def main() -> int:
         verbose_print(namespace.verbose, [f"{written} screenshot(s)"])
     if namespace.compare_gold:
         shooter.gold_compare(gold_dir, namespace.prefix, namespace.verbose)
+    if not browser_session.traces_pages:
+        return 0
     if namespace.verbose:
         verbose_print(
             namespace.verbose,

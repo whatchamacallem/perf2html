@@ -55,6 +55,7 @@ window.ui_strings_ = (function () {
     str_counter_llm: "last level cache misses, all",
     str_error_call_graph_too_large:
       "the call graph of {0} draws more than {1} nodes",
+    str_error_clipboard_copy_refused: "the browser refused the copy",
     str_error_hash_file_missing: "url names line {0} but no file",
     str_error_hash_file_unknown:
       "url encodes a file this report never profiled: {0}",
@@ -84,6 +85,8 @@ window.ui_strings_ = (function () {
     str_error_hash_test_unknown:
       "url encodes a test this report does not have: {0}",
     str_error_hash_value_empty: "url part {0} holds no value",
+    str_error_hash_view_browser_unsupported:
+      "url encodes a view this browser cannot run: {0}",
     str_error_hash_view_missing: "url names {0} but no view",
     str_error_hash_view_page_missing:
       "url encodes a view this diff report has no page for: {0}",
@@ -161,7 +164,6 @@ window.ui_strings_ = (function () {
     str_settings_apply: "apply",
     str_settings_copy: "copy",
     str_settings_debug_query: "{name}={value}",
-    str_settings_paste: "paste",
     str_slider_cell_after_stop: "▒",
     str_slider_cell_before_stop: "▓",
     str_sort_alphabetical: "alphabetical",

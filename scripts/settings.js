@@ -109,13 +109,88 @@ window.try_catch_handler_(function () {
       .split("&")
       .find((hash_part) => hash_part.startsWith(key_prefix));
   }
+  // Returns the base64 digits, their padding and a digit's and a byte's bits.
+  function base64_notation(settings_values) {
+    const digits = setting_read(
+      settings_values,
+      "SETTINGS_DEBUG_HASH_BASE64_DIGITS",
+    );
+    return {
+      byte_bits: setting_read(
+        settings_values,
+        "SETTINGS_DEBUG_HASH_BYTE_BITS",
+      ),
+      digit_bits: Math.log2(digits.length),
+      digits,
+      padding: setting_read(
+        settings_values,
+        "SETTINGS_DEBUG_HASH_BASE64_PADDING",
+      ),
+    };
+  }
+  // Returns the bytes of base64 text, a part holding a stray digit refused.
+  function base64_bytes_decode(settings_values, applied_part, base64_text) {
+    const { byte_bits, digit_bits, digits, padding } =
+      base64_notation(settings_values);
+    let digit_count = base64_text.length;
+    while (digit_count && base64_text[digit_count - 1] === padding)
+      digit_count--;
+    const bytes = [];
+    let bit_buffer = 0;
+    let bit_count = 0;
+    for (const digit of base64_text.slice(0, digit_count)) {
+      const digit_value = digits.indexOf(digit);
+      if (digit_value < 0)
+        window.throw_exception_(
+          "str_error_settings_values_unusable",
+          applied_part,
+        );
+      bit_buffer = (bit_buffer << digit_bits) | digit_value;
+      bit_count += digit_bits;
+      if (bit_count >= byte_bits) {
+        bit_count -= byte_bits;
+        bytes.push(bit_buffer >> bit_count);
+        bit_buffer &= (1 << bit_count) - 1;
+      }
+    }
+    if (bit_count >= digit_bits)
+      window.throw_exception_(
+        "str_error_settings_values_unusable",
+        applied_part,
+      );
+    return new Uint8Array(bytes);
+  }
+  // Returns the base64 text of bytes, padded to a whole number of bytes.
+  function base64_text_encode(settings_values, bytes) {
+    const { byte_bits, digit_bits, digits, padding } =
+      base64_notation(settings_values);
+    let base64_text = "";
+    let bit_buffer = 0;
+    let bit_count = 0;
+    for (const byte of bytes) {
+      bit_buffer = (bit_buffer << byte_bits) | byte;
+      bit_count += byte_bits;
+      while (bit_count >= digit_bits) {
+        bit_count -= digit_bits;
+        base64_text += digits[bit_buffer >> bit_count];
+        bit_buffer &= (1 << bit_count) - 1;
+      }
+    }
+    if (bit_count)
+      base64_text += digits[bit_buffer << (digit_bits - bit_count)];
+    while ((base64_text.length * digit_bits) % byte_bits)
+      base64_text += padding;
+    return base64_text;
+  }
   // Returns the settings the top hash applies, an empty object for none.
   function settings_applied_values(written_object) {
     const applied_part = settings_applied_part(written_object);
     if (applied_part === undefined) return {};
     const hash_values = JSON.parse(
       new TextDecoder(undefined, { fatal: true }).decode(
-        Uint8Array.fromBase64(
+        base64_bytes_decode(
+          written_object,
+          applied_part,
           decodeURIComponent(
             applied_part.slice(applied_part.indexOf("=") + 1),
           ),
@@ -161,6 +236,13 @@ window.try_catch_handler_(function () {
   }
   function settings_names_() {
     return Object.keys(settings_object);
+  }
+  // Returns the hash text applying the settings given.
+  function settings_applied_text_(hash_values) {
+    return base64_text_encode(
+      settings_object,
+      new TextEncoder().encode(JSON.stringify(hash_values)),
+    );
   }
   // Returns a copy of the settings the top page's hash applied.
   function settings_applied_values_() {
@@ -381,6 +463,7 @@ window.try_catch_handler_(function () {
   };
   window.report_view_storage_ = view_storage;
   window.settings_ = settings_;
+  window.settings_applied_text_ = settings_applied_text_;
   window.settings_applied_values_ = settings_applied_values_;
   window.settings_names_ = settings_names_;
   window.settings_opening_ = settings_opening_;

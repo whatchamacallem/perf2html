@@ -32,6 +32,10 @@ release.
 The HTML will open straight from disk, with no server. Start by opening the top
 level `index.html` in the report and then bookmarks will work.
 
+The pages run in current Chrome and Firefox. SeaMonkey 2.53.24 is the oldest
+browser they support. The flame graph, speedscope's own app, does not run in
+SeaMonkey.
+
 The html app is stateless following REST style. This means the navigation URLs
 are immutable (so bookmarks work) and the module URLs used by JavaScript on the
 back end are also immutable (so no server is needed and perfect caching is

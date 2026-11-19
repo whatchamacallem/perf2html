@@ -30,7 +30,8 @@ window.try_catch_handler_(function () {
     // The address shown opens the page with no screenshot code running.
     query_values.delete(SCREENSHOT_LABEL_QUERY_KEY_NAME);
     query_values.delete(SCREENSHOT_MENU_KEY_NUMBER);
-    const query_text = query_values.size ? "?" + query_values : "";
+    const query_string = String(query_values);
+    const query_text = query_string ? "?" + query_string : "";
     const path_names = location.pathname.split("/");
     const page_name = path_names.pop();
     const report_name = path_names.pop();
@@ -41,7 +42,7 @@ window.try_catch_handler_(function () {
     label.addEventListener(
       "click",
       window.try_catch_handler_(() =>
-        navigator.clipboard.writeText(label.textContent),
+        window.report_ui_.clipboard_text_write(label.textContent),
       ),
     );
     document.body.appendChild(label);

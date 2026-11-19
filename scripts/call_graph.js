@@ -23,6 +23,15 @@ window.try_catch_handler_(function () {
   const CALL_GRAPH_PAD_TEXT = settings_("CALL_GRAPH_PAD_TEXT");
   const NUMBER_FRACTION_DIGITS = settings_("NUMBER_FRACTION_DIGITS");
   const NUMBER_MULTIPLE_SUFFIX_TEXT = settings_("NUMBER_MULTIPLE_SUFFIX_TEXT");
+  const STYLE_CALL_GRAPH_PAGE_WIDTH_PROPERTY = settings_(
+    "STYLE_CALL_GRAPH_PAGE_WIDTH_PROPERTY",
+  );
+  const STYLE_CALL_GRAPH_SYMBOL_BUTTON_RIGHT_PROPERTY = settings_(
+    "STYLE_CALL_GRAPH_SYMBOL_BUTTON_RIGHT_PROPERTY",
+  );
+  const STYLE_CALL_GRAPH_TABLE_HEIGHT_PROPERTY = settings_(
+    "STYLE_CALL_GRAPH_TABLE_HEIGHT_PROPERTY",
+  );
   const STYLE_TABLE_CHUNK_ROWS_PROPERTY = settings_(
     "STYLE_TABLE_CHUNK_ROWS_PROPERTY",
   );
@@ -182,7 +191,7 @@ window.try_catch_handler_(function () {
   function edges_sort(callee_edges) {
     if (!Object.hasOwn(SORT_ORDERS, sort_mode))
       window.throw_exception_("str_error_internal");
-    return callee_edges.toSorted(SORT_ORDERS[sort_mode]);
+    return callee_edges.slice().sort(SORT_ORDERS[sort_mode]);
   }
 
   // Returns the key of a node's path in the open set.
@@ -191,7 +200,7 @@ window.try_catch_handler_(function () {
   }
   // Returns the record of the function a node's path ends at.
   function path_function(node_path) {
-    return function_records[node_path.at(-1)];
+    return function_records[node_path[node_path.length - 1]];
   }
   // Lists the edges a node's path shows, each callee already on it skipped.
   function shown_callee_edges(node_path) {
@@ -215,11 +224,10 @@ window.try_catch_handler_(function () {
     let drawn_node_count = 0;
     let last_stop = 0;
     // A cutoff opens the nodes at its depth, so its draw ends a level deeper.
-    for (
-      let node_level = 1;
-      node_level <= CALL_GRAPH_CUTOFF_STOP_DEPTHS.at(-1) + 1;
-      node_level++
-    ) {
+    const deepest_level =
+      CALL_GRAPH_CUTOFF_STOP_DEPTHS[CALL_GRAPH_CUTOFF_STOP_DEPTHS.length - 1] +
+      1;
+    for (let node_level = 1; node_level <= deepest_level; node_level++) {
       level_paths = level_paths.flatMap((node_path) =>
         shown_callee_edges(node_path).map((call_edge) => [
           ...node_path,
@@ -326,7 +334,7 @@ window.try_catch_handler_(function () {
       );
       for (
         let pass_row = child_rows[0] + 1;
-        pass_row < child_rows.at(-1);
+        pass_row < child_rows[child_rows.length - 1];
         pass_row++
       )
         if (!child_rows.includes(pass_row))
@@ -353,7 +361,8 @@ window.try_catch_handler_(function () {
           is_open ? next_free_rows.length : group_index + 1,
         ),
       );
-      (layout_rows[node_row] ??= [])[group_index] = graph_node;
+      if (layout_rows[node_row] === undefined) layout_rows[node_row] = [];
+      layout_rows[node_row][group_index] = graph_node;
       next_free_rows[group_index] = node_row + 1;
       // A row keeps a group right of a closed node, its mark's place if empty.
       if (node_is_closed(graph_node))
@@ -596,7 +605,8 @@ window.try_catch_handler_(function () {
   // Writes every sizer row whose cells differ from the widest cells now.
   function sizer_rows_draw(cells_markup) {
     for (const sizer_row of graph_table.querySelectorAll(
-      ":scope > :is(thead, tbody) > tr.table-sizer-row-",
+      ":scope > thead > tr.table-sizer-row-," +
+        " :scope > tbody > tr.table-sizer-row-",
     ))
       if (sizer_row.innerHTML !== cells_markup)
         sizer_row.innerHTML = cells_markup;
@@ -734,8 +744,26 @@ window.try_catch_handler_(function () {
     head_draw(group_count);
     rows_place(graph_rows);
     sizer_rows_draw(sizer_cells_markup(widest_cells, group_count));
+    symbol_button_rights_keep();
     tab_stop_place(had_focus);
     window.report_ui_.layout_activate();
+  }
+  // Keeps on each linked symbol's cell where its button ends, its frame's end.
+  function symbol_button_rights_keep() {
+    const symbol_buttons = graph_table.querySelectorAll(
+      "td.clickable-.call-graph-symbol- > .menu-button-",
+    );
+    const button_rights = [...symbol_buttons].map(
+      (symbol_button) =>
+        symbol_button.parentElement.getBoundingClientRect().right -
+        symbol_button.getBoundingClientRect().right,
+    );
+    symbol_buttons.forEach((symbol_button, button_index) =>
+      symbol_button.parentElement.style.setProperty(
+        STYLE_CALL_GRAPH_SYMBOL_BUTTON_RIGHT_PROPERTY,
+        window.report_ui_.design_px(button_rights[button_index]) + "px",
+      ),
+    );
   }
   // Puts the tree's one tab stop on its kept node, else on its first node.
   function tab_stop_place(takes_focus) {
@@ -781,7 +809,7 @@ window.try_catch_handler_(function () {
         next_key = drawn_path_keys[0];
         break;
       case WIDGET_KEY_NAMES.last:
-        next_key = drawn_path_keys.at(-1);
+        next_key = drawn_path_keys[drawn_path_keys.length - 1];
         break;
       case WIDGET_KEY_NAMES.left:
         if (is_open) node_toggle(tree_item);
@@ -971,6 +999,30 @@ window.try_catch_handler_(function () {
     page_scroll_box.scrollTo(0, 0);
   }
 
+  // Keeps the page's shown width on it, the heading's width.
+  function page_width_keep(page_width_px) {
+    page_scroll_box.style.setProperty(
+      STYLE_CALL_GRAPH_PAGE_WIDTH_PROPERTY,
+      page_width_px + "px",
+    );
+  }
+  new ResizeObserver(
+    window.try_catch_handler_((resize_entries) =>
+      page_width_keep(resize_entries[0].contentRect.width),
+    ),
+  ).observe(page_scroll_box);
+  page_width_keep(
+    window.report_ui_.design_px(page_scroll_box.getBoundingClientRect().width),
+  );
+  // Keeps the table's height on it, the height of each column's color.
+  new ResizeObserver(
+    window.try_catch_handler_((resize_entries) =>
+      graph_table.style.setProperty(
+        STYLE_CALL_GRAPH_TABLE_HEIGHT_PROPERTY,
+        resize_entries[0].contentRect.height + "px",
+      ),
+    ),
+  ).observe(graph_table);
   graph_table.classList.add("table-chunked-");
   graph_table.append(graph_head);
   graph_table.addEventListener(

@@ -23,12 +23,9 @@ window.try_catch_handler_(function () {
   const ACTION_LABEL_TEXTS = {
     apply: window.ui_strings_.text("str_settings_apply"),
     copy: window.ui_strings_.text("str_settings_copy"),
-    paste: window.ui_strings_.text("str_settings_paste"),
   };
   // Names each setting's actions, none while settings debugging is off.
-  const ACTION_NAMES = SETTINGS_DEBUG_ENABLED
-    ? ["copy", "paste", "apply"]
-    : [];
+  const ACTION_NAMES = SETTINGS_DEBUG_ENABLED ? ["copy", "apply"] : [];
   const DEBUG_QUERY_TEXT = window.ui_strings_.text_fill(
     "str_settings_debug_query",
     {
@@ -42,7 +39,6 @@ window.try_catch_handler_(function () {
   const SETTING_ACTIONS = {
     apply: setting_apply,
     copy: setting_copy,
-    paste: setting_paste,
   };
   const debug_box = document.getElementById("settings-debug-");
   const page_scroll_box = document.getElementById("settings-page-");
@@ -140,11 +136,6 @@ window.try_catch_handler_(function () {
   function box_rows_fit(setting_box) {
     setting_box.rows = setting_box.value.split("\n").length;
   }
-  function box_text_set(setting_name, box_text) {
-    const setting_box = setting_boxes.get(setting_name);
-    setting_box.value = box_text;
-    box_rows_fit(setting_box);
-  }
   // Hands the box's JSON up as the setting's new value.
   function setting_apply(setting_name) {
     window.report_ui_.settings_apply_send(
@@ -153,14 +144,9 @@ window.try_catch_handler_(function () {
     );
   }
   function setting_copy(setting_name) {
-    return navigator.clipboard.writeText(
+    window.report_ui_.clipboard_text_write(
       setting_boxes.get(setting_name).value,
     );
-  }
-  function setting_paste(setting_name) {
-    return navigator.clipboard
-      .readText()
-      .then((pasted_text) => box_text_set(setting_name, pasted_text));
   }
   function action_button(browser_event) {
     return browser_event.target.closest(".menu-button-");

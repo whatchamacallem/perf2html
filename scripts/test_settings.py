@@ -28,6 +28,37 @@ BROWSER_PIPE_SPARE_FD = 10
 CLICK_CLIPBOARD_WRITE_FUNCTION = (
     "(pasted_text) => navigator.clipboard.writeText(pasted_text)"
 )
+# Holds each key a step presses as the WebDriver key values Firefox takes.
+CLICK_FIREFOX_KEY_VALUES: dict[str, tuple[str, ...]] = {
+    "+": ("", "+"),
+    "-": ("-",),
+    "1": ("1",),
+    "2": ("2",),
+    "5": ("5",),
+    "=": ("=",),
+    "ArrowDown": ("",),
+    "ArrowLeft": ("",),
+    "ArrowRight": ("",),
+    "ArrowUp": ("",),
+    "Backspace": ("",),
+    "End": ("",),
+    "Enter": ("",),
+    "Escape": ("",),
+    "Home": ("",),
+    "PageDown": ("",),
+    "Space": (" ",),
+    "Tab": ("",),
+    "c": ("c",),
+    "ctrl+v": ("", "v"),
+    "r": ("r",),
+    "s": ("s",),
+    "shift+Tab": ("", ""),
+}
+# Holds whether each key moving the focus moves it backward, past the page.
+CLICK_FOCUS_MOVES_BACKWARD: dict[str, bool] = {
+    "Tab": False,
+    "shift+Tab": True,
+}
 CLICK_HASH_STATE = "location.hash"
 # Holds each key a step presses, as the DevTools key input takes it.
 CLICK_KEY_PRESSES: dict[str, dict[str, Any]] = {
@@ -101,6 +132,43 @@ CLICK_KEY_PRESSES: dict[str, dict[str, Any]] = {
     },
 }
 CLICK_MENU_FRAME_NAME = "menu"
+# Holds each key a step presses as the key events SeaMonkey's input takes.
+CLICK_SEAMONKEY_KEY_EVENTS: dict[str, tuple[dict[str, Any], ...]] = {
+    "+": (
+        {"key": "Shift", "code": "ShiftLeft", "keyCode": 16},
+        {"key": "+", "code": "Equal", "keyCode": 61},
+    ),
+    "-": ({"key": "-", "code": "Minus", "keyCode": 173},),
+    "1": ({"key": "1", "code": "Digit1", "keyCode": 49},),
+    "2": ({"key": "2", "code": "Digit2", "keyCode": 50},),
+    "5": ({"key": "5", "code": "Digit5", "keyCode": 53},),
+    "=": ({"key": "=", "code": "Equal", "keyCode": 61},),
+    "ArrowDown": ({"key": "ArrowDown", "code": "ArrowDown", "keyCode": 40},),
+    "ArrowLeft": ({"key": "ArrowLeft", "code": "ArrowLeft", "keyCode": 37},),
+    "ArrowRight": (
+        {"key": "ArrowRight", "code": "ArrowRight", "keyCode": 39},
+    ),
+    "ArrowUp": ({"key": "ArrowUp", "code": "ArrowUp", "keyCode": 38},),
+    "Backspace": ({"key": "Backspace", "code": "Backspace", "keyCode": 8},),
+    "End": ({"key": "End", "code": "End", "keyCode": 35},),
+    "Enter": ({"key": "Enter", "code": "Enter", "keyCode": 13},),
+    "Escape": ({"key": "Escape", "code": "Escape", "keyCode": 27},),
+    "Home": ({"key": "Home", "code": "Home", "keyCode": 36},),
+    "PageDown": ({"key": "PageDown", "code": "PageDown", "keyCode": 34},),
+    "Space": ({"key": " ", "code": "Space", "keyCode": 32},),
+    "Tab": ({"key": "Tab", "code": "Tab", "keyCode": 9},),
+    "c": ({"key": "c", "code": "KeyC", "keyCode": 67},),
+    "ctrl+v": (
+        {"key": "Control", "code": "ControlLeft", "keyCode": 17},
+        {"key": "v", "code": "KeyV", "keyCode": 86},
+    ),
+    "r": ({"key": "r", "code": "KeyR", "keyCode": 82},),
+    "s": ({"key": "s", "code": "KeyS", "keyCode": 83},),
+    "shift+Tab": (
+        {"key": "Shift", "code": "ShiftLeft", "keyCode": 16},
+        {"key": "Tab", "code": "Tab", "keyCode": 9},
+    ),
+}
 CLICK_VIEW_FRAME_NAME = "view"
 # Bounds the presses of one walk, so a walk reaching nothing fails.
 CLICK_WALK_PRESS_LIMIT = 60
@@ -115,18 +183,15 @@ CLICK_WALK_REACHED_FUNCTION = (
 COMMENT_BLOCK_MAX_LINES = 1
 COMMENT_FIRST_WORD_REPLACEMENTS = {"Answers": "Returns"}
 
-COMPARE_BACKGROUND_COLOR = (96, 96, 96)
-COMPARE_BOX_LINE_PX = 4
-COMPARE_CROP_MARGIN_PX = 8
-COMPARE_GAP_PX = 8
+# Compares a Chrome shot with its gold twin pixel by pixel.
+COMPARE_EXACT_CHANNEL_CHANGE = 0
+COMPARE_EXACT_SQUARE_PX = 1
 COMPARE_HIGHLIGHT_COLOR = (255, 0, 255)
 COMPARE_IMAGE_PREFIX = "compare_"
 COMPARE_KEPT_BRIGHTNESS_SHARE = 0.25
-COMPARE_LABEL_COLOR = (255, 255, 255)
-COMPARE_LABEL_FONT_PX = 20
-COMPARE_LISTED_REGION_COUNT = 4
-COMPARE_PANELS_MAX_HEIGHT_SHARE = 2
-COMPARE_REGION_TILE_PX = 16
+# Compares another browser's shot with Chrome's gold, font smoothing passing.
+COMPARE_VAGUE_CHANNEL_CHANGE = 48
+COMPARE_VAGUE_SQUARE_PX = 16
 
 # Holds an error report a page writes to its console, its first line a group.
 CONSOLE_ERROR_REPORT_PATTERN = re.compile(ERROR_REPORT_PATTERN_TEXT)
@@ -149,9 +214,40 @@ ESCAPE_NAMED_ENTITY_PATTERN = "|".join(
 )
 ESCAPE_PREFIX_PATTERN = r"(?<!\\)(?:\\\\)*"
 
+# Moves the focus through a window's controls until one move hands it on.
+FIREFOX_FOCUS_RETURN_FUNCTION = (
+    "(is_backward, move_limit) => {"
+    " const focus_service = Services.focus;"
+    " const browser_window = focus_service.activeWindow;"
+    " for (let move_count = 0; move_count < move_limit; move_count++) {"
+    " const focused_before = focus_service.focusedElement;"
+    " focus_service.moveFocus(browser_window, null, is_backward"
+    " ? focus_service.MOVEFOCUS_BACKWARD"
+    " : focus_service.MOVEFOCUS_FORWARD, 0);"
+    " if (focus_service.focusedElement === focused_before) return; }"
+    " throw new Error(`${move_limit} moves reach no page`); }"
+)
+# Resolves once the page holds the focus, a hand off reaching it in a while.
+FIREFOX_PAGE_FOCUS_WAIT_FUNCTION = (
+    "async function (after_paint) {"
+    " while (!document.hasFocus()) await after_paint(); }"
+)
+
 # Returns whether a frame's element has a layout box, which a hidden one lacks.
 FRAME_LAID_OUT_FUNCTION = (
     "function () { return this.getClientRects().length > 0; }"
+)
+# Returns each frame element's window and whether it shows in the tab.
+FRAME_WINDOWS_SHOWN_FUNCTION = (
+    "() => new Promise((resolve) => {"
+    " const frame_elements = [...document.querySelectorAll('iframe')];"
+    " if (!frame_elements.length) { resolve([]); return; }"
+    " const observer = new IntersectionObserver((entries) => {"
+    " observer.disconnect();"
+    " resolve(entries.map((entry) => [entry.target.contentWindow,"
+    " entry.intersectionRect.width > 0"
+    " && entry.intersectionRect.height > 0])); });"
+    " for (const element of frame_elements) observer.observe(element); })"
 )
 
 HEAT_MAP_PAGE_TITLE = ""
@@ -192,6 +288,11 @@ MENU_LOGO_LINKS: dict[str, str] = {
 PAGE_CHECK_TABS_AT_ONCE = 16
 # The binding a page calls once drawn, which DevTools reports.
 PAGE_DRAWN_BINDING_NAME = "screenshot_page_drawn"
+# Hands the channel Firefox reports through to the binding a page calls.
+PAGE_DRAWN_CHANNEL_FUNCTION = (
+    f"(drawn_channel) => {{ window['{PAGE_DRAWN_BINDING_NAME}']"
+    " = drawn_channel; }"
+)
 # Calls the binding after the load, the page's own drawn mark, a paint.
 PAGE_DRAWN_FUNCTION = (
     "async function (after_paint, binding_name, binding_payload) {"
@@ -223,10 +324,340 @@ SCREENSHOT_BROWSER_PATH = os.path.expanduser(
     "/chrome-linux64/chrome"
 )
 SCREENSHOT_DIR_NAME = "screenshots"
+# Starts the X server Firefox and SeaMonkey draw through, WebGL with it.
+SCREENSHOT_DISPLAY_SERVER_ARGUMENTS: tuple[str, ...] = (
+    "-screen",
+    "0",
+    "1600x1200x24",
+    "-nolisten",
+    "tcp",
+)
+SCREENSHOT_DISPLAY_SERVER_NAME = "Xvfb"
+SCREENSHOT_FIREFOX_DIR_NAME = "screenshots-firefox"
+# Holds the address Firefox writes to stderr once it listens.
+SCREENSHOT_FIREFOX_LISTENING_PATTERN = re.compile(
+    r"WebDriver BiDi listening on (ws://\S+)"
+)
+# Firefox where packages.md installs it in the home dir.
+SCREENSHOT_FIREFOX_PATH = os.path.expanduser(
+    "~/.local/share/firefox-for-testing/firefox/linux-stable_160.0.1"
+    "/firefox/firefox"
+)
+SCREENSHOT_FIREFOX_PROFILE_DIR_PATH = "build/screenshots_firefox_profile"
+SCREENSHOT_FIREFOX_SESSION_PATH = "/session"
 SCREENSHOT_LABEL_URL_PARAM = "screenshot"
 SCREENSHOT_LABEL_URL_VALUE = "1"
 SCREENSHOT_MENU_URL_PARAM = "screenshot-menu"
 SCREENSHOT_SCRATCH_DIR_PATH = "build/screenshots_scratch"
+SCREENSHOT_SEAMONKEY_DIR_NAME = "screenshots-seamonkey"
+# Installs the browser window script that drives each SeaMonkey tab.
+SCREENSHOT_SEAMONKEY_DRIVER_FUNCTION = """\
+(event_marker, binding_name, chunk_length) => {
+  const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+  const {Services} = Cu.import("resource://gre/modules/Services.jsm", {});
+  const {AppConstants} =
+    Cu.import("resource://gre/modules/AppConstants.jsm", {});
+  const progress_flags = Ci.nsIWebProgressListener;
+  const driver = {context_tabs: new Map(), frame_tabs: new Map(),
+    tabs: new Map()};
+  window.screenshot_driver = driver;
+  driver.emit = (event) => {
+    const code_points = Array.from(JSON.stringify(event));
+    const chunks = [];
+    for (let chunk_start = 0; chunk_start < code_points.length;
+      chunk_start += chunk_length) {
+      chunks.push(code_points.slice(chunk_start,
+        chunk_start + chunk_length).join(""));
+    }
+    console.log(event_marker, ...chunks);
+  };
+  driver.window_utils = (frame_window) => frame_window
+    .QueryInterface(Ci.nsIInterfaceRequestor)
+    .getInterface(Ci.nsIDOMWindowUtils);
+  driver.window_id = (frame_window) =>
+    String(driver.window_utils(frame_window).outerWindowID);
+  driver.observe = (subject, topic) => {
+    if (topic === "content-document-global-created") {
+      const tab_key = driver.window_id(subject.top);
+      if (!driver.tabs.has(tab_key)) return;
+      const frame = driver.window_id(subject);
+      const context = driver.window_utils(subject).currentInnerWindowID;
+      driver.context_tabs.set(context, tab_key);
+      driver.frame_tabs.set(frame, tab_key);
+      Cu.exportFunction((payload) => driver.emit({event: "drawn",
+        tab: tab_key, context, payload: String(payload)}), subject,
+        {defineAs: binding_name});
+      driver.emit({event: "context_created", tab: tab_key, frame, context});
+      return;
+    }
+    const window_id = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
+    if (topic === "inner-window-destroyed") {
+      const tab_key = driver.context_tabs.get(window_id);
+      if (tab_key === undefined) return;
+      driver.context_tabs.delete(window_id);
+      driver.emit({event: "context_destroyed", tab: tab_key,
+        context: window_id});
+      return;
+    }
+    const frame = String(window_id);
+    const tab_key = driver.frame_tabs.get(frame);
+    if (tab_key === undefined) return;
+    driver.frame_tabs.delete(frame);
+    driver.emit({event: "frame_removed", tab: tab_key, frame});
+  };
+  driver.console_observer = {observe: (subject) => {
+    const console_message = subject.wrappedJSObject;
+    const context = Number(console_message.innerID);
+    const tab_key = driver.context_tabs.get(context);
+    if (tab_key === undefined) return;
+    driver.emit({event: "console", tab: tab_key, context,
+      text: console_message.arguments.map((console_argument) =>
+        ["boolean", "number", "string"].includes(typeof console_argument)
+          ? String(console_argument) : "").join(" ")});
+  }};
+  Services.obs.addObserver(driver.console_observer,
+    "console-api-log-event", false);
+  driver.error_listener = {observe: (message) => {
+    if (!(message instanceof Ci.nsIScriptError)
+      || !(message.flags & Ci.nsIScriptError.exceptionFlag)) return;
+    const tab_key = driver.context_tabs.get(message.innerWindowID);
+    if (tab_key === undefined) return;
+    driver.emit({event: "thrown", tab: tab_key,
+      text: message.errorMessage});
+  }};
+  Services.console.registerListener(driver.error_listener);
+  for (const topic of ["content-document-global-created",
+    "inner-window-destroyed", "outer-window-destroyed"]) {
+    Services.obs.addObserver(driver, topic, false);
+  }
+  driver.tab_open = (open_number, width, height) => {
+    const tab_window = Services.ww.openWindow(null,
+      AppConstants.BROWSER_CHROME_URL, "_blank",
+      "chrome,all,dialog=no", null);
+    const startup_observer = {observe: (subject) => {
+      if (subject !== tab_window) return;
+      Services.obs.removeObserver(startup_observer,
+        "browser-delayed-startup-finished");
+      try {
+        driver.tab_ready(open_number, tab_window, width, height);
+      } catch (error) {
+        driver.emit({event: "tab_opened", open_number,
+          error: String(error)});
+      }
+    }};
+    Services.obs.addObserver(startup_observer,
+      "browser-delayed-startup-finished", false);
+  };
+  driver.tab_ready = (open_number, tab_window, width, height) => {
+    const browser = tab_window.gBrowser.selectedBrowser;
+    browser.docShell.setOriginAttributes({userContextId: open_number});
+    const content_window = browser.contentWindow;
+    tab_window.resizeBy(width - content_window.innerWidth,
+      height - content_window.innerHeight);
+    if (content_window.innerWidth !== width
+      || content_window.innerHeight !== height) {
+      throw new Error(`the page is ${content_window.innerWidth}x`
+        + `${content_window.innerHeight}, not ${width}x${height}`);
+    }
+    const tab_key = driver.window_id(content_window);
+    const progress_listener = {
+      QueryInterface: (interface_id) => {
+        if (interface_id.equals(Ci.nsIWebProgressListener)
+          || interface_id.equals(Ci.nsISupportsWeakReference)
+          || interface_id.equals(Ci.nsISupports)) return progress_listener;
+        throw Components.Exception("",
+          Components.results.NS_ERROR_NO_INTERFACE);
+      },
+      onLocationChange: () => {},
+      onProgressChange: () => {},
+      onSecurityChange: () => {},
+      onStateChange: (web_progress, request, state_flags) => {
+        if (!(state_flags & progress_flags.STATE_IS_WINDOW)) return;
+        const frame = String(web_progress.DOMWindowID);
+        if (state_flags & progress_flags.STATE_START) {
+          driver.emit({event: "load_begin", tab: tab_key, frame});
+        } else if (state_flags & progress_flags.STATE_STOP) {
+          driver.emit({event: "load_end", tab: tab_key, frame});
+        }
+      },
+      onStatusChange: () => {},
+    };
+    browser.webProgress.addProgressListener(progress_listener,
+      Ci.nsIWebProgress.NOTIFY_STATE_WINDOW);
+    driver.tabs.set(tab_key, {browser, progress_listener,
+      window: tab_window});
+    tab_window.focus();
+    driver.emit({event: "tab_opened", open_number, tab: tab_key});
+  };
+  driver.tab_close = (tab_key) => {
+    const tab = driver.tabs.get(tab_key);
+    tab.browser.webProgress.removeProgressListener(tab.progress_listener);
+    driver.tabs.delete(tab_key);
+    for (const tab_map of [driver.context_tabs, driver.frame_tabs]) {
+      for (const [map_key, map_tab] of [...tab_map]) {
+        if (map_tab === tab_key) tab_map.delete(map_key);
+      }
+    }
+    tab.window.close();
+  };
+  driver.navigate = (tab_key, page_url) => {
+    driver.tabs.get(tab_key).browser.loadURI(page_url);
+  };
+  driver.frame_tree = (tab_key) => {
+    const frame_node = (frame_window) => {
+      const child_nodes = [];
+      for (let frame_index = 0; frame_index < frame_window.frames.length;
+        frame_index++) {
+        child_nodes.push(frame_node(frame_window.frames[frame_index]));
+      }
+      return [driver.window_id(frame_window), child_nodes];
+    };
+    return JSON.stringify(
+      frame_node(driver.tabs.get(tab_key).browser.contentWindow));
+  };
+  driver.frame_shown = (parent_frame, frame) => {
+    const parent_window =
+      Services.wm.getOuterWindowWithId(Number(parent_frame));
+    if (!parent_window) return JSON.stringify("absent");
+    for (const frame_element of
+      parent_window.document.querySelectorAll("iframe")) {
+      const frame_window = frame_element.contentWindow;
+      if (!frame_window || driver.window_id(frame_window) !== frame) {
+        continue;
+      }
+      if (!frame_element.getClientRects().length) {
+        return JSON.stringify(false);
+      }
+      const frame_box = frame_element.getBoundingClientRect();
+      return JSON.stringify(frame_box.right > 0 && frame_box.bottom > 0
+        && frame_box.left < parent_window.innerWidth
+        && frame_box.top < parent_window.innerHeight);
+    }
+    return JSON.stringify("absent");
+  };
+  driver.image_data = (tab_key, width, height) => {
+    const content_window = driver.tabs.get(tab_key).browser.contentWindow;
+    if (content_window.innerWidth !== width
+      || content_window.innerHeight !== height) {
+      throw new Error(`the page is ${content_window.innerWidth}x`
+        + `${content_window.innerHeight}, not ${width}x${height}`);
+    }
+    const canvas = document.createElementNS(
+      "http://www.w3.org/1999/xhtml", "canvas");
+    canvas.width = content_window.innerWidth;
+    canvas.height = content_window.innerHeight;
+    const drawing = canvas.getContext("2d");
+    drawing.drawWindow(content_window, content_window.scrollX,
+      content_window.scrollY, canvas.width, canvas.height,
+      "rgb(255,255,255)", drawing.DRAWWINDOW_DRAW_VIEW);
+    return JSON.stringify(canvas.toDataURL("image/png"));
+  };
+  driver.keys_send = (tab_key, key_actions) => {
+    const tab_window = driver.tabs.get(tab_key).window;
+    const input_processor = Cc["@mozilla.org/text-input-processor;1"]
+      .createInstance(Ci.nsITextInputProcessor);
+    if (!input_processor.beginInputTransactionForTests(tab_window)) {
+      throw new Error("the window began no input transaction");
+    }
+    for (const [action_name, key_init] of key_actions) {
+      input_processor[action_name](
+        new tab_window.KeyboardEvent("", key_init));
+    }
+  };
+  driver.focus_return = (tab_key, is_backward, move_limit) => {
+    const tab = driver.tabs.get(tab_key);
+    const focus_service = Services.focus;
+    for (let move_count = 0; move_count <= move_limit; move_count++) {
+      const focused_window = focus_service.focusedWindow;
+      if (focused_window && driver.window_id(focused_window.top)
+        === tab_key) return;
+      focus_service.moveFocus(tab.window, null, is_backward
+        ? focus_service.MOVEFOCUS_BACKWARD
+        : focus_service.MOVEFOCUS_FORWARD, 0);
+    }
+    throw new Error(`${move_limit} moves reach no page`);
+  };
+  driver.clipboard_write = (pasted_text) => {
+    Cc["@mozilla.org/widget/clipboardhelper;1"]
+      .getService(Ci.nsIClipboardHelper).copyString(pasted_text);
+  };
+  driver.quit = () => {
+    Services.startup.quit(Ci.nsIAppStartup.eForceQuit);
+  };
+  driver.script_run = (tab_key, context, expression, call_number) => {
+    const frame_window = Services.wm.getCurrentInnerWindowWithId(context);
+    if (!frame_window) return JSON.stringify({gone: true});
+    let value;
+    try {
+      value = frame_window.wrappedJSObject.eval(expression);
+    } catch (error) {
+      return JSON.stringify({exception: String(error)});
+    }
+    if (call_number === null) return JSON.stringify({value});
+    const settle = (result) => driver.emit(
+      {event: "result", tab: tab_key, call_number, ...result});
+    frame_window.wrappedJSObject.Promise.resolve(value).then(
+      Cu.exportFunction((settled) => settle(
+        {value: Cu.waiveXrays(settled)}), frame_window),
+      Cu.exportFunction((error) => settle({exception: String(error)}),
+        frame_window));
+    return JSON.stringify({});
+  };
+}
+"""
+# Splits an event into console arguments, each one short enough to send.
+SCREENSHOT_SEAMONKEY_EVENT_CHUNK_LENGTH = 4096
+# Marks the console lines the driver writes, each one an event.
+SCREENSHOT_SEAMONKEY_EVENT_MARKER = "screenshot_driver_event"
+# Holds the line SeaMonkey writes to stdout when its DevTools server fails.
+SCREENSHOT_SEAMONKEY_LISTEN_FAILED_PATTERN = re.compile(
+    r"^Unable to start debugger server on "
+)
+# The console messages the driver writes its events as.
+SCREENSHOT_SEAMONKEY_LISTENERS: tuple[str, ...] = ("ConsoleAPI",)
+# Holds the line SeaMonkey writes to stdout once its DevTools server opened.
+SCREENSHOT_SEAMONKEY_LISTENING_PATTERN = re.compile(
+    r"^Started debugger server on "
+)
+SCREENSHOT_SEAMONKEY_PACKET_LENGTH_END = b":"
+# SeaMonkey where packages.md installs it in the home dir.
+SCREENSHOT_SEAMONKEY_PATH = os.path.expanduser(
+    "~/.local/share/seamonkey-for-testing/2.53.24/seamonkey/seamonkey"
+)
+# Holds the preferences a fresh profile starts with, the DevTools server's.
+SCREENSHOT_SEAMONKEY_PREFERENCES: dict[str, bool | int | str] = {
+    "app.update.auto": False,
+    "app.update.enabled": False,
+    "app.updatecheck.override": True,
+    "browser.dom.window.dump.enabled": True,
+    "browser.rights.override": True,
+    "browser.sessionhistory.max_total_viewers": 0,
+    "browser.sessionstore.resume_from_crash": False,
+    "browser.startup.homepage": BLANK_PAGE_URL,
+    "browser.startup.homepage_override.mstone": "ignore",
+    "browser.startup.page": 0,
+    "browser.tabs.warnOnClose": False,
+    "datareporting.policy.dataSubmissionEnabled": False,
+    "devtools.chrome.enabled": True,
+    "devtools.debugger.prompt-connection": False,
+    "devtools.debugger.remote-enabled": True,
+    "dom.max_chrome_script_run_time": 0,
+    "dom.max_script_run_time": 0,
+    "extensions.update.enabled": False,
+    "shell.checkDefaultApps": 0,
+    "shell.checkDefaultClient": False,
+    "startup.homepage_welcome_url": "",
+    "toolkit.telemetry.reportingpolicy.firstRun": False,
+}
+SCREENSHOT_SEAMONKEY_PREFERENCES_FILE_NAME = "user.js"
+# The parent process, whose console runs the browser window's scripts.
+SCREENSHOT_SEAMONKEY_PROCESS_ID = 0
+SCREENSHOT_SEAMONKEY_PROFILE_DIR_PATH = "build/screenshots_seamonkey_profile"
+SCREENSHOT_SEAMONKEY_READ_BYTES = 1 << 20
+# Names the socket in the profile, a short name as a socket path is short.
+SCREENSHOT_SEAMONKEY_SOCKET_NAME = "devtools"
+# The views README.md names unsupported in SeaMonkey, its runs leaving them.
+SCREENSHOT_SEAMONKEY_UNSUPPORTED_VIEWS: tuple[str, ...] = ("flame-graph",)
 SCREENSHOT_TOGGLE_DARK_URL_PARAM = "toggle-dark"
 # The modes the views take in turn, the default dark mode first.
 SCREENSHOT_TOGGLE_DARK_VALUES: tuple[str, ...] = ("0", "1")
@@ -286,6 +717,19 @@ SOURCE_SCAN_ALLOWED_NON_ASCII_CHARS = (
     "┣",
     "┳",
     "⊞",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
 )
 SOURCE_SCAN_BANNED_TAG_NAMES = (
     "abbr",
@@ -334,6 +778,50 @@ SOURCE_SCAN_COMMENT_MARKUP = (
     "#",
     "*",
 )
+
+# Names the oldest browser the page scripts and stylesheets support.
+SOURCE_SCAN_SUPPORT_FLOOR_BROWSER = "SeaMonkey 2.53.24"
+# Each page file kind the support floor check reads.
+SOURCE_SCAN_SUPPORT_FLOOR_EXTENSIONS = (".css", ".js")
+# Each script or stylesheet feature pattern the support floor lacks.
+SOURCE_SCAN_SUPPORT_FLOOR_MISSING_PATTERNS = (
+    r"\.replaceChildren\(",
+    r"\.at\(",
+    r"\?\?=|\|\|=|&&=",
+    r"\.to(?:Reversed|Sorted|Spliced)\(",
+    r"\.checkVisibility\(",
+    r"\bcurrentCSSZoom\b",
+    r"\b(?:actual|font)BoundingBox",
+    r"\.findLast(?:Index)?\(",
+    r"\bstructuredClone\(",
+    r"\bnavigator\.clipboard\b",
+    r"\bnew Error\([^()]*,\s*\{",
+    r"\bUint8Array\.fromBase64\(|\.toBase64\(",
+    r":has\(",
+    r":is\(",
+    r":where\(",
+    r":focus-visible",
+    r":not\([^()]*,",
+    r"\banchor\(|anchor-(?:name|scope)|position-(?:anchor|try)",
+    r"container-type|@container|\b[0-9.]+cq(?:[bhiw]|max|min)\b",
+    r"\.style\.zoom\b|(?<![\w-])zoom\s*:",
+    r"(?<![\w-])inset\s*:",
+    r"(?<![\w-])(?:border|inset|margin|padding)-(?:block|inline)\s*:"
+    r"|\b(?:border|inset|margin|padding)(?:Block|Inline)\b",
+    r"(?<![\w-])gap\s*:",
+    r"\b[0-9.]+lh\b",
+    r"(?<![\w-])translate\s*:",
+    r"animation-(?:range|timeline)",
+    r"content-visibility\s*:\s*hidden",
+)
+# Each feature pattern the support floor lacks, then its older form's pattern.
+SOURCE_SCAN_SUPPORT_FLOOR_PAIRED_PATTERNS = {
+    r"(?<![\w-])(?:min-)?width\s*:\s*max-content": r"-moz-max-content",
+    r"(?<![\w-])width\s*:\s*fit-content": r"-moz-fit-content",
+    r"(?<![\w-])width\s*:\s*min-content": r"-moz-min-content",
+    r"(?<![\w-])user-select\s*:": r"-moz-user-select\s*:",
+    r"(?<![\w-])overflow\s*:\s*clip\b": r"(?<![\w-])overflow\s*:\s*hidden\b",
+}
 
 # Resolves after a paint once the state read differs, its handlers then run.
 STATE_CHANGE_FUNCTION = (
@@ -996,3 +1484,26 @@ VIEW_CHECK_ERROR_HASH = "#view=database"
 
 # Names the tool's waiting scripts in a trace, which times no page by them.
 WAIT_SCRIPT_URL = "screenshot_wait.js"
+
+# Joins a handshake's key in the accept key a WebSocket server answers with.
+WEB_SOCKET_ACCEPT_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+WEB_SOCKET_CLOSE_OPCODE = 0x8
+WEB_SOCKET_FINAL_BIT = 0x80
+WEB_SOCKET_FRAME_HEAD_BYTES = 2
+WEB_SOCKET_HEADER_END = b"\r\n\r\n"
+WEB_SOCKET_KEY_BYTES = 16
+WEB_SOCKET_LENGTH_MASK = 0x7F
+WEB_SOCKET_LONG_LENGTH_BYTES = 8
+WEB_SOCKET_LONG_LENGTH_MARK = 127
+WEB_SOCKET_MASK_BIT = 0x80
+WEB_SOCKET_MASK_BYTES = 4
+WEB_SOCKET_OPCODE_MASK = 0x0F
+WEB_SOCKET_PING_OPCODE = 0x9
+WEB_SOCKET_PONG_OPCODE = 0xA
+WEB_SOCKET_READ_BYTES = 1 << 20
+WEB_SOCKET_SHORT_LENGTH_BYTES = 2
+WEB_SOCKET_SHORT_LENGTH_LIMIT = 1 << 16
+WEB_SOCKET_SHORT_LENGTH_MARK = 126
+WEB_SOCKET_SWITCH_STATUS = "101"
+WEB_SOCKET_TEXT_OPCODE = 0x1
+WEB_SOCKET_VERSION = "13"

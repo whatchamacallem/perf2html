@@ -417,9 +417,9 @@ A diff report's run keeps these.
 |                             | screenshots.                                 |
 | `test_report.py`            | Checks the pages, manifest, checksum, heat   |
 |                             | map, flame graph and timer artifacts.        |
-| `test_screenshot.py`        | Shoots the golden bookmarks of one report in |
-|                             | Chrome, times its golden clicks, and writes  |
-|                             | `test_index.html` and `timing.txt`.          |
+| `test_screenshot.py`        | Shoots, clicks and times the golden links    |
+|                             | for Chrome, Firefox or SeaMonkey, and        |
+|                             | compares the shots with Chrome's gold ones.  |
 | `test_settings.py`          | Holds the golden values the test scripts     |
 |                             | compare the reports and sources against.     |
 | `test_source_scan.py`       | Faults long comment blocks, comment          |

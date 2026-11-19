@@ -56,7 +56,9 @@ _BUILD_LOCATION_SCRATCH_NAME=test_expected_build_location_scratch
 _BUILD_LOCATION_TRACE_TREES=build-instr
 _ROWS_FILE_NAME=perf2html.txt
 _SCREENSHOT_DIFF_DIR="$PERF2HTML_DIR_/screenshots-diff"
+_SCREENSHOT_FIREFOX_DIFF_DIR="$PERF2HTML_DIR_/screenshots-diff-firefox"
 _SCREENSHOT_GOLD_DIR="$PERF2HTML_DIR_/screenshots-gold"
+_SCREENSHOT_SEAMONKEY_DIFF_DIR="$PERF2HTML_DIR_/screenshots-diff-seamonkey"
 _SCREENSHOT_SCRIPT_NAME=test_screenshot.py
 _TEST_LIST_FILE_NAME=test_list.txt
 _TIMING_FILE_SUFFIX=.perf-stat.json
@@ -66,21 +68,34 @@ _DEFAULT_REPORTS=(
   "$PERF2HTML_DIR_/$REPORT_MODIFIED_DIR_NAME"
   "$PERF2HTML_DIR_/$REPORT_DIFF_DIR_NAME"
 )
+_SCREENSHOT_DIFF_DIRS=(
+  "$_SCREENSHOT_DIFF_DIR"
+  "$_SCREENSHOT_FIREFOX_DIFF_DIR"
+  "$_SCREENSHOT_SEAMONKEY_DIFF_DIR"
+)
 
 tools_resolve() {
-  local _missing=() _line _browser_check _pillow_check
+  local _missing=() _line _browser_check _display_check _pillow_check
   local _admin="$PERF2HTML_DIR_/$ADMIN_INSTRUCTIONS_FILE_NAME"
   command -v shfmt >/dev/null || _missing+=(shfmt)
   [ -x "$RUFF_PATH" ] || _missing+=("$RUFF_PATH")
   command -v clang-format >/dev/null || _missing+=(clang-format)
   [ -x "$PRETTIER_PATH" ] || _missing+=("$PRETTIER_PATH")
   [ -x "$PYRIGHT_PATH" ] || _missing+=("$PYRIGHT_PATH")
-  _browser_check='import os, test_settings'
-  _browser_check+='; browser_path = test_settings.SCREENSHOT_BROWSER_PATH'
+  _browser_check='import os, sys, test_settings'
+  _browser_check+='; browser_path = getattr(test_settings, sys.argv[1])'
   _browser_check+='; raise SystemExit(not os.path.isfile(browser_path)'
   _browser_check+=' or not os.access(browser_path, os.X_OK))'
   PYTHONPATH="$_SCRIPT_DIR" python3 -c "$_browser_check" \
-    || _missing+=(chrome-for-testing)
+    SCREENSHOT_BROWSER_PATH || _missing+=(chrome-for-testing)
+  PYTHONPATH="$_SCRIPT_DIR" python3 -c "$_browser_check" \
+    SCREENSHOT_FIREFOX_PATH || _missing+=(firefox-for-testing)
+  PYTHONPATH="$_SCRIPT_DIR" python3 -c "$_browser_check" \
+    SCREENSHOT_SEAMONKEY_PATH || _missing+=(seamonkey-for-testing)
+  _display_check='import shutil, test_settings'
+  _display_check+='; raise SystemExit(not shutil.which('
+  _display_check+='test_settings.SCREENSHOT_DISPLAY_SERVER_NAME))'
+  PYTHONPATH="$_SCRIPT_DIR" python3 -c "$_display_check" || _missing+=(xvfb)
   _pillow_check='from importlib.util import find_spec'
   _pillow_check+='; raise SystemExit(not find_spec("PIL"))'
   python3 -c "$_pillow_check" || _missing+=(pillow)
@@ -398,15 +413,38 @@ screenshot_command_set() {
     "${_args[@]}" "$@")
 }
 
+# Compares each report's shots with the gold, both reports before failing.
+screenshots_compare() {
+  local _diff_dir="$1" _name _exit_code _failure_code=0 _exit_codes=()
+  shift
+
+  for _name in "$REPORT_MODIFIED_DIR_NAME" "$REPORT_DIFF_DIR_NAME"; do
+    screenshot_command_set "$_name" "$@" --compare-only \
+      --compare-gold "$_SCREENSHOT_GOLD_DIR" --compare-out "$_diff_dir"
+    _exit_code=0
+    command_item_print "${_SCREENSHOT_COMMAND[*]}"
+    "${_SCREENSHOT_COMMAND[@]}" || _exit_code=$?
+    _exit_codes+=("$_name=$_exit_code")
+    if [ "$_failure_code" = 0 ]; then
+      _failure_code="$_exit_code"
+    fi
+  done
+  [ "$_failure_code" = 0 ] || error_exit "$_failure_code" \
+    "error: $_SCREENSHOT_SCRIPT_NAME exit codes: ${_exit_codes[*]}"
+}
+
 screenshots_run() {
-  local _name _exit_code _failure_code=0 _exit_codes=()
+  local _name _browser_option
 
   heading_print "$_SCREENSHOT_SCRIPT_NAME"
   for _name in "$REPORT_MODIFIED_DIR_NAME" "$REPORT_DIFF_DIR_NAME"; do
-    screenshot_command_set "$_name"
-    # The verbose lines go to the Markdown log on stderr, as blocks of text.
-    subprocess_run "${_SCREENSHOT_COMMAND[@]}" >&2
-    VERBOSE_BLOCK_PRINTED=loose
+    # Chrome, taking no option, writes the index page the others then shoot.
+    for _browser_option in "" --firefox --seamonkey; do
+      screenshot_command_set "$_name" ${_browser_option:+"$_browser_option"}
+      # The verbose lines go to the Markdown log on stderr, as blocks of text.
+      subprocess_run "${_SCREENSHOT_COMMAND[@]}" >&2
+      VERBOSE_BLOCK_PRINTED=loose
+    done
   done
 
   # A measuring run changes the recorded values the golden screenshots show.
@@ -416,25 +454,15 @@ screenshots_run() {
   fi
 
   # The golden screenshots are a developer's own and optional.
-  if [ -d "$_SCREENSHOT_GOLD_DIR" ]; then
-    # Both reports are compared before either exit code fails the run.
-    for _name in "$REPORT_MODIFIED_DIR_NAME" "$REPORT_DIFF_DIR_NAME"; do
-      screenshot_command_set "$_name" --compare-only \
-        --compare-gold "$_SCREENSHOT_GOLD_DIR" \
-        --compare-out "$_SCREENSHOT_DIFF_DIR"
-      _exit_code=0
-      command_item_print "${_SCREENSHOT_COMMAND[*]}"
-      "${_SCREENSHOT_COMMAND[@]}" || _exit_code=$?
-      _exit_codes+=("$_name=$_exit_code")
-      if [ "$_failure_code" = 0 ]; then
-        _failure_code="$_exit_code"
-      fi
-    done
-    [ "$_failure_code" = 0 ] || error_exit "$_failure_code" \
-      "error: $_SCREENSHOT_SCRIPT_NAME exit codes: ${_exit_codes[*]}"
-  else
+  if [ ! -d "$_SCREENSHOT_GOLD_DIR" ]; then
     log_verbose "screenshots: no $_SCREENSHOT_GOLD_DIR, not compared"
+    return 0
   fi
+
+  # Chrome's shots are the one gold, which every browser's shots match.
+  screenshots_compare "$_SCREENSHOT_DIFF_DIR"
+  screenshots_compare "$_SCREENSHOT_FIREFOX_DIFF_DIR" --firefox
+  screenshots_compare "$_SCREENSHOT_SEAMONKEY_DIFF_DIR" --seamonkey
 }
 
 regenerate_refuse() {
@@ -519,8 +547,10 @@ clear_overwritten_folders() {
   done
   log_verbose "cleared ${#_DEFAULT_REPORTS[@]} report(s)"
 
-  rm -rf "$_SCREENSHOT_DIFF_DIR" || error_exit 1 \
-    "error: could not remove the previous shot diffs: $_SCREENSHOT_DIFF_DIR"
+  for _path in "${_SCREENSHOT_DIFF_DIRS[@]}"; do
+    rm -rf "$_path" \
+      || error_exit 1 "error: could not remove the previous shot diffs: $_path"
+  done
 }
 
 args_parse() {
@@ -558,6 +588,8 @@ args_parse() {
 }
 
 main() {
+  local _diff_dir _exit_code=0
+
   args_parse "$@"
   verbose_begin
   title_print "$_SCRIPT" "$@"
@@ -576,11 +608,14 @@ main() {
   test_expected_report_check_run
   test_expected_build_location_check
   screenshots_run
-  # Only a shot differing from its gold twin makes the shot diffs directory.
-  if [ -d "$_SCREENSHOT_DIFF_DIR" ]; then
-    screenshot_gold_notice "$_SCREENSHOT_GOLD_DIR" "$_SCREENSHOT_DIFF_DIR"
-    exit "$SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE"
-  fi
+  # Only a shot differing from its gold twin makes a shot diffs directory.
+  for _diff_dir in "${_SCREENSHOT_DIFF_DIRS[@]}"; do
+    if [ -d "$_diff_dir" ]; then
+      screenshot_gold_notice "$_SCREENSHOT_GOLD_DIR" "$_diff_dir"
+      _exit_code="$SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE"
+    fi
+  done
+  exit "$_exit_code"
 }
 
 main "$@"

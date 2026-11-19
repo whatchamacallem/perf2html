@@ -306,7 +306,8 @@
           while (row.cells.length < count) {
             row.insertCell();
           }
-          grid.replaceChildren(table);
+          grid.textContent = "";
+          grid.appendChild(table);
           layout();
         }
 

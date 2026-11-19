@@ -303,6 +303,8 @@ window.try_catch_handler_(function () {
       if (need_name === "test") return address.test !== null;
       if (need_name === "view_page" && view_key !== null)
         return window.report_frame_.view_has_page(view_key);
+      if (need_name === "view_browser" && view_key !== null)
+        return window.report_frame_.view_browser_runs(view_key);
       window.throw_exception_("str_error_internal");
     });
   }

@@ -239,9 +239,9 @@ MENU_ENTRY_NEEDS: dict[str, list[str]] = {
     "counters": ["counter_list"],
     "str_menu_file": ["test"],
     "str_menu_function": ["test"],
-    "str_view_call_graph": ["test", "view_page"],
-    "str_view_database": ["test", "view_page"],
-    "str_view_flame_graph": ["test", "view_page"],
+    "str_view_call_graph": ["test", "view_page", "view_browser"],
+    "str_view_database": ["test", "view_page", "view_browser"],
+    "str_view_flame_graph": ["test", "view_page", "view_browser"],
 }
 MENU_ENTRY_VIEW_KEYS: dict[str, list[str]] = {
     "call_graph_sort": [CALL_GRAPH_VIEW_KEY],
@@ -329,6 +329,12 @@ SCREENSHOT_LABEL_QUERY_VALUE = "1"
 SCREENSHOT_MENU_KEY_NUMBER = "screenshot-menu"
 
 SETTINGS_DEBUG_ENABLED = False
+# The digits of the base64 hash part applying settings, in value order.
+SETTINGS_DEBUG_HASH_BASE64_DIGITS = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+)
+SETTINGS_DEBUG_HASH_BASE64_PADDING = "="
+SETTINGS_DEBUG_HASH_BYTE_BITS = 8
 SETTINGS_DEBUG_HASH_KEY_NAME = "setting-values"
 SETTINGS_DEBUG_JSON_INDENT_CHARS = 2
 SETTINGS_DEBUG_JSON_MAX_LENGTH_CHARS = 79
@@ -366,6 +372,11 @@ STORAGE_OWNED_KEYS: tuple[str, ...] = (
 STORAGE_VERSION = "perf2html v0"
 STORAGE_VERSION_KEY = "perf2html.version"
 
+STYLE_CALL_GRAPH_PAGE_WIDTH_PROPERTY = "--call-graph-page-width-"
+STYLE_CALL_GRAPH_SYMBOL_BUTTON_RIGHT_PROPERTY = (
+    "--call-graph-symbol-button-right-"
+)
+STYLE_CALL_GRAPH_TABLE_HEIGHT_PROPERTY = "--call-graph-table-height-"
 STYLE_COLOR_DARK_MODE: dict[str, list[str]] = {
     "#effdff": [
         "dark-mode-menu-normal-fg-",
@@ -454,13 +465,12 @@ STYLE_HEAT_COLOR_STOPS: list[str] = [
     "#FF7F21",
     "#F06142",
 ]
+STYLE_HEAT_MAP_MAIN_HEIGHT_PROPERTY = "--heat-map-main-height-"
 STYLE_HEAT_MAP_SOURCE_BOX_ROOM_PROPERTY = "--heat-map-source-box-room-"
 STYLE_HEAT_MAP_SOURCE_END_LINE_BOTTOM_PROPERTY = (
     "--heat-map-source-end-line-bottom-"
 )
-STYLE_HEAT_MAP_SOURCE_FILE_BOX_HEIGHT_PROPERTY = (
-    "--heat-map-source-file-box-height-"
-)
+STYLE_HEAT_MAP_SOURCE_TITLE_DROP_PROPERTY = "--heat-map-source-title-drop-"
 STYLE_MENU_LOGO_START_SHARE = 0.5
 STYLE_PAGE_BACKGROUND_DARK_MODE_ROLE = "dark-mode-page-bg-"
 STYLE_PAGE_BACKGROUND_EARLY_FILL_ENABLED = True
@@ -479,6 +489,12 @@ STYLE_TABLE_CHUNK_ROWS_PROPERTY = "--table-chunk-rows-"
 STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS = 1.5
 STYLE_TABLE_FUNCTION_LIST_COLUMN_MAX_CHARS = 48
 STYLE_TABLE_FUNCTION_NAME_MAX_CHARS = 20
+STYLE_TABLE_HOVER_ROW_EDGE_PROPERTY: dict[str, str] = {
+    "bottom": "--table-hover-row-bottom-",
+    "left": "--table-hover-row-left-",
+    "right": "--table-hover-row-right-",
+    "top": "--table-hover-row-top-",
+}
 STYLE_TABLE_LOCATION_COLUMN_MAX_CHARS = 48
 STYLE_TEXT_SCROLLBAR_FONT_MULTIPLE: dict[str, float] = {
     "horizontal": 1,
@@ -495,7 +511,9 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "call-graph-hover-row-z-index-": "1",
     "heat-map-main-edge-z-index-": "1",
     "heat-map-minimap-width-": "110px",
-    "heat-map-source-line-box-padding-block-": "0.5lh",
+    "heat-map-source-line-box-padding-block-": (
+        "calc(0.5 * var(--page-line-height-))"
+    ),
     "heat-map-source-ticker-tape-gap-": "1ch",
     "heat-map-tree-node-hover-z-index-": "1",
     "heat-map-tree-node-padding-right-": "1ch",
@@ -507,17 +525,18 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "menu-pulldown-entry-padding-inline-": "1ch",
     "menu-status-bar-padding-left-": "1ch",
     "menu-status-bar-padding-right-": "1ch",
-    "menu-strip-blank-line-height-": "0.5lh",
+    "menu-strip-blank-line-height-": "calc(0.5 * var(--page-line-height-))",
     "menu-strip-padding-right-": "1ch",
     "page-body-line-height-": "1.1",
     "page-emphasis-padding-inline-": "1ch",
-    "page-inset-block-": "1lh",
+    "page-inset-block-": "var(--page-line-height-)",
     "page-inset-inline-": "2ch",
+    "page-line-height-": "calc(var(--page-body-line-height-) * 1em)",
     "page-line-width-": "0.1em",
     "page-table-cell-padding-inline-": "1ch",
     "page-table-hover-row-z-index-": "1",
     "page-table-title-z-index-": "1",
-    "page-text-scrollbar-horizontal-height-": "1lh",
+    "page-text-scrollbar-horizontal-height-": "var(--page-line-height-)",
     "page-text-scrollbar-vertical-width-": "1ch",
     "page-tool-tip-max-width-": "60ch",
     "page-tool-tip-z-index-": "2",
@@ -619,6 +638,11 @@ TRACE_LOAD_SEGMENT_COMMAND: tuple[str, ...] = ("readelf", "-lW")
 TRACE_LOAD_SEGMENT_KEYWORD = "LOAD"
 TRACE_MAPS_EXECUTABLE_FLAG = "x"
 TRACE_RECORD_WORDS = 2
+
+# A user agent string holding a view's text names a browser that cannot run it.
+VIEW_UNSUPPORTED_USER_AGENT_TOKENS: dict[str, list[str]] = {
+    FLAME_GRAPH_VIEW_ENTRY[0]: ["SeaMonkey/"],
+}
 
 WIDGET_KEY_NAMES: dict[str, str] = {
     "activate": "Enter",

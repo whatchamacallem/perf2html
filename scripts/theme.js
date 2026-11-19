@@ -99,6 +99,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS = settings_(
     "STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS",
   );
+  const STYLE_TABLE_HOVER_ROW_EDGE_PROPERTY = settings_(
+    "STYLE_TABLE_HOVER_ROW_EDGE_PROPERTY",
+  );
   const STYLE_TEXT_SCROLLBAR_FONT_MULTIPLE = settings_(
     "STYLE_TEXT_SCROLLBAR_FONT_MULTIPLE",
   );
@@ -295,6 +298,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
   let design_scale_stop = null;
   let column_edge_hovered_element = null;
   let column_press_is_active = false;
+  // Holds whether a pointer pressed after the last key, so focus is unmarked.
+  let focus_is_pointer_given = false;
+  // Holds the table that frames the row the pointer is over, or null.
+  let hover_framed_table = null;
   // Holds the tool tip's cell, the one the pointer last entered, or null.
   let tool_tip_cell = null;
   let tool_tip_timer = 0;
@@ -458,19 +465,44 @@ window.report_ui_ = window.try_catch_handler_(function () {
       window.throw_exception_("str_error_internal");
     }
     design_scale = wanted;
-    root_element.style.zoom = String(root_zoom);
+    const root_height_text = root_element.clientHeight / root_zoom + "px";
+    // The root's box is the window's size in design px, drawn at its scale.
+    element_scale_set(
+      root_element,
+      root_zoom,
+      root_element.clientWidth / root_zoom + "px",
+      root_height_text,
+    );
     root_element.style.setProperty(
       STYLE_DESIGN_VIEWPORT_HEIGHT_PROPERTY,
-      root_element.clientHeight / root_zoom + "px",
+      root_height_text,
     );
     if (!is_scaled) return;
     page_element.style.minWidth = STYLE_DESIGN_COORDINATES_WIDTH_PX + "px";
-    home_panel.style.zoom = String(multiple);
-    view_frame.style.zoom = String(multiple);
+    // A view's box is its place's size over the multiple, drawn at it.
+    const view_size_text = `calc(100% / ${multiple})`;
+    for (const view_element of [home_panel, view_frame])
+      element_scale_set(
+        view_element,
+        multiple,
+        view_size_text,
+        view_size_text,
+      );
     home_panel.style.setProperty(
       STYLE_DESIGN_VIEWPORT_HEIGHT_PROPERTY,
       root_element.clientHeight / wanted + "px",
     );
+  }
+  // Draws an element at a scale, its box the size given in its own px.
+  function element_scale_set(
+    scaled_element,
+    multiple,
+    width_text,
+    height_text,
+  ) {
+    scaled_element.style.width = width_text;
+    scaled_element.style.height = height_text;
+    scaled_element.style.transform = `scale(${multiple})`;
   }
   function design_px(screen_px) {
     return screen_px / design_scale;
@@ -886,6 +918,25 @@ window.report_ui_ = window.try_catch_handler_(function () {
     return new URL(report_path, REPORT_ROOT_HREF).href;
   }
 
+  // Replaces an element's children with the nodes given.
+  function children_replace(parent_element, child_nodes) {
+    parent_element.textContent = "";
+    parent_element.append(...child_nodes);
+  }
+  // Writes text to the clipboard through the document's own copy command.
+  function clipboard_text_write(copied_text) {
+    const copy_handler = (copy_event) => {
+      copy_event.clipboardData.setData("text/plain", copied_text);
+      copy_event.preventDefault();
+    };
+    document.addEventListener("copy", copy_handler);
+    try {
+      if (!document.execCommand("copy"))
+        window.throw_exception_("str_error_clipboard_copy_refused");
+    } finally {
+      document.removeEventListener("copy", copy_handler);
+    }
+  }
   // Returns whether the key was typed in an editable field, which keeps it.
   function field_owns_key(key_event) {
     return (
@@ -1214,6 +1265,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
         );
         entry_element.setAttribute("aria-selected", String(is_highlighted));
       }
+      root_element.classList.toggle(
+        "holds-highlighted-entry-",
+        matches[highlight_index] !== undefined,
+      );
     }
     // Steps through the matches, a step back from the first lighting none.
     function highlight_step(step_count) {
@@ -1248,9 +1303,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       matches = entries.filter((entry_element) =>
         text_matches(entry_element.textContent),
       );
-      entry_list.replaceChildren(
-        ...(matches.length ? matches : [no_match_note]),
-      );
+      children_replace(entry_list, matches.length ? matches : [no_match_note]);
       search_box.textContent = search_shown_text(
         search_text,
         placeholder_text,
@@ -1265,8 +1318,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
       if (relabelled_entries.length !== entries.length)
         window.throw_exception_("str_error_internal");
       entries.forEach((entry_element, entry_index) => {
-        entry_element.replaceChildren(
-          ...relabelled_entries[entry_index].childNodes,
+        children_replace(
+          entry_element,
+          relabelled_entries[entry_index].childNodes,
         );
       });
     }
@@ -1279,6 +1333,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       is_open = true;
       search_text = typed_text;
       root_element.classList.add("open-");
+      open_pulldown_mark();
       root_element.setAttribute("aria-expanded", "true");
       entry_box.hidden = false;
       // A closed list shows no bar, so the bar starts at the first open.
@@ -1300,6 +1355,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       is_open = false;
       search_text = "";
       root_element.classList.remove("open-");
+      open_pulldown_mark();
       root_element.setAttribute("aria-expanded", "false");
       search_box.hidden = true;
       entry_box.hidden = true;
@@ -1463,12 +1519,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
       }),
     );
     root_element.addEventListener(
-      "paste",
-      window.try_catch_handler_((paste_event) => {
-        const clipboard_text = pasted_text(paste_event);
-        if (clipboard_text === null) return;
-        paste_event.preventDefault();
-        pulldown_paste(clipboard_text);
+      "text-paste-",
+      window.try_catch_handler_((text_paste) => {
+        text_paste.preventDefault();
+        pulldown_paste(text_paste.detail);
       }),
     );
     // A press on the cell opens its list, a press on an open cell closes it.
@@ -1778,18 +1832,21 @@ window.report_ui_ = window.try_catch_handler_(function () {
       if (!key_event.repeat) entry_activate(entry);
     }
     // Searches with pasted text in a search cell, as with typed keys.
-    function entry_paste_handler(paste_event) {
-      const entry_cell = paste_event.target;
-      if (entry_cell.parentElement !== strip_line) return;
+    function entry_paste_handler(text_paste) {
+      const entry_cell = text_paste.target;
+      if (
+        text_paste.defaultPrevented ||
+        entry_cell.parentElement !== strip_line
+      )
+        return;
       const entry = entries_by_name.get(
         entry_cell.getAttribute("data-entry-name-"),
       );
-      const clipboard_text = pasted_text(paste_event);
-      if (entry.kind !== "search" || clipboard_text === null) return;
-      paste_event.preventDefault();
+      if (entry.kind !== "search") return;
+      text_paste.preventDefault();
       strip_search_text_set(
         entry,
-        search_texts.get(entry.name) + clipboard_text,
+        search_texts.get(entry.name) + text_paste.detail,
       );
     }
     // Shows a search cell's search, while focused the placeholder for none.
@@ -1950,7 +2007,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       window.try_catch_handler_(entry_key_handler),
     );
     strip_line.addEventListener(
-      "paste",
+      "text-paste-",
       window.try_catch_handler_(entry_paste_handler),
     );
     for (const focus_event_name of ["focusin", "focusout"])
@@ -2202,8 +2259,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
       )
       .join("");
     for (const sizer_row of table_element.querySelectorAll(
-      ":scope > :is(thead, tbody)" +
-        " > tr.table-sizer-row-:not(.table-title-copy-)",
+      ":scope > thead > tr.table-sizer-row-:not(.table-title-copy-)," +
+        " :scope > tbody > tr.table-sizer-row-:not(.table-title-copy-)",
     )) {
       sizer_row.className = [...row_class_names].join(" ");
       sizer_row.innerHTML = sizer_cells_markup;
@@ -3199,7 +3256,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     kept_column_orders.clear();
     kept_column_widths.clear();
     for (const title_cell of root_element.querySelectorAll(
-      "table.table- > :is(thead, tbody) > tr > th",
+      "table.table- > thead > tr > th, table.table- > tbody > tr > th",
     ))
       title_cell.style.minWidth = "";
     const heading_elements = root_element.querySelectorAll(".page-heading-");
@@ -3525,7 +3582,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
         : [
             {
               label: window.ui_strings_.text("str_table_heading_copy_path"),
-              on_select: () => navigator.clipboard.writeText(copied_path),
+              on_select: () => clipboard_text_write(copied_path),
               value: "path",
             },
           ];
@@ -3533,7 +3590,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       {
         label: window.ui_strings_.text("str_table_heading_copy_text"),
         on_select: () =>
-          navigator.clipboard.writeText(
+          clipboard_text_write(
             headed_copy_text(heading_text(), copied_text()),
           ),
         value: "text",
@@ -3688,7 +3745,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
     const drawn_style = getComputedStyle(drawn_element);
     const measure_context = document.createElement("canvas").getContext("2d");
     measure_context.font = drawn_style.fontSize + " " + drawn_style.fontFamily;
-    const glyph_metrics = measure_context.measureText(CH_UNIT_GLYPH);
     // The heading's line leads the image, a space each side of its text.
     const heading_line_text = STRIP_GAP_TEXT + heading_text + STRIP_GAP_TEXT;
     const heading_width = measure_context.measureText(heading_line_text).width;
@@ -3704,12 +3760,29 @@ window.report_ui_ = window.try_catch_handler_(function () {
     const heading_color = status_style.color;
     status_probe.remove();
     if (heading_fill === null) window.throw_exception_("str_error_internal");
+    // A text and a mark on its baseline measure the font's ascent and descent.
+    const font_probe = render_element_of(
+      render_element(
+        "span",
+        {},
+        CH_UNIT_GLYPH + render_element("span", {}, ""),
+      ),
+    );
+    font_probe.style.position = "absolute";
+    font_probe.style.visibility = "hidden";
+    font_probe.style.fontSize = drawn_style.fontSize;
+    font_probe.style.fontFamily = drawn_style.fontFamily;
+    font_probe.lastChild.style.display = "inline-block";
+    drawn_element.parentElement.append(font_probe);
+    const font_rect = font_probe.getBoundingClientRect();
+    const font_ascent = design_px(
+      font_probe.lastChild.getBoundingClientRect().top - font_rect.top,
+    );
+    const font_descent = design_px(font_rect.height) - font_ascent;
+    font_probe.remove();
     // Drops the baseline as a line box does, the font's height centred.
     const baseline_drop = (line_height) =>
-      (line_height +
-        glyph_metrics.fontBoundingBoxAscent -
-        glyph_metrics.fontBoundingBoxDescent) /
-      2;
+      (line_height + font_ascent - font_descent) / 2;
     let ground_element = drawn_element.parentElement;
     while (
       painted_background_color(getComputedStyle(ground_element)) === null
@@ -3728,16 +3801,21 @@ window.report_ui_ = window.try_catch_handler_(function () {
     for (const stuck_element of stuck_elements)
       stuck_element.style.position = "static";
     const drawn_rect = drawn_element.getBoundingClientRect();
-    const drawn_zoom = drawn_element.currentCSSZoom;
-    const image_width = Math.max(drawn_rect.width / drawn_zoom, heading_width);
-    const image_height = drawn_rect.height / drawn_zoom + heading_height;
-    // Returns a client rect's place and size in the image, unzoomed.
+    const image_width = Math.max(design_px(drawn_rect.width), heading_width);
+    const image_height = design_px(drawn_rect.height) + heading_height;
+    // Returns a client rect's place and size in the image, in design px.
     const image_box = (client_rect) => ({
-      x: (client_rect.left - drawn_rect.left) / drawn_zoom,
-      y: (client_rect.top - drawn_rect.top) / drawn_zoom + heading_height,
-      width: client_rect.width / drawn_zoom,
-      height: client_rect.height / drawn_zoom,
+      x: design_px(client_rect.left - drawn_rect.left),
+      y: design_px(client_rect.top - drawn_rect.top) + heading_height,
+      width: design_px(client_rect.width),
+      height: design_px(client_rect.height),
     });
+    // Returns whether an element has a box, as a laid out element has.
+    const has_box = (page_element) => page_element.getClientRects().length > 0;
+    // Returns whether an element has a box its visibility shows.
+    const is_shown = (page_element) =>
+      has_box(page_element) &&
+      getComputedStyle(page_element).visibility === "visible";
     const shape_markups = [
       render_element(
         "rect",
@@ -3799,18 +3877,12 @@ window.report_ui_ = window.try_catch_handler_(function () {
       page_element.closest(".strip-line- > .menu-button-") !== null;
     // Paints an element's background, its before, its children, its after.
     function backgrounds_paint(painted_element) {
-      if (
-        !painted_element.checkVisibility() ||
-        is_strip_control(painted_element)
-      )
+      if (!has_box(painted_element) || is_strip_control(painted_element))
         return;
       const fill_color = painted_background_color(
         getComputedStyle(painted_element),
       );
-      if (
-        fill_color !== null &&
-        painted_element.checkVisibility({ visibilityProperty: true })
-      )
+      if (fill_color !== null && is_shown(painted_element))
         for (const client_rect of painted_element.getClientRects())
           shape_markups.push(
             render_element(
@@ -3852,11 +3924,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       text_node = text_walker.nextNode()
     ) {
       const text_element = text_node.parentElement;
-      if (
-        !text_element.checkVisibility({ visibilityProperty: true }) ||
-        is_strip_control(text_element)
-      )
-        continue;
+      if (!is_shown(text_element) || is_strip_control(text_element)) continue;
       const text_color = getComputedStyle(text_element).color;
       for (const word_match of text_node.data.matchAll(/\S+/g)) {
         word_range.setStart(text_node, word_match.index);
@@ -3999,8 +4067,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
         lone_link !== null &&
         lone_link.textContent === shown_element.textContent;
       // A link's address is copied bare, any other text under its heading.
-      if (is_link_line) return navigator.clipboard.writeText(lone_link.href);
-      return navigator.clipboard.writeText(
+      if (is_link_line) return clipboard_text_write(lone_link.href);
+      return clipboard_text_write(
         headed_copy_text(
           status_bar_text_now(),
           is_table_shown ? shown_table_text() : shown_element.textContent,
@@ -4586,7 +4654,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
           window.try_catch_handler_(frame_draw),
         );
     }
-    bar_element.replaceChildren(cell_make());
+    children_replace(bar_element, [cell_make()]);
     const resize_observer = new ResizeObserver(
       window.try_catch_handler_(resize_draw),
     );
@@ -4648,13 +4716,95 @@ window.report_ui_ = window.try_catch_handler_(function () {
     resize_settle_callbacks.push(settle_callback);
   }
 
+  // Marks the body while a pulldown is open, which hides the tool tip.
+  function open_pulldown_mark() {
+    document.body.classList.toggle(
+      "holds-open-pulldown-",
+      document.querySelector(".menu-button-.open-") !== null,
+    );
+  }
+  // Hangs the tool tip under its cell's right, flipped to its left to fit.
+  function tool_tip_place() {
+    const root_zoom = design_scale_root_zoom();
+    const cell_rect = tool_tip_cell.getBoundingClientRect();
+    const tip_rect = tool_tip_element.getBoundingClientRect();
+    const window_width = document.documentElement.clientWidth;
+    const fits_below =
+      cell_rect.bottom + tip_rect.height <=
+      document.documentElement.clientHeight;
+    const is_flipped =
+      cell_rect.right - tip_rect.width < 0 &&
+      cell_rect.left + tip_rect.width <= window_width &&
+      fits_below;
+    tool_tip_element.style.top = cell_rect.bottom / root_zoom + "px";
+    tool_tip_element.style.left = is_flipped
+      ? cell_rect.left / root_zoom + "px"
+      : "";
+    tool_tip_element.style.right = is_flipped
+      ? ""
+      : (window_width - cell_rect.right) / root_zoom + "px";
+  }
+  // Returns the element a crossing pointer enters, none as it leaves the page.
+  function pointer_entered_element(pointer_event) {
+    return pointer_event.type === "pointerover"
+      ? pointer_event.target
+      : pointer_event.relatedTarget;
+  }
+  // Frames the row the pointer enters, its table drawing the frame.
+  function hover_frame_cross(pointer_event) {
+    const entered_element = pointer_entered_element(pointer_event);
+    const entered_row = entered_element ? entered_element.closest("tr") : null;
+    const framed_row =
+      entered_row &&
+      entered_row.matches(
+        ".table- > tbody > tr.row-link-," +
+          " .table- > tbody > tr[data-line-number-]," +
+          " .heat-map-source-information-box- .table- > tbody" +
+          " > tr:not(.table-title-row-)," +
+          " #call-graph-table- > tbody > tr",
+      )
+        ? entered_row
+        : null;
+    const framed_table = framed_row
+      ? framed_row.parentElement.parentElement
+      : null;
+    if (hover_framed_table && hover_framed_table !== framed_table)
+      hover_framed_table.classList.remove("row-hovered-");
+    hover_framed_table = framed_table;
+    if (!framed_row) return;
+    const table_rect = framed_table.getBoundingClientRect();
+    const table_style = getComputedStyle(framed_table);
+    const row_rect = framed_row.getBoundingClientRect();
+    // A source line's frame starts at the tree's edge, in view.
+    const row_left = framed_table.classList.contains("heat-map-source-table-")
+      ? framed_row.cells[0].getBoundingClientRect().right
+      : row_rect.left;
+    // Holds how far inside each edge of the table's box the frame's edge lies.
+    const edge_screen_px = {
+      bottom: table_rect.bottom - row_rect.bottom,
+      left: row_left - table_rect.left,
+      right: table_rect.right - row_rect.right,
+      top: row_rect.top - table_rect.top,
+    };
+    for (const [edge_name, property_name] of Object.entries(
+      STYLE_TABLE_HOVER_ROW_EDGE_PROPERTY,
+    )) {
+      if (!Object.hasOwn(edge_screen_px, edge_name))
+        window.throw_exception_("str_error_internal");
+      // The frame is placed inside the table's border, which its box holds.
+      const border_px = parseFloat(
+        table_style.getPropertyValue(`border-${edge_name}-width`),
+      );
+      framed_table.style.setProperty(
+        property_name,
+        design_px(edge_screen_px[edge_name]) - border_px + "px",
+      );
+    }
+    framed_table.classList.add("row-hovered-");
+  }
   // Hides the tool tip as the pointer enters another cell, timing the new one.
   function tool_tip_pointer_cross(pointer_event) {
-    // A pointer leaving the document enters no element of it.
-    const entered_element =
-      pointer_event.type === "pointerover"
-        ? pointer_event.target
-        : pointer_event.relatedTarget;
+    const entered_element = pointer_entered_element(pointer_event);
     const entered_cell = entered_element
       ? entered_element.closest("[aria-description]")
       : null;
@@ -4689,6 +4839,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     tool_tip_element.textContent =
       tool_tip_cell.getAttribute("aria-description");
     tool_tip_element.hidden = false;
+    tool_tip_place();
     tool_tip_timer = setTimeout(
       window.try_catch_handler_(() => {
         tool_tip_element.hidden = true;
@@ -4707,11 +4858,16 @@ window.report_ui_ = window.try_catch_handler_(function () {
     render_element("div", { class: "menu-button- tool-tip-", hidden: "" }, ""),
   );
   document.body.append(tool_tip_element);
-  for (const crossing_type of ["pointerover", "pointerout"])
+  for (const crossing_type of ["pointerover", "pointerout"]) {
     document.addEventListener(
       crossing_type,
       window.try_catch_handler_(tool_tip_pointer_cross),
     );
+    document.addEventListener(
+      crossing_type,
+      window.try_catch_handler_(hover_frame_cross),
+    );
+  }
   // A press, a release and any click, a key's too, time the tool tip anew.
   for (const press_type of ["pointerdown", "pointerup", "click"])
     document.addEventListener(
@@ -4727,6 +4883,54 @@ window.report_ui_ = window.try_catch_handler_(function () {
     "click",
     window.try_catch_handler_((click_event) => {
       if (click_event.pointerType) menu_button_pointer_blur();
+    }),
+  );
+  // A pointer's press leaves the focus it gives unmarked, as a key's marks it.
+  document.addEventListener(
+    "pointerdown",
+    window.try_catch_handler_(() => {
+      focus_is_pointer_given = true;
+    }),
+    true,
+  );
+  // A key, but a shortcut's, marks the focused element and each focus after.
+  document.addEventListener(
+    "keydown",
+    window.try_catch_handler_((key_event) => {
+      if (key_event.altKey || key_event.ctrlKey || key_event.metaKey) return;
+      focus_is_pointer_given = false;
+      document.activeElement.classList.add("keyboard-focus-");
+    }),
+    true,
+  );
+  document.addEventListener(
+    "focusin",
+    window.try_catch_handler_((focus_event) => {
+      focus_event.target.classList.toggle(
+        "keyboard-focus-",
+        !focus_is_pointer_given,
+      );
+    }),
+  );
+  document.addEventListener(
+    "focusout",
+    window.try_catch_handler_((focus_event) => {
+      focus_event.target.classList.remove("keyboard-focus-");
+    }),
+  );
+  // Hands a paste to the focused element, which Firefox passes for the body.
+  document.addEventListener(
+    "paste",
+    window.try_catch_handler_((paste_event) => {
+      const clipboard_text = pasted_text(paste_event);
+      if (clipboard_text === null) return;
+      const text_paste = new CustomEvent("text-paste-", {
+        bubbles: true,
+        cancelable: true,
+        detail: clipboard_text,
+      });
+      document.activeElement.dispatchEvent(text_paste);
+      if (text_paste.defaultPrevented) paste_event.preventDefault();
     }),
   );
   font_fit_apply();
@@ -4761,6 +4965,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       top_href: address_top_href,
     },
     call_graph_cutoff_choose_send,
+    clipboard_text_write,
     dark_mode_enabled_now_,
     dark_mode_set_,
     design_character_width_px: DESIGN_CHARACTER_WIDTH_PX,

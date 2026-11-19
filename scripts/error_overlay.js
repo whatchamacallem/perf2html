@@ -34,8 +34,13 @@
 
   function error_text_of_(thrown_value) {
     if (!(thrown_value instanceof Error)) return String(thrown_value);
-    const error_text =
-      thrown_value.stack ?? `${thrown_value.name}: ${thrown_value.message}`;
+    const error_line = String(thrown_value);
+    // Gecko writes an empty stack for a script it could not parse.
+    const stack_text = thrown_value.stack || error_line;
+    // Gecko writes a stack without the line naming the error, as V8 begins.
+    const error_text = stack_text.startsWith(error_line)
+      ? stack_text
+      : `${error_line}\n${stack_text}`;
     if (thrown_value.cause !== undefined)
       return `${error_text}\n${error_text_of_(thrown_value.cause)}`;
     return error_text;
@@ -49,11 +54,12 @@
     return report_relative_(location.href.split(/[?#]/)[0] + location.hash);
   }
 
+  // Writes a link whose click runs the script, inside the click itself.
   function link_render_(script_text, link_text) {
-    const link_href = "javascript:" + encodeURIComponent(script_text);
     return (
-      `<a style="color:${OVERLAY_LINK_COLOR}" ` +
-      `href="${html_escape_(link_href)}">${html_escape_(link_text)}</a>`
+      `<a style="color:${OVERLAY_LINK_COLOR}" href="#" ` +
+      `onclick="${html_escape_(script_text + ";return false")}">` +
+      `${html_escape_(link_text)}</a>`
     );
   }
 
@@ -63,43 +69,54 @@
         const entry_result = entry_function.apply(this, entry_arguments);
         if (!(entry_result instanceof Promise)) return entry_result;
         return entry_result.catch(function (rejection_reason) {
-          err_overlay_show_(rejection_reason);
+          err_overlay_show_(rejection_reason, "");
           throw rejection_reason;
         });
       } catch (thrown_value) {
-        err_overlay_show_(thrown_value);
+        err_overlay_show_(thrown_value, "");
         throw thrown_value;
       }
     };
   }
 
+  // Returns the error holding its cause, if it has one.
+  function error_caused_(thrown_error, error_cause) {
+    if (error_cause !== undefined) thrown_error.cause = error_cause;
+    return thrown_error;
+  }
+
   // Throws the filled UI string, a trailing Error value its cause.
   function throw_exception_(string_id, ...fill_values) {
-    const error_options =
-      fill_values.at(-1) instanceof Error
-        ? { cause: fill_values.pop() }
+    const error_cause =
+      fill_values[fill_values.length - 1] instanceof Error
+        ? fill_values.pop()
         : undefined;
     if (window.ui_strings_ === undefined)
-      ui_error_throw_(string_id, error_options);
+      ui_error_throw_(string_id, error_cause);
     let message_text;
     try {
       message_text = window.ui_strings_.text_fill(string_id, fill_values);
     } catch (ui_error) {
       // A ui error met while formatting keeps the formatted error's cause.
-      if (error_options) ui_error.cause = error_options.cause;
-      throw ui_error;
+      throw error_caused_(ui_error, error_cause);
     }
-    throw new Error(message_text, error_options);
+    throw error_caused_(new Error(message_text), error_cause);
   }
 
   // Throws the ui error of a missing ui string, naming what is missing.
-  function ui_error_throw_(missing_text, error_options) {
-    throw new Error(`${UI_ERROR_TEXT}: ${missing_text}`, error_options);
+  function ui_error_throw_(missing_text, error_cause) {
+    throw error_caused_(
+      new Error(`${UI_ERROR_TEXT}: ${missing_text}`),
+      error_cause,
+    );
   }
 
-  function err_overlay_show_(thrown_value) {
+  function err_overlay_show_(thrown_value, script_place) {
     const error_text = report_relative_(error_text_of_(thrown_value));
-    report_render_({ page: page_address_(), text: error_text }, false);
+    report_render_(
+      { page: page_address_(), script: script_place, text: error_text },
+      false,
+    );
   }
 
   function report_render_(report, is_relayed) {
@@ -122,6 +139,7 @@
         : window[REPORT_MANIFEST_TABLE_GLOBAL_NAME];
     const place_lines = [`address  ${page_address_()}`];
     if (is_relayed) place_lines.push(`page     ${report.page}`);
+    if (report.script !== "") place_lines.push(`script   ${report.script}`);
     const copy_text = [
       OVERLAY_TITLE_TEXT,
       "",
@@ -144,8 +162,13 @@
       `min-height:100vh;display:flex;align-items:center;` +
       `justify-content:safe center`;
     const block_style = "font:inherit;white-space:pre";
+    // Copies through the document's own copy command, which every browser has.
     const copy_script =
-      "navigator.clipboard.writeText(" + JSON.stringify(copy_text) + ")";
+      "document.addEventListener('copy',function(copy_event){" +
+      "copy_event.clipboardData.setData('text/plain'," +
+      JSON.stringify(copy_text) +
+      ");copy_event.preventDefault()},{once:true});" +
+      "document.execCommand('copy')";
     const links_line =
       `${link_render_(copy_script, OVERLAY_COPY_LINK_TEXT)} ` +
       `${link_render_("history.back()", OVERLAY_BACK_LINK_TEXT)}`;
@@ -164,10 +187,21 @@
   }
 
   window.addEventListener("error", function (browser_event) {
-    err_overlay_show_(browser_event.error || browser_event.message);
+    // V8 names no script for a muted error of another origin's script.
+    const script_place =
+      browser_event.filename === ""
+        ? ""
+        : report_relative_(
+            `${browser_event.filename}:${browser_event.lineno}:` +
+              `${browser_event.colno}`,
+          );
+    err_overlay_show_(
+      browser_event.error || browser_event.message,
+      script_place,
+    );
   });
   window.addEventListener("unhandledrejection", function (browser_event) {
-    err_overlay_show_(browser_event.reason);
+    err_overlay_show_(browser_event.reason, "");
   });
   window.addEventListener("message", function (browser_event) {
     const payload = browser_event.data;

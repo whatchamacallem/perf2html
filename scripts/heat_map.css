@@ -5,8 +5,8 @@
 /* A tree node, one line high: its bars and branch, name, share. */
 .heat-map-tree-node- {
   display: flex;
-  height: 1lh;
-  align-items: unsafe end;
+  height: var(--page-line-height-);
+  align-items: flex-end;
   padding-right: var(--heat-map-tree-node-padding-right-);
   cursor: pointer;
   white-space: pre;
@@ -50,31 +50,30 @@
 }
 /* A box's body is as wide as what it shows, the span its image draws. */
 .heat-map-source-information-box-body- {
+  width: -moz-fit-content;
   width: fit-content;
 }
 /* A box's table titles stay on their tables, each holding its own lines. */
 .heat-map-source-information-box- th {
   position: relative;
 }
-:is(
-    tr.heat-map-source-line-detail-row-,
-    tr.heat-map-source-file-information-row-
-  )
-  > td {
+tr.heat-map-source-line-detail-row- > td,
+tr.heat-map-source-file-information-row- > td {
   white-space: normal;
   padding: 0;
 }
 /* A line's or function's box has half a line clear above and below it. */
 tr.heat-map-source-line-detail-row- > td {
-  padding-block: var(--heat-map-source-line-box-padding-block-);
+  padding-block-start: var(--heat-map-source-line-box-padding-block-);
+  padding-block-end: var(--heat-map-source-line-box-padding-block-);
 }
 /* The file's box rises into the title line, level with the tree's title. */
 tr.heat-map-source-file-information-row- > td {
   position: relative;
-  top: -1lh;
+  top: calc(-1 * var(--page-line-height-));
 }
 /* The title line over the file's box lets a press through to the box. */
-.heat-map-source-table-:has(.heat-map-source-file-information-row-) > thead {
+.heat-map-source-table-.holds-file-box- > thead {
   pointer-events: none;
 }
 /* A title still takes its own presses. */
@@ -82,18 +81,8 @@ tr.heat-map-source-file-information-row- > td {
   pointer-events: auto;
 }
 /* A source title rides below the file's box until the box scrolls away. */
-.heat-map-source-table-:has(.heat-map-source-file-information-row-)
-  > thead
-  > tr
-  > th:not(:first-child) {
-  animation: heat-map-source-title-drop- linear;
-  animation-timeline: scroll();
-  animation-range: 0 var(--heat-map-source-file-box-height-);
-}
-@keyframes heat-map-source-title-drop- {
-  from {
-    translate: 0 var(--heat-map-source-file-box-height-);
-  }
+.heat-map-source-table-.holds-file-box- > thead > tr > th:not(:first-child) {
+  transform: translateY(var(--heat-map-source-title-drop-));
 }
 /* A file with no source has its box beside the tree, level with its title. */
 .heat-map-source-box-alone- {
@@ -107,37 +96,35 @@ tr.clickable- {
 }
 /* A box wider than the titles widens the source column of every chunk. */
 .heat-map-source-table-
-  > :is(thead, tbody)
+  > thead
+  > tr.table-sizer-row-
+  > td.heat-map-source-table-code-cell-,
+.heat-map-source-table-
+  > tbody
   > tr.table-sizer-row-
   > td.heat-map-source-table-code-cell- {
   min-width: var(--heat-map-source-box-room-);
 }
 /* The source's last line scrolls up to just below the column titles. */
 .heat-map-source-end- {
-  height: calc(100cqh - var(--heat-map-source-end-line-bottom-));
+  height: calc(
+    var(--heat-map-main-height-) - var(--heat-map-source-end-line-bottom-)
+  );
 }
-/* A hovered source line's tree cell ends where the line's frame starts. */
-tr[data-line-number-]:hover > td:first-child {
-  anchor-name: --heat-map-source-hover-tree-cell-;
-}
-/* A hovered source line's frame starts at the tree's edge, in view. */
-table.heat-map-source-table-::before {
-  left: anchor(--heat-map-source-hover-tree-cell- right);
-}
+
 /* The hottest lines keep their line with none, so no file moves the page. */
 #heat-map-ticker-tape-box- {
-  min-height: 1lh;
+  min-height: var(--page-line-height-);
 }
-/* The tape's first entry follows one gap, as each entry after it does. */
 .heat-map-source-ticker-tape- {
   display: flex;
-  gap: var(--heat-map-source-ticker-tape-gap-);
-  padding-left: var(--heat-map-source-ticker-tape-gap-);
   flex-wrap: nowrap;
   overflow: hidden;
 }
+/* Each entry of the tape follows one gap, its first entry too. */
 .heat-map-source-ticker-tape- > * {
   flex: none;
+  margin-left: var(--heat-map-source-ticker-tape-gap-);
 }
 
 /* The minimap: the source scaled into its column, the shown part boxed. */
@@ -148,7 +135,7 @@ table.heat-map-source-table-::before {
   cursor: pointer;
   isolation: isolate;
 }
-#heat-map-minimap-.empty- {
+#heat-map-main-column-.minimap-empty- #heat-map-minimap- {
   display: none;
 }
 #heat-map-minimap-box- {
@@ -180,6 +167,9 @@ table.heat-map-source-table-::before {
 #heat-map-minimap-viewport-::before {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: -1;
 }

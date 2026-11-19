@@ -22,6 +22,9 @@ window.try_catch_handler_(function () {
   );
   const SETTINGS_DEBUG_QUERY_VALUES = settings_("SETTINGS_DEBUG_QUERY_VALUES");
   const SETTINGS_VIEW_ENTRY = settings_("SETTINGS_VIEW_ENTRY");
+  const VIEW_UNSUPPORTED_USER_AGENT_TOKENS = settings_(
+    "VIEW_UNSUPPORTED_USER_AGENT_TOKENS",
+  );
 
   const home_panel = window.report_ui_.home_panel;
   const loaded_hash = location.hash;
@@ -66,6 +69,14 @@ window.try_catch_handler_(function () {
   function view_has_page(view_key) {
     return is_regular_report || !REGULAR_REPORT_VIEW_KEYS.includes(view_key);
   }
+  // Returns whether this browser runs a view, as its user agent string tells.
+  function view_browser_runs(view_key) {
+    if (!Object.hasOwn(VIEW_UNSUPPORTED_USER_AGENT_TOKENS, view_key))
+      return true;
+    return !VIEW_UNSUPPORTED_USER_AGENT_TOKENS[view_key].some((agent_token) =>
+      navigator.userAgent.includes(agent_token),
+    );
+  }
   // Returns the query's menu entry number while the loaded address shows.
   function menu_entry_number_now() {
     return location.hash === loaded_hash ? loaded_menu_entry_number : null;
@@ -82,6 +93,11 @@ window.try_catch_handler_(function () {
     if (!view_has_page(parsed_address.view))
       window.throw_exception_(
         "str_error_hash_view_page_missing",
+        parsed_address.view,
+      );
+    if (!view_browser_runs(parsed_address.view))
+      window.throw_exception_(
+        "str_error_hash_view_browser_unsupported",
         parsed_address.view,
       );
     if (
@@ -228,9 +244,8 @@ window.try_catch_handler_(function () {
         test: current_address.test,
         view: SETTINGS_VIEW_ENTRY[0],
         setting: setting_name,
-        [SETTINGS_DEBUG_HASH_KEY_NAME]: new TextEncoder()
-          .encode(JSON.stringify(applied_values))
-          .toBase64(),
+        [SETTINGS_DEBUG_HASH_KEY_NAME]:
+          window.settings_applied_text_(applied_values),
       }),
     );
   }
@@ -348,6 +363,7 @@ window.try_catch_handler_(function () {
     menu_entry_number_now,
     settings_debug_clear,
     test_names,
+    view_browser_runs,
     view_has_page,
     view_mode_link_now,
     view_post,

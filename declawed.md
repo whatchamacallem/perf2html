@@ -660,15 +660,29 @@ The single function/check owning each concern - never bypass or duplicate:
   dir and no log of its own; a failure's log tail still reaches stderr.
   Debug mode keeps the artifacts in `perf2html_temporary_artifacts/` for a
   later `--regenerate` and for debugging.
-- Copy `tests/perf2html/screenshots/` to `tests/perf2html/screenshots-gold/`
-  once its shots are right, then iterate with
-  `scripts/test_expected_behavior.sh --regenerate`. That rebuilds every page
-  from the same recordings, so the recorded time, the raw data archive name,
-  the timings and the counters the shots show match the gold, and it compares
-  each shot with its gold twin, writing a `compare_` image of each difference
-  into `tests/perf2html/screenshots-diff/`; a difference is then the edit's
-  own. Only `--regenerate` compares: a measuring run changes what the shots
-  show, so after one copy its shots to `screenshots-gold/` again.
+- Chrome's shots are the one gold set. Copy `tests/perf2html/screenshots/`
+  to `tests/perf2html/screenshots-gold/` once its shots are right, then
+  iterate with `scripts/test_expected_behavior.sh --regenerate`. That
+  rebuilds every page from the same recordings, so the recorded time, the
+  raw data archive name, the timings and the counters the shots show match
+  the gold, and it compares each shot with its gold twin, writing a
+  `compare_` image of each difference into
+  `tests/perf2html/screenshots-diff/`; a difference is then the edit's own.
+  Only `--regenerate` compares: a measuring run changes what the shots show,
+  so after one copy its shots to `screenshots-gold/` again.
+- The Firefox and SeaMonkey shots, in `screenshots-firefox/` and
+  `screenshots-seamonkey/`, have no gold of their own: what matters is that
+  each browser draws the pages as Chrome does, not as it drew them before.
+  Each is compared with its Chrome twin in `screenshots-gold/`, vaguely:
+  both shots averaged over squares of `COMPARE_VAGUE_SQUARE_PX`, a square
+  differing when a color channel of its average moves by more than
+  `COMPARE_VAGUE_CHANNEL_CHANGE` (test_settings.py), so that font smoothing
+  passes and a box moved, sized or drawn otherwise does not. Their
+  `compare_` images go into `screenshots-diff-firefox/` and
+  `screenshots-diff-seamonkey/`. A Chrome shot is compared pixel by pixel.
+- A `compare_` image is the new shot dimmed, each differing pixel of a
+  differing square painted `COMPARE_HIGHLIGHT_COLOR`; the gold twin is the
+  file of the same name in `screenshots-gold/`.
 - A shot differing from its gold twin is not a failure of the test suite but
   an outcome the development process requires: a measuring run changes the
   values the shots show and an edit changes what its pages draw.
@@ -684,8 +698,9 @@ The single function/check owning each concern - never bypass or duplicate:
   every other test, explains the difference again at its end and exits
   `SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE`, which `test_all.sh` passes on.
 - An agent concluding whether a run passed or failed first looks at every
-  `compare_` image in `screenshots-diff/` not already inspected and reports
-  what each shows. It never deletes or moves the gold shots and never
+  `compare_` image in `screenshots-diff/`, `screenshots-diff-firefox/` and
+  `screenshots-diff-seamonkey/` not already inspected and reports what each
+  shows. It never deletes or moves the gold shots and never
   challenges the maintainer over a difference.
 - When only one file reasonably needs to be checked, the check is a single
   shot run of the screenshot tool, `test_screenshot.py --shot=<name>`, the
@@ -700,7 +715,10 @@ The single function/check owning each concern - never bypass or duplicate:
   --shot=04-720p-database-urlparser-modified-light
   perf2html_modified_report modified_`; a diff report's shot adds `--diff`
   and takes `perf2html_diff_report diff_`, and `--out=<dir>` writes the shot
-  elsewhere than `screenshots/`.
+  elsewhere than `screenshots/`. `--firefox` or `--seamonkey` takes the shot
+  in that browser, into `screenshots-firefox/` or `screenshots-seamonkey/`,
+  and `--compare-gold=screenshots-gold` then compares it with its Chrome
+  twin vaguely.
 - `./perf2html_batch.sh --regenerate`, from the project
   root, rebuilds all three reports from the kept recordings in about 20
   seconds, the diff report among them, so an edit to a stylesheet or a page
@@ -720,8 +738,10 @@ The single function/check owning each concern - never bypass or duplicate:
   (`--check`);
   `~/.local/bin/pyright --project scripts/pyrightconfig.json`.
 - The screenshot tool opens its browser itself, Chrome for Testing at
-  `SCREENSHOT_BROWSER_PATH` (test_settings.py), and the browser starts only
-  outside an agent's command sandbox.
+  `SCREENSHOT_BROWSER_PATH`, with `--firefox` Firefox at
+  `SCREENSHOT_FIREFOX_PATH` and with `--seamonkey` SeaMonkey at
+  `SCREENSHOT_SEAMONKEY_PATH` (test_settings.py), and the browser starts
+  only outside an agent's command sandbox.
 - The full run is `test_all.sh` and only run that when asked to "test".
 - No testing of `--txz` is allowed outside `scripts/publish.sh`. `publish.sh`
   takes no such argument: it always passes `--txz` to the script that makes the

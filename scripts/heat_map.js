@@ -66,14 +66,17 @@ window.try_catch_handler_(function () {
   const HEAT_MAP_VIEW_ENTRY = settings_("HEAT_MAP_VIEW_ENTRY");
   const RANKING_COUNTER_NAME = settings_("RANKING_COUNTER_NAME");
   const REPORT_SOURCES_DIR_NAME = settings_("REPORT_SOURCES_DIR_NAME");
+  const STYLE_HEAT_MAP_MAIN_HEIGHT_PROPERTY = settings_(
+    "STYLE_HEAT_MAP_MAIN_HEIGHT_PROPERTY",
+  );
   const STYLE_HEAT_MAP_SOURCE_BOX_ROOM_PROPERTY = settings_(
     "STYLE_HEAT_MAP_SOURCE_BOX_ROOM_PROPERTY",
   );
   const STYLE_HEAT_MAP_SOURCE_END_LINE_BOTTOM_PROPERTY = settings_(
     "STYLE_HEAT_MAP_SOURCE_END_LINE_BOTTOM_PROPERTY",
   );
-  const STYLE_HEAT_MAP_SOURCE_FILE_BOX_HEIGHT_PROPERTY = settings_(
-    "STYLE_HEAT_MAP_SOURCE_FILE_BOX_HEIGHT_PROPERTY",
+  const STYLE_HEAT_MAP_SOURCE_TITLE_DROP_PROPERTY = settings_(
+    "STYLE_HEAT_MAP_SOURCE_TITLE_DROP_PROPERTY",
   );
   const STYLE_TABLE_FUNCTION_LIST_COLUMN_MAX_CHARS = settings_(
     "STYLE_TABLE_FUNCTION_LIST_COLUMN_MAX_CHARS",
@@ -93,6 +96,7 @@ window.try_catch_handler_(function () {
     .content.firstElementChild;
   const tree_panel = tree_track.querySelector("#heat-map-tree-");
   const main_panel = document.getElementById("heat-map-main-");
+  const main_column = document.getElementById("heat-map-main-column-");
   const ticker_tape_box = document.getElementById("heat-map-ticker-tape-box-");
   const minimap_panel = document.getElementById("heat-map-minimap-");
   const minimap_box = document.getElementById("heat-map-minimap-box-");
@@ -1431,16 +1435,24 @@ window.try_catch_handler_(function () {
       render_element("td", {}, "") +
         render_element("td", { colspan: column_count - 1 }, ""),
     );
-  // Keeps the file box's height on its table, the source titles' drop.
+  // Holds the file box's height, the farthest the source titles drop.
+  let file_box_height_px = 0;
+  // Drops the source titles below the file box by the part of it in view.
+  function source_title_drop() {
+    const box_row = file_box_row();
+    if (!box_row) return;
+    box_row
+      .closest("table")
+      .style.setProperty(
+        STYLE_HEAT_MAP_SOURCE_TITLE_DROP_PROPERTY,
+        Math.max(0, file_box_height_px - main_panel.scrollTop) + "px",
+      );
+  }
+  // Keeps the file box's height, then drops the source titles below it.
   const file_box_resize_observer = new ResizeObserver(
     window.try_catch_handler_((resize_entries) => {
-      for (const resize_entry of resize_entries)
-        resize_entry.target
-          .closest("table")
-          .style.setProperty(
-            STYLE_HEAT_MAP_SOURCE_FILE_BOX_HEIGHT_PROPERTY,
-            design_rect(resize_entry.target).height + "px",
-          );
+      file_box_height_px = design_rect(resize_entries[0].target).height;
+      source_title_drop();
     }),
   );
   // Opens the file's box above its first line, as wide as a line's box.
@@ -1448,6 +1460,7 @@ window.try_catch_handler_(function () {
     const table_element = main_panel.querySelector(
       "table.heat-map-source-table-",
     );
+    table_element.classList.add("holds-file-box-");
     // The box follows the chunk's sizer rows, so its title copy sizes it.
     table_element.tBodies[0]
       .querySelector(":scope > tr.table-sizer-row-:not(.table-title-copy-)")
@@ -1469,8 +1482,8 @@ window.try_catch_handler_(function () {
     );
     // The sizer rows hold the room, so a change restyles them alone.
     const sizer_rows = table_element.querySelectorAll(
-      ":scope > :is(thead, tbody)" +
-        " > tr.table-sizer-row-:not(.table-title-copy-)",
+      ":scope > thead > tr.table-sizer-row-:not(.table-title-copy-)," +
+        " :scope > tbody > tr.table-sizer-row-:not(.table-title-copy-)",
     );
     const room_set = (room_text) => {
       for (const sizer_row of sizer_rows)
@@ -1494,9 +1507,8 @@ window.try_catch_handler_(function () {
     );
     let room_px = 0;
     for (const box_row of table_element.querySelectorAll(
-      ":scope > tbody > :is(" +
-        "tr.heat-map-source-line-detail-row-," +
-        " tr.heat-map-source-file-information-row-)",
+      ":scope > tbody > tr.heat-map-source-line-detail-row-," +
+        " :scope > tbody > tr.heat-map-source-file-information-row-",
     )) {
       const outgrown_px =
         design_rect(box_row).width - design_rect(title_row).width;
@@ -1855,7 +1867,7 @@ window.try_catch_handler_(function () {
   }
   function minimap_clear() {
     minimap_empty();
-    minimap_panel.classList.add("empty-");
+    main_column.classList.add("minimap-empty-");
   }
   // Holds the room of a source taller than the view, filled before the paint.
   function minimap_build() {
@@ -1870,13 +1882,14 @@ window.try_catch_handler_(function () {
     const is_taller =
       design_rect(table_element).bottom - source_top_px >
       main_panel.clientHeight;
-    minimap_panel.classList.toggle("empty-", !is_taller);
+    main_column.classList.toggle("minimap-empty-", !is_taller);
     if (!is_taller) return;
     source_resize_observer.observe(table_element);
     source_resize_observer.observe(source_end());
     minimap_fill_request();
   }
-  const minimap_is_shown = () => !minimap_panel.classList.contains("empty-");
+  const minimap_is_shown = () =>
+    !main_column.classList.contains("minimap-empty-");
   // Fills a shown minimap before the paint, a later request replacing it.
   function minimap_fill_request() {
     if (!minimap_is_shown()) return;
@@ -2050,6 +2063,23 @@ window.try_catch_handler_(function () {
     "scroll",
     window.try_catch_handler_(minimap_sync),
   );
+  main_panel.addEventListener(
+    "scroll",
+    window.try_catch_handler_(source_title_drop),
+  );
+  // Keeps the main box's height on it, which its source end and tree read.
+  function main_height_keep(main_height_px) {
+    main_panel.style.setProperty(
+      STYLE_HEAT_MAP_MAIN_HEIGHT_PROPERTY,
+      main_height_px + "px",
+    );
+  }
+  new ResizeObserver(
+    window.try_catch_handler_((resize_entries) =>
+      main_height_keep(resize_entries[0].contentRect.height),
+    ),
+  ).observe(main_panel);
+  main_height_keep(design_rect(main_panel).height);
   // Centres the view on a pressed row outside the box, then drags the box.
   minimap_panel.addEventListener(
     "pointerdown",
@@ -2361,7 +2391,7 @@ window.try_catch_handler_(function () {
     });
   // Shows markup in place of a file's source, the tree kept in its column.
   function source_replace(panel_markup) {
-    ticker_tape_box.replaceChildren();
+    ticker_tape_box.textContent = "";
     const tree_state = tree_state_read();
     main_panel.innerHTML = panel_markup;
     main_panel.scrollTop = 0;
@@ -2550,7 +2580,10 @@ window.try_catch_handler_(function () {
           window.try_catch_handler_(() => {
             // A later route drew or replaced the source meanwhile.
             if (!table_element.isConnected) return;
+            // Keeps the line in view as chunks taller than their lines draw.
+            const kept_view_line = view_line_read();
             source_rest_draw();
+            if (kept_view_line) view_line_restore(kept_view_line);
             first_draw_finish();
           }),
         ),
