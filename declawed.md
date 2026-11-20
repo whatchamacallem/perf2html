@@ -83,7 +83,7 @@ scripts too."""
   screenshot tool's timing limit: `test_screenshot.py` times the page loads
   of its golden bookmarks and every click of its golden click sets, writes
   each page file's slowest timings and every click to
-  `screenshots/timing.txt`, then fails naming the slowest one over its limit,
+  `screenshots/chrome/timing.txt`, then fails naming the slowest one over its limit,
   `TIMING_PAGE_LOAD_LIMIT_MS` for a page load and `TIMING_CLICK_LIMIT_MS`
   for a click (test_settings.py), and pointing to that file.
 - No timer decides a failure: a check counts work or waits for an event, so
@@ -660,65 +660,68 @@ The single function/check owning each concern - never bypass or duplicate:
   dir and no log of its own; a failure's log tail still reaches stderr.
   Debug mode keeps the artifacts in `perf2html_temporary_artifacts/` for a
   later `--regenerate` and for debugging.
-- Chrome's shots are the one gold set. Copy `tests/perf2html/screenshots/`
-  to `tests/perf2html/screenshots-gold/` once its shots are right, then
-  iterate with `scripts/test_expected_behavior.sh --regenerate`. That
-  rebuilds every page from the same recordings, so the recorded time, the
-  raw data archive name, the timings and the counters the shots show match
-  the gold, and it compares each shot with its gold twin, writing a
-  `compare_` image of each difference into
-  `tests/perf2html/screenshots-diff/`; a difference is then the edit's own.
-  Only `--regenerate` compares: a measuring run changes what the shots show,
-  so after one copy its shots to `screenshots-gold/` again.
-- The Firefox and SeaMonkey shots, in `screenshots-firefox/` and
-  `screenshots-seamonkey/`, have no gold of their own: what matters is that
-  each browser draws the pages as Chrome does, not as it drew them before.
-  Each is compared with its Chrome twin in `screenshots-gold/`, vaguely:
-  both shots averaged over squares of `COMPARE_VAGUE_SQUARE_PX`, a square
-  differing when a color channel of its average moves by more than
-  `COMPARE_VAGUE_CHANNEL_CHANGE` (test_settings.py), so that font smoothing
-  passes and a box moved, sized or drawn otherwise does not. Their
-  `compare_` images go into `screenshots-diff-firefox/` and
-  `screenshots-diff-seamonkey/`. A Chrome shot is compared pixel by pixel.
-- A `compare_` image is the new shot dimmed, each differing pixel of a
-  differing square painted `COMPARE_HIGHLIGHT_COLOR`; the gold twin is the
-  file of the same name in `screenshots-gold/`.
-- A shot differing from its gold twin is not a failure of the test suite but
-  an outcome the development process requires: a measuring run changes the
-  values the shots show and an edit changes what its pages draw.
-  `test_screenshot.py` names each differing shot on stdout with its
-  `compare_` image; `test_expected_behavior.sh` runs every other stage, then
-  explains the difference to the agent reading the run and exits
-  `SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE` (settings.sh), never 0, so that no
-  difference goes unseen. Any other non-zero exit is a failure.
-- `test_all.sh` measures once, through `test_expected_behavior.sh
-  --keep-artifacts`; `test_error_handling.sh` then regenerates from those
-  recordings with `--regenerate --keep-artifacts`, never measuring again, so
-  its run compares the shots with the gold. After a gold difference it runs
-  every other test, explains the difference again at its end and exits
-  `SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE`, which `test_all.sh` passes on.
-- An agent concluding whether a run passed or failed first looks at every
-  `compare_` image in `screenshots-diff/`, `screenshots-diff-firefox/` and
-  `screenshots-diff-seamonkey/` not already inspected and reports what each
-  shows. It never deletes or moves the gold shots and never
-  challenges the maintainer over a difference.
+- Each browser's shots go into `screenshots/<browser>/` and its gold into
+  `screenshots/<browser>-gold/`, `<browser>` one of `chrome`, `firefox`,
+  `seamonkey` and `webkit` (`SCREENSHOT_DIR_NAME`, the browsers'
+  `SCREENSHOT_*_DIR_NAME` and `SCREENSHOT_GOLD_DIR_FORMAT`,
+  test_settings.py); no other screenshot directory exists. Every choice of
+  the screenshot tool is a command line switch.
+- With no switch, `test_screenshot.py` shoots the modified report and the
+  diff report (`SHOOT_REPORTS`) in Chrome, into a cleared
+  `screenshots/chrome/`. When `screenshots/chrome-gold/` exists, the run
+  then compares each shot with its same named gold twin pixel by pixel and
+  fails at the first difference, one error line naming both files, exit 1;
+  WebKit's shots compare by the vague rule below, its index page shot
+  varying per load at its frames' edges;
+  with no gold, the run renames `screenshots/chrome/` to
+  `screenshots/chrome-gold/`, the new gold. `--firefox`, `--seamonkey` and
+  `--webkit` choose the browser.
+- Any difference from the gold is a failure. A measuring run changes the
+  recorded time, the raw data archive name, the timings and the counters
+  the shots show, so a gold matches only the runs regenerated from the
+  recordings it was shot from: iterate with
+  `scripts/test_expected_behavior.sh --regenerate`, so that a difference is
+  the edit's own.
+- Deleting a `screenshots/<browser>-gold/` directory by hand, after
+  checking the shots, is always allowed and is the only way a gold is
+  replaced: the next run with no gold makes the new one. A gold gets as
+  old as it has to until an agent reviews it; until then a measuring run,
+  `test_all.sh` among them, fails at its first shot showing measured data,
+  `test_all.sh` being no part of the normal work loop.
+- `--compare-browser=<browser>` compares the run's shots with another
+  browser's gold instead, the comparison between browsers, run only when
+  the maintainer asks: both shots averaged over squares of
+  `COMPARE_VAGUE_SQUARE_PX`, a square differing when a color channel of its
+  average moves by more than `COMPARE_VAGUE_CHANNEL_CHANGE`
+  (test_settings.py), so that font smoothing passes and a box moved, sized
+  or drawn otherwise does not. Such a run makes no gold.
+- `test_expected_behavior.sh` runs the screenshot tool in every run, once
+  per browser with no switch but the browser's, Chrome first, so that a
+  gold difference fails it. `test_all.sh` measures once, through
+  `test_expected_behavior.sh --keep-artifacts`, then runs
+  `test_error_handling.sh`, the fast check of the failure modes, which
+  takes no shot and runs `test_expected_behavior.sh` only to see it refuse.
+- Reviewing the shots and updating the golds is the agent's job, not the
+  maintainer's. For a gold difference the agent checks the new shots in
+  `screenshots/<browser>/` against their gold twins, the pair the error
+  line names first, and reports what changed; once every difference is the
+  edit's own or the measurement's, the agent deletes that browser's gold
+  directory and runs the screenshot tool again, which makes the new gold.
+  The agent never moves a gold or edits one in place, and never challenges
+  the maintainer over a difference.
 - When only one file reasonably needs to be checked, the check is a single
   shot run of the screenshot tool, `test_screenshot.py --shot=<name>`, the
-  name a shot's file name in `screenshots/` without `.png`; the changes an
-  edit makes to the other pages are caught later by the gold screenshot
+  name a shot's file name without `.png`, which picks its report; the
+  changes an edit makes to the other pages are caught later by the gold
   comparison of `test_expected_behavior.sh --regenerate`. A single shot run
-  takes that one shot, checks no other view, times nothing and writes
-  neither `test_index.html` nor `timing.txt`; given `--compare-gold`, the
-  run compares that one shot with its gold twin.
-- A single shot run, from the project root, after the reports are rebuilt:
-  `python3 scripts/test_screenshot.py --build-root=$PWD
-  --shot=04-720p-database-urlparser-modified-light
-  perf2html_modified_report modified_`; a diff report's shot adds `--diff`
-  and takes `perf2html_diff_report diff_`, and `--out=<dir>` writes the shot
-  elsewhere than `screenshots/`. `--firefox` or `--seamonkey` takes the shot
-  in that browser, into `screenshots-firefox/` or `screenshots-seamonkey/`,
-  and `--compare-gold=screenshots-gold` then compares it with its Chrome
-  twin vaguely.
+  takes that one shot into a cleared `screenshots/<browser>/`, checks no
+  other view, times nothing, writes neither `test_index.html` nor
+  `timing.txt`, compares the shot with its gold twin when the gold exists
+  and makes no gold.
+- A single shot run, after the reports are rebuilt:
+  `python3 scripts/test_screenshot.py
+  --shot=04-720p-database-urlparser-modified-light`; `--firefox`,
+  `--seamonkey` or `--webkit` takes the shot in that browser.
 - `./perf2html_batch.sh --regenerate`, from the project
   root, rebuilds all three reports from the kept recordings in about 20
   seconds, the diff report among them, so an edit to a stylesheet or a page
@@ -739,9 +742,10 @@ The single function/check owning each concern - never bypass or duplicate:
   `~/.local/bin/pyright --project scripts/pyrightconfig.json`.
 - The screenshot tool opens its browser itself, Chrome for Testing at
   `SCREENSHOT_BROWSER_PATH`, with `--firefox` Firefox at
-  `SCREENSHOT_FIREFOX_PATH` and with `--seamonkey` SeaMonkey at
-  `SCREENSHOT_SEAMONKEY_PATH` (test_settings.py), and the browser starts
-  only outside an agent's command sandbox.
+  `SCREENSHOT_FIREFOX_PATH`, with `--seamonkey` SeaMonkey at
+  `SCREENSHOT_SEAMONKEY_PATH` and with `--webkit` WebKit at
+  `SCREENSHOT_WEBKIT_PATH` (test_settings.py), and the browser starts only
+  outside an agent's command sandbox.
 - The full run is `test_all.sh` and only run that when asked to "test".
 - No testing of `--txz` is allowed outside `scripts/publish.sh`. `publish.sh`
   takes no such argument: it always passes `--txz` to the script that makes the
@@ -810,8 +814,7 @@ The single function/check owning each concern - never bypass or duplicate:
   read back as an input to itself.
 - `test_expected_behavior.sh` captures, redirects or reformats no output of its
   own or a child's - every child runs through `subprocess_run` and its lines
-  reach the terminal verbatim; a non-zero exit is `error_exit`, the gold
-  comparison's `SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE` aside. The one
+  reach the terminal verbatim; a non-zero exit is `error_exit`. The one
   exception is `pyright_filtered_run` at level 1.
 - `tools_resolve` (or equivalent) must find every formatter/linter, the
   screenshot browser, Pillow and the `toolchain_missing_list` toolchain,

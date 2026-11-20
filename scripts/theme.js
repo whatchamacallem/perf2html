@@ -38,10 +38,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
   );
   const NUMBER_MULTIPLE_SUFFIX_TEXT = settings_("NUMBER_MULTIPLE_SUFFIX_TEXT");
   const OVERVIEW_PAGE_PATH = settings_("OVERVIEW_PAGE_PATH");
-  const SETTINGS_DEBUG_HASH_KEY_NAME = settings_(
-    "SETTINGS_DEBUG_HASH_KEY_NAME",
-  );
-  const SETTINGS_VIEW_ENTRY = settings_("SETTINGS_VIEW_ENTRY");
   const STORAGE_KEY_VIEW_DARK_MODE = settings_("STORAGE_KEY_VIEW_DARK_MODE");
   const STORAGE_KEY_VIEW_SCALE = settings_("STORAGE_KEY_VIEW_SCALE");
   const STYLE_DESIGN_COORDINATES_WIDTH_PX = settings_(
@@ -93,6 +89,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const STYLE_HEAT_COLOR_STOPS = settings_("STYLE_HEAT_COLOR_STOPS");
   const STYLE_PAGE_FONT_FAMILY = settings_("STYLE_PAGE_FONT_FAMILY");
   const STYLE_SVG_NAMESPACE_URL = settings_("STYLE_SVG_NAMESPACE_URL");
+  const STYLE_TABLE_CHUNK_LINE_HEIGHT_PROPERTY = settings_(
+    "STYLE_TABLE_CHUNK_LINE_HEIGHT_PROPERTY",
+  );
   const STYLE_TABLE_CHUNK_ROWS_PROPERTY = settings_(
     "STYLE_TABLE_CHUNK_ROWS_PROPERTY",
   );
@@ -107,6 +106,9 @@ window.report_ui_ = window.try_catch_handler_(function () {
   );
   const STYLE_TEXT_SCROLLBAR_THUMB_SHORTEST_CHARS = settings_(
     "STYLE_TEXT_SCROLLBAR_THUMB_SHORTEST_CHARS",
+  );
+  const STYLE_ZOOM_FRAME_CHECK_MULTIPLE = settings_(
+    "STYLE_ZOOM_FRAME_CHECK_MULTIPLE",
   );
   const TABLE_CHUNK_ROW_COUNT = settings_("TABLE_CHUNK_ROW_COUNT");
   const TABLE_DOWNLOAD_IMAGE_SCALE = settings_("TABLE_DOWNLOAD_IMAGE_SCALE");
@@ -147,23 +149,12 @@ window.report_ui_ = window.try_catch_handler_(function () {
     "function",
     "functions",
     "localProfilePath",
-    "setting",
-    SETTINGS_DEBUG_HASH_KEY_NAME,
   ];
   const ADDRESS_VIEW_KEY_NAMES = new Map([
     [CALL_GRAPH_VIEW_KEY, []],
     [DATABASE_VIEW_KEY, []],
     [FLAME_GRAPH_VIEW_ENTRY[0], ["localProfilePath"]],
     [HEAT_MAP_VIEW_ENTRY[0], ["file", "line", "function", "functions"]],
-    [SETTINGS_VIEW_ENTRY[0], ["setting"]],
-  ]);
-  // Tells per view whether an address of the view needs a test.
-  const ADDRESS_VIEW_NEEDS_TEST = new Map([
-    [CALL_GRAPH_VIEW_KEY, true],
-    [DATABASE_VIEW_KEY, true],
-    [FLAME_GRAPH_VIEW_ENTRY[0], true],
-    [HEAT_MAP_VIEW_ENTRY[0], true],
-    [SETTINGS_VIEW_ENTRY[0], false],
   ]);
   const CH_UNIT_GLYPH = "0";
   // Holds the computed background color of an element that paints none.
@@ -261,6 +252,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
   const view_frame = document.getElementById("overview-view-frame-");
   const is_scaled = !is_framed && !!home_panel;
   const page_element = document.getElementById("overview-page-");
+  const zoom_sizes_frames = zoom_frame_layout_check();
   const page_scroll_box = document.getElementById("overview-page-scroll-box-");
   const page_scroll_bar = document.querySelector(
     '.text-scrollbar-[data-scrolls-="overview-page-scroll-box-"]',
@@ -448,6 +440,30 @@ window.report_ui_ = window.try_catch_handler_(function () {
       String(DESIGN_CHARACTER_WIDTH_PX / measured_px),
     );
   }
+  // Keeps a table line's drawn height, before any scale, which sizes chunks.
+  function table_line_height_apply() {
+    const line_table = render_element_of(
+      render_element(
+        "table",
+        { class: "table-" },
+        render_element(
+          "tbody",
+          {},
+          render_element(
+            "tr",
+            {},
+            render_element("td", {}, render_html_escape(CH_UNIT_GLYPH)),
+          ),
+        ),
+      ),
+    );
+    document.body.append(line_table);
+    document.documentElement.style.setProperty(
+      STYLE_TABLE_CHUNK_LINE_HEIGHT_PROPERTY,
+      line_table.rows[0].getBoundingClientRect().height + "px",
+    );
+    line_table.remove();
+  }
   function design_scale_root_zoom() {
     if (is_framed) return 1;
     const window_width_px = Math.max(
@@ -493,13 +509,36 @@ window.report_ui_ = window.try_catch_handler_(function () {
       root_element.clientHeight / wanted + "px",
     );
   }
-  // Draws an element at a scale, its box the size given in its own px.
+  // Returns whether zoom lays a zoomed frame's page out at the zoomed size.
+  function zoom_frame_layout_check() {
+    // A page holding no view frame draws no zoomed frame.
+    if (!is_scaled) return true;
+    const zoomed_box = render_element_of(
+      render_element("div", {}, render_element("iframe", {}, "")),
+    );
+    if (!("zoom" in zoomed_box.style)) return false;
+    zoomed_box.style.zoom = String(STYLE_ZOOM_FRAME_CHECK_MULTIPLE);
+    document.body.append(zoomed_box);
+    const frame_window = zoomed_box.firstElementChild.contentWindow;
+    // WebKit lays the page out at the frame's screen size, wider than its own.
+    const is_laid_out_zoomed =
+      frame_window.document.documentElement.clientWidth ===
+      frame_window.innerWidth;
+    zoomed_box.remove();
+    return is_laid_out_zoomed;
+  }
+  // Draws an element at a scale, through zoom where it lays frames out right.
   function element_scale_set(
     scaled_element,
     multiple,
     width_text,
     height_text,
   ) {
+    if (zoom_sizes_frames && "zoom" in scaled_element.style) {
+      scaled_element.style.zoom = String(multiple);
+      return;
+    }
+    // A transform leaves the box unscaled, so its size is given in its own px.
     scaled_element.style.width = width_text;
     scaled_element.style.height = height_text;
     scaled_element.style.transform = `scale(${multiple})`;
@@ -649,9 +688,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
         window.throw_exception_("str_error_hash_value_empty", key_name);
     }
     const is_home = ADDRESS_KEY_NAMES.every(
-      (key_name) =>
-        parsed_address[key_name] === null ||
-        key_name === SETTINGS_DEBUG_HASH_KEY_NAME,
+      (key_name) => parsed_address[key_name] === null,
     );
     if (is_home) return;
     if (parsed_address.view === null)
@@ -671,7 +708,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
     for (const key_name of ADDRESS_KEY_NAMES.slice(2)) {
       if (
         parsed_address[key_name] !== null &&
-        key_name !== SETTINGS_DEBUG_HASH_KEY_NAME &&
         !ADDRESS_VIEW_KEY_NAMES.get(parsed_address.view).includes(key_name)
       )
         window.throw_exception_(
@@ -726,10 +762,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       parsed_address.functions === null
     )
       window.throw_exception_("str_error_hash_heat_map_functions_missing");
-    if (
-      parsed_address.test === null &&
-      ADDRESS_VIEW_NEEDS_TEST.get(parsed_address.view)
-    )
+    if (parsed_address.test === null)
       window.throw_exception_("str_error_hash_test_missing");
   }
   function address_of_hash(hash) {
@@ -757,10 +790,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
       parsed_address.functions = Boolean(Number(parsed_address.functions));
     return Object.freeze(parsed_address);
   }
-  function address_parts_hash(full_address) {
+  function address_hash(partial_address) {
     const hash_parts = [];
     for (const key_name of ADDRESS_KEY_NAMES) {
-      const part_value = full_address[key_name];
+      const part_value = partial_address[key_name];
       if (part_value == null) continue;
       // A view mode writes as 0 or 1, as its address reads it.
       const written_value =
@@ -770,22 +803,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
       );
     }
     return "#" + hash_parts.join("&");
-  }
-  // Writes a hash, carrying the settings the page's own hash applies.
-  function address_hash(partial_address) {
-    return address_parts_hash({
-      ...partial_address,
-      [SETTINGS_DEBUG_HASH_KEY_NAME]:
-        partial_address[SETTINGS_DEBUG_HASH_KEY_NAME] ??
-        address_of_hash(location.hash)[SETTINGS_DEBUG_HASH_KEY_NAME],
-    });
-  }
-  // Writes a hash of the address with no applied settings, carrying none.
-  function address_settings_cleared_hash(partial_address) {
-    return address_parts_hash({
-      ...partial_address,
-      [SETTINGS_DEBUG_HASH_KEY_NAME]: null,
-    });
   }
   // Writes the hash of a test's heat map at a function, the one door for it.
   function address_function_hash(test_name, function_name) {
@@ -847,8 +864,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
       return HEAT_MAP_VIEW_ENTRY[1];
     if (checked_address.view === FLAME_GRAPH_VIEW_ENTRY[0])
       return FLAME_GRAPH_VIEW_ENTRY[1];
-    if (checked_address.view === SETTINGS_VIEW_ENTRY[0])
-      return SETTINGS_VIEW_ENTRY[1];
     window.throw_exception_("str_error_internal");
   }
   // Returns the link to the top page at a hash, the address the menu shows.
@@ -857,17 +872,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
   }
   // Asks the top page for a hash.
   function address_request_send(hash) {
-    const carried_hash = address_hash(address_of_hash(hash));
+    const checked_hash = address_hash(address_of_hash(hash));
     if (is_framed)
-      parent_post({ report_ui: "address_request", hash: carried_hash });
-    else location.assign(address_top_href(carried_hash));
-  }
-  function settings_apply_send(setting_name, setting_value) {
-    parent_post({ report_ui: "settings_apply", setting_name, setting_value });
-  }
-  // Asks the top page to load again with settings debugging switched over.
-  function settings_debug_toggle_send() {
-    parent_post({ report_ui: "settings_debug_toggle" });
+      parent_post({ report_ui: "address_request", hash: checked_hash });
+    else location.assign(address_top_href(checked_hash));
   }
   // Asks the top page to choose a call graph cutoff by its stop's depth.
   function call_graph_cutoff_choose_send(cutoff_depth) {
@@ -929,12 +937,24 @@ window.report_ui_ = window.try_catch_handler_(function () {
       copy_event.clipboardData.setData("text/plain", copied_text);
       copy_event.preventDefault();
     };
+    // WebKit copies only over selected text, so the copied text is selected.
+    const selected_text = render_element_of(
+      render_element(
+        "span",
+        { class: "copied-text-" },
+        render_html_escape(copied_text),
+      ),
+    );
+    document.body.append(selected_text);
+    document.getSelection().selectAllChildren(selected_text);
     document.addEventListener("copy", copy_handler);
     try {
       if (!document.execCommand("copy"))
         window.throw_exception_("str_error_clipboard_copy_refused");
     } finally {
       document.removeEventListener("copy", copy_handler);
+      document.getSelection().removeAllRanges();
+      selected_text.remove();
     }
   }
   // Returns whether the key was typed in an editable field, which keeps it.
@@ -1112,7 +1132,8 @@ window.report_ui_ = window.try_catch_handler_(function () {
     };
     let inner_markup = label_markup;
     if (kind_name === "link") {
-      const link_attributes = { href: fields.href };
+      // A link not known yet draws its button over an anchor following none.
+      const link_attributes = fields.href ? { href: fields.href } : {};
       if (fields.opens_new_tab) link_attributes.target = "_blank";
       if (fields.tag_name === "a")
         Object.assign(own_attributes, link_attributes);
@@ -1901,7 +1922,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       if (cells_by_name.has(entry_name))
         cells_by_name.get(entry_name).focus({ preventScroll: true });
     }
-    // Focuses the entry a digit reaches, opening a pulldown as its key does.
+    // Focuses a digit's entry, a pulldown opened, false for a refused focus.
     function strip_numbered_entry_focus(number_text) {
       if (!digit_entries.has(number_text))
         window.throw_exception_(
@@ -1910,8 +1931,10 @@ window.report_ui_ = window.try_catch_handler_(function () {
         );
       const entry = digit_entries.get(number_text);
       const entry_cell = cells_by_name.get(entry.name);
+      entry_cell.focus({ preventScroll: true });
+      if (document.activeElement !== entry_cell) return false;
       if (entry.kind === "pulldown") entry_activate(entry);
-      else entry_cell.focus({ preventScroll: true });
+      return true;
     }
     // Returns the pulldown of a named cell, refusing a cell holding none.
     function strip_pulldown_named(entry_name) {
@@ -2209,6 +2232,14 @@ window.report_ui_ = window.try_catch_handler_(function () {
     }
     return table_deferred_chunks.get(table_element) || [];
   }
+  // Returns whether a row is one of the table's lines, no sizer and no box.
+  function row_is_line(body_row, title_count) {
+    return !(
+      body_row.classList.contains("table-sizer-row-") ||
+      body_row.cells.length !== title_count ||
+      body_row.getElementsByTagName("table").length
+    );
+  }
   // Fills each sizer row with each column's widest shown cell, sizes chunks.
   function table_chunks_fit(table_element) {
     if (!table_element.classList.contains("table-chunked-")) return;
@@ -2227,12 +2258,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
       for (const body_row of table_body.rows) {
         const row_cells = body_row.cells;
         // A sizer, a row of another cell count or a box's row sizes no column.
-        if (
-          body_row.classList.contains("table-sizer-row-") ||
-          row_cells.length !== title_count ||
-          body_row.getElementsByTagName("table").length
-        )
-          continue;
+        if (!row_is_line(body_row, title_count)) continue;
         row_class_texts.add(body_row.className);
         for (let cell_index = 0; cell_index < title_count; cell_index++)
           widest_cell_take(
@@ -2265,20 +2291,22 @@ window.report_ui_ = window.try_catch_handler_(function () {
       sizer_row.className = [...row_class_names].join(" ");
       sizer_row.innerHTML = sizer_cells_markup;
     }
-    // A deferred chunk counts the rows it waits for.
+    // A chunk counts its lines and the rows it waits for, a box no line.
     [...table_element.tBodies].forEach((table_body, chunk_index) => {
-      const row_count =
-        [...table_body.rows].filter(
-          (body_row) => !body_row.classList.contains("table-sizer-row-"),
-        ).length +
-        (deferred_chunks[chunk_index]
-          ? deferred_chunks[chunk_index].row_count
-          : 0);
+      const drawn_rows = [...table_body.rows].filter(
+        (body_row) => !body_row.classList.contains("table-sizer-row-"),
+      );
+      const waiting_count = deferred_chunks[chunk_index]
+        ? deferred_chunks[chunk_index].row_count
+        : 0;
       table_body.style.setProperty(
         STYLE_TABLE_CHUNK_ROWS_PROPERTY,
-        String(row_count),
+        String(
+          drawn_rows.filter((body_row) => row_is_line(body_row, title_count))
+            .length + waiting_count,
+        ),
       );
-      table_body.hidden = !row_count;
+      table_body.hidden = !drawn_rows.length && !waiting_count;
     });
   }
   // Draws the deferred chunks a test picks, then fits and walks the table.
@@ -4934,6 +4962,7 @@ window.report_ui_ = window.try_catch_handler_(function () {
     }),
   );
   font_fit_apply();
+  table_line_height_apply();
   dark_mode_show(window.report_dark_mode_.opening_enabled());
   if (is_scaled) design_scale_stop = design_scale_stored_stop();
   design_scale_apply();
@@ -4961,7 +4990,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
       page_href: address_page_href,
       path: address_path,
       request: address_request_send,
-      settings_cleared_hash: address_settings_cleared_hash,
       top_href: address_top_href,
     },
     call_graph_cutoff_choose_send,
@@ -5003,8 +5031,6 @@ window.report_ui_ = window.try_catch_handler_(function () {
     render_table,
     resize_settle_register,
     search_matcher,
-    settings_apply_send,
-    settings_debug_toggle_send,
     share_of_test,
     signed_human_text,
     signed_percent_text,

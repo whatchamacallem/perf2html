@@ -353,8 +353,6 @@ manifest_write() {
   local manifest="$dir/MANIFEST.txt" checksum
   command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" scripts \
     "--report=$dir" "${VERBOSE_FLAGS[@]}"
-  command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" settings \
-    "--report=$dir" "${VERBOSE_FLAGS[@]}"
   command_run python3 "$PERF2HTML_DIR_/scripts/build_report.py" debug \
     "--report=$dir" "${VERBOSE_FLAGS[@]}" -- \
     "$REPORT_MANIFEST_VERSION_LABEL=$version" "$@"

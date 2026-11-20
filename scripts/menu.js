@@ -17,15 +17,12 @@ window.try_catch_handler_(function () {
   const MENU_ENTRY_VIEW_KEYS = settings_("MENU_ENTRY_VIEW_KEYS");
   const MENU_LOGO_REPOSITORY_URL = settings_("MENU_LOGO_REPOSITORY_URL");
   const MENU_SCALE_KEY_STEPS = settings_("MENU_SCALE_KEY_STEPS");
-  const SETTINGS_DEBUG_ENABLED = settings_("SETTINGS_DEBUG_ENABLED");
-  const SETTINGS_VIEW_ENTRY = settings_("SETTINGS_VIEW_ENTRY");
   const STYLE_MENU_LOGO_START_SHARE = settings_("STYLE_MENU_LOGO_START_SHARE");
 
   const FLAME_GRAPH_VIEW_KEY = FLAME_GRAPH_VIEW_ENTRY[0];
   const HEAT_MAP_VIEW_KEY = HEAT_MAP_VIEW_ENTRY[0];
   const REPORT_NAME_TEXT = window.ui_strings_.text("str_report_name");
   const SCALE_LAST_STOP = window.report_ui_.design_scale_last_stop;
-  const SETTINGS_VIEW_KEY = SETTINGS_VIEW_ENTRY[0];
   const TITLE_PART_SEPARATOR = window.ui_strings_.text(
     "str_title_part_separator",
   );
@@ -34,7 +31,6 @@ window.try_catch_handler_(function () {
     [DATABASE_VIEW_KEY]: "str_view_database",
     [FLAME_GRAPH_VIEW_KEY]: "str_view_flame_graph",
     [HEAT_MAP_VIEW_KEY]: "str_view_heat_map",
-    [SETTINGS_VIEW_KEY]: "str_view_settings",
   };
 
   const menu_strip = document.getElementById("menu-");
@@ -48,6 +44,8 @@ window.try_catch_handler_(function () {
   const heat_scale_choices = window.report_preferences_.heat_scale_choices();
   const heat_sort_choices = window.report_preferences_.heat_sort_choices;
   let flash_entry_name = "";
+  // Whether the menu entry's focus waits for the page's focus.
+  let menu_entry_focus_waits = false;
   let menu_strip_handle = null;
   let preference_strip_handle = null;
 
@@ -191,7 +189,6 @@ window.try_catch_handler_(function () {
       Boolean(window.report_ui_.dark_mode_enabled_now_()),
     );
     window.report_frame_.view_post("view_reset");
-    window.report_frame_.settings_debug_clear();
   }
   // Resets the preferences on the toggle query, then shows the mode it opens.
   function dark_mode_toggle_query_apply() {
@@ -348,22 +345,18 @@ window.try_catch_handler_(function () {
     return [
       entry(
         "str_report_name",
-        SETTINGS_DEBUG_ENABLED
-          ? "str_tool_tip_settings"
-          : "str_tool_tip_report_name",
+        "str_tool_tip_report_name",
         "link",
         address,
         null,
         {
           is_numbered: false,
-          href: SETTINGS_DEBUG_ENABLED
-            ? view_hash(SETTINGS_VIEW_KEY)
-            : MENU_LOGO_REPOSITORY_URL,
+          href: MENU_LOGO_REPOSITORY_URL,
           label_markup: logo_letters_markup(
             REPORT_NAME_TEXT,
             STYLE_MENU_LOGO_START_SHARE,
           ),
-          opens_new_tab: !SETTINGS_DEBUG_ENABLED,
+          opens_new_tab: true,
           withholds_tab_stop: true,
         },
       ),
@@ -493,22 +486,26 @@ window.try_catch_handler_(function () {
   // Builds the view mode entry, its label the shown mode, its link the other.
   function view_mode_entry(address) {
     const sent_link = window.report_frame_.view_mode_link_now();
-    // The link shows once the heat map sends the shown address's own.
-    const link_hash =
+    const is_sent =
       sent_link !== null &&
-      sent_link.hash === window.report_ui_.address.hash(address)
-        ? sent_link.link_hash
-        : "";
+      sent_link.hash === window.report_ui_.address.hash(address);
+    // Before the heat map sends the link, a function without samples has none.
+    const has_link = is_sent
+      ? sent_link.link_hash !== ""
+      : address.function === null ||
+        window.report_source_database_.functionsWithCounters[
+          address.test
+        ].includes(address.function);
     return window.report_ui_.strip.entry_make(
       "heat_counter_source",
-      link_hash ? "link" : "label",
+      has_link ? "link" : "label",
       window.ui_strings_.text(
         address.functions
           ? "str_menu_counter_source_functions"
           : "str_menu_counter_source_lines",
       ),
       {
-        href: link_hash,
+        href: is_sent ? sent_link.link_hash : "",
         tool_tip_text: window.ui_strings_.text("str_tool_tip_counter_source"),
       },
     );
@@ -647,9 +644,26 @@ window.try_catch_handler_(function () {
     document.title = title_text(address);
     // The view heads its copies and images with the status bar shown.
     window.report_frame_.view_post("status_bar_show");
+    menu_entry_focus();
+  }
+  // Focuses the query's menu entry, once a focus reaches a page refusing it.
+  function menu_entry_focus() {
     const menu_entry_number = window.report_frame_.menu_entry_number_now();
-    if (menu_entry_number !== null)
-      menu_strip_handle.numbered_entry_focus(menu_entry_number);
+    if (
+      menu_entry_number === null ||
+      menu_strip_handle.numbered_entry_focus(menu_entry_number) ||
+      menu_entry_focus_waits
+    )
+      return;
+    menu_entry_focus_waits = true;
+    window.addEventListener(
+      "focus",
+      window.try_catch_handler_(() => {
+        menu_entry_focus_waits = false;
+        menu_entry_focus();
+      }),
+      { once: true },
+    );
   }
   function address_show() {
     menu_render();

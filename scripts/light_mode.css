@@ -346,6 +346,14 @@ body {
   position: relative;
   overflow-clip-margin: var(--page-line-width-);
 }
+/* A browser with no clip margin cuts a framed box by a path a line out. */
+@supports not (overflow-clip-margin: 0px) {
+  :root[data-dark-mode-="disabled"] #heat-map-minimap-,
+  :root[data-dark-mode-="disabled"] .text-scrollbar- {
+    overflow: visible;
+    clip-path: inset(calc(-1 * var(--page-line-width-))) padding-box;
+  }
+}
 /* A bar's clear top border, a page line in the bar's own characters. */
 :root[data-dark-mode-="disabled"] .text-scrollbar-.horizontal- {
   border-top: calc(
@@ -397,9 +405,4 @@ body {
   margin-bottom: calc(
     var(--menu-strip-blank-line-height-) - var(--page-line-width-)
   );
-}
-
-.settings-value-box- {
-  background: var(--light-mode-page-bg-);
-  color: var(--light-mode-page-fg-);
 }

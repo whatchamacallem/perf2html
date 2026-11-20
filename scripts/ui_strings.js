@@ -79,8 +79,6 @@ window.ui_strings_ = (function () {
     str_error_hash_part_unknown: "url part unrecognized: {0}",
     str_error_hash_profile_path_missing:
       "url names no local profile path, which the flame graph needs to start",
-    str_error_hash_setting_unknown:
-      "url encodes a setting this report does not have: {0}",
     str_error_hash_test_missing: "No test selected.",
     str_error_hash_test_unknown:
       "url encodes a test this report does not have: {0}",
@@ -107,11 +105,6 @@ window.ui_strings_ = (function () {
       "setting {0} holds {1}, not a stop count above 1",
     str_error_setting_stop_unusable:
       "setting {0} holds {1}, not a stop index below {2}",
-    str_error_setting_unknown: "no such setting: {0}",
-    str_error_settings_debug_query_unusable:
-      "the {0} query value came out as {1}, expected {2} or {3}",
-    str_error_settings_values_unusable:
-      "url part {0} holds no object of setting values",
     str_error_stored_preference_unknown:
       "stored preference error: {0}, clearing: {1}",
     str_error_strip_number_unusable:
@@ -161,9 +154,6 @@ window.ui_strings_ = (function () {
     str_search_drag_placeholder: "[search or drag]",
     str_search_placeholder: "[search]",
     str_search_text: "[{search}]",
-    str_settings_apply: "apply",
-    str_settings_copy: "copy",
-    str_settings_debug_query: "{name}={value}",
     str_slider_cell_after_stop: "▒",
     str_slider_cell_before_stop: "▓",
     str_sort_alphabetical: "alphabetical",
@@ -207,14 +197,12 @@ window.ui_strings_ = (function () {
     str_tool_tip_reset: "Restores default preferences.",
     str_tool_tip_scale: "Scales the whole report, as do +, - and =.",
     str_tool_tip_search: "Filter the rows with a pattern. Esc clears it.",
-    str_tool_tip_settings: "Opens the settings page.",
     str_tool_tip_test: "Selects the test shown.",
     str_view_call_graph: "call graph",
     str_view_database: "database",
     str_view_flame_graph: "flame graph",
     str_view_heat_map: "heat map",
     str_view_overview: "overview",
-    str_view_settings: "settings",
   };
   function text_fill(string_id, replacements) {
     const template = text(string_id);

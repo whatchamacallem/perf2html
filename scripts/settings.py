@@ -21,7 +21,6 @@ ASSET_LIGHT_MODE_STYLESHEET_NAME = "light_mode.css"
 ASSET_MENU_SCRIPT_NAME = "menu.js"
 ASSET_OVERVIEW_SCRIPT_NAME = "overview.js"
 ASSET_PREFERENCES_SCRIPT_NAME = "preferences.js"
-ASSET_SETTINGS_PAGE_SCRIPT_NAME = "settings_page.js"
 ASSET_SETTINGS_SCRIPT_NAME = "settings.js"
 ASSET_SOURCE_DATABASE_SCRIPT_NAME = "source_database.js"
 ASSET_TEMPLATE_CALL_GRAPH_PAGE_NAME = "call_graph.html"
@@ -30,7 +29,6 @@ ASSET_TEMPLATE_FLAME_GRAPH_PAGE_NAME = "flame_graph.html"
 ASSET_TEMPLATE_HEAT_MAP_PAGE_NAME = "heat_map.html"
 ASSET_TEMPLATE_OVERVIEW_PAGE_NAME = "overview.html"
 ASSET_TEMPLATE_README_PAGE_NAME = "readme_page.html"
-ASSET_TEMPLATE_SETTINGS_PAGE_NAME = "settings_page.html"
 ASSET_THEME_SCRIPT_NAME = "theme.js"
 ASSET_THEME_STYLESHEET_NAME = "theme.css"
 ASSET_UI_STRINGS_SCRIPT_NAME = "ui_strings.js"
@@ -328,23 +326,9 @@ SCREENSHOT_LABEL_QUERY_KEY_NAME = "screenshot"
 SCREENSHOT_LABEL_QUERY_VALUE = "1"
 SCREENSHOT_MENU_KEY_NUMBER = "screenshot-menu"
 
-SETTINGS_DEBUG_ENABLED = False
-# The digits of the base64 hash part applying settings, in value order.
-SETTINGS_DEBUG_HASH_BASE64_DIGITS = (
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-)
-SETTINGS_DEBUG_HASH_BASE64_PADDING = "="
-SETTINGS_DEBUG_HASH_BYTE_BITS = 8
-SETTINGS_DEBUG_HASH_KEY_NAME = "setting-values"
-SETTINGS_DEBUG_JSON_INDENT_CHARS = 2
-SETTINGS_DEBUG_JSON_MAX_LENGTH_CHARS = 79
-SETTINGS_DEBUG_JSON_SPACING_PATTERN = r'("(?:[^\\"]|\\.)*")|[:,]'
-SETTINGS_DEBUG_QUERY_KEY_NAME = "debug"
-SETTINGS_DEBUG_QUERY_VALUES: dict[str, str] = {"disabled": "0", "enabled": "1"}
 SETTINGS_HELD_SCRIPT_TEMPLATE_ID = "page-held-script-"
 SETTINGS_RELAY_MESSAGE_NAME = "settings_relay"
 SETTINGS_REQUEST_MESSAGE_NAME = "settings_request"
-SETTINGS_VIEW_ENTRY: tuple[str, str] = ("settings", "settings/index.html")
 
 SIGNAL_EXIT_CODE_BASE = 128
 
@@ -485,6 +469,7 @@ STYLE_README_PAGE_VALUE_ENTRIES: dict[str, str] = {
     "readme-page-font-family-": "Arial",
 }
 STYLE_SVG_NAMESPACE_URL = "http://www.w3.org/2000/svg"
+STYLE_TABLE_CHUNK_LINE_HEIGHT_PROPERTY = "--table-chunk-line-height-"
 STYLE_TABLE_CHUNK_ROWS_PROPERTY = "--table-chunk-rows-"
 STYLE_TABLE_COLUMN_EDGE_GRAB_CHARS = 1.5
 STYLE_TABLE_FUNCTION_LIST_COLUMN_MAX_CHARS = 48
@@ -542,6 +527,8 @@ STYLE_VALUE_ENTRIES: dict[str, str] = {
     "page-tool-tip-z-index-": "2",
     "screenshot-z-index-": "3",
 }
+# Zooms the frame that checks how zoom lays a frame's page out.
+STYLE_ZOOM_FRAME_CHECK_MULTIPLE = 2
 
 SYMBOL_TABLE_COMMAND: tuple[str, ...] = ("objdump", "--syms", "--wide")
 SYMBOL_TABLE_PATTERN = (

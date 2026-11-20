@@ -72,6 +72,12 @@ tr.heat-map-source-file-information-row- > td {
   position: relative;
   top: calc(-1 * var(--page-line-height-));
 }
+/* A chunk holding a box is never skipped, its box no line of its height. */
+.heat-map-source-table- > tbody.holds-box- {
+  content-visibility: visible;
+  /* The box's titles and row frames stay under the source's titles. */
+  isolation: isolate;
+}
 /* The title line over the file's box lets a press through to the box. */
 .heat-map-source-table-.holds-file-box- > thead {
   pointer-events: none;

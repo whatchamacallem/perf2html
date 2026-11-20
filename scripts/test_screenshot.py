@@ -13,7 +13,7 @@ import abc, argparse, base64, bisect, contextlib, fcntl, functools, hashlib
 import json, os, re, shutil, signal, socket, subprocess, sys, threading
 import urllib.parse
 
-import PIL.Image, PIL.ImageChops, PIL.ImageEnhance
+import PIL.Image, PIL.ImageChops
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_settings
@@ -98,9 +98,9 @@ class ScreenshotSet(NamedTuple):
                 earlier_view.takes_turn()
                 for earlier_view in _VIEWS[: view_index - 1]
             ) % len(test_settings.SCREENSHOT_TOGGLE_DARK_VALUES)
-        toggle_dark_values = test_settings.SCREENSHOT_TOGGLE_DARK_VALUES
-        if self.shot_flags & test_settings.SHOOT_LIGHT_DEFAULT:
-            toggle_dark_values = toggle_dark_values[::-1]
+        toggle_dark_value = test_settings.SCREENSHOT_TOGGLE_DARK_VALUES[
+            shown_index
+        ]
         viewports = (
             test_settings.SCREENSHOT_VIEWPORTS[:1]
             if self.shot_flags & test_settings.SHOOT_ONE_VARIANT
@@ -109,10 +109,8 @@ class ScreenshotSet(NamedTuple):
         return tuple(
             ShotVariant(
                 *viewport,
-                toggle_dark_values[shown_index],
-                test_settings.SHOT_MODE_NAME_PARTS[
-                    test_settings.SCREENSHOT_TOGGLE_DARK_VALUES[shown_index]
-                ],
+                toggle_dark_value,
+                test_settings.SHOT_MODE_NAME_PARTS[toggle_dark_value],
             )
             for viewport in viewports
         )
@@ -271,29 +269,6 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
     ),
     ScreenshotSet(
         test_settings.SHOOT_REGULAR_REPORT,
-        "#test=urlparser&view=database"
-        "&setting-values=eyJEQVRBQkFTRV9DT1VOVEVSX0xJU1RfREVGQVVMVF9TSE9X"
-        "Tl9OQU1FUyI6WyJjYWxscyIsIklyIiwiRDFtciIsIkRMbXIiLCJCY20iXX0%3D",
-        "",
-        "database",
-        "urlparser_counters_four",
-        (),
-        "",
-    ),
-    ScreenshotSet(
-        _SHOOT_BOTH_REPORTS,
-        "#test=urlparser&view=heat-map"
-        "&file=string/bits/string_fortified.h&line=59&functions=0"
-        "&setting-values=eyJIRUFUX01BUF9DT1VOVEVSX0xJU1RfREVGQVVMVF9TSE9X"
-        "Tl9OQU1FUyI6WyJjYWxscyIsIklyIiwiTDFtIiwiTExtIiwiQm0iXX0%3D",
-        "",
-        "heat_map",
-        "line_counters_four",
-        (),
-        "",
-    ),
-    ScreenshotSet(
-        test_settings.SHOOT_REGULAR_REPORT,
         "#test=urlparser&view=call-graph",
         "7",
         "call_graph",
@@ -307,19 +282,6 @@ _VIEWS: tuple[ScreenshotSet, ...] = (
         "",
         "database",
         "urlparser",
-        (),
-        "",
-    ),
-    ScreenshotSet(
-        test_settings.SHOOT_REGULAR_REPORT
-        | test_settings.SHOOT_ONE_VARIANT
-        | test_settings.SHOOT_UNTIMED
-        | test_settings.SHOOT_LIGHT_DEFAULT,
-        "#view=settings&setting=DARK_MODE_ENABLED_DEFAULT"
-        "&setting-values=eyJEQVJLX01PREVfRU5BQkxFRF9ERUZBVUxUIjpmYWxzZX0%3D",
-        "",
-        "settings",
-        "applied",
         (),
         "",
     ),
@@ -1424,11 +1386,12 @@ class FrameNode(NamedTuple):
 class BrowserSession(abc.ABC):
     # What an error message calls the browser.
     browser_name = ""
-    # The largest channel change of a square's average color matching the gold.
-    compare_channel_change = test_settings.COMPARE_VAGUE_CHANNEL_CHANGE
-    # The side of the squares a gold comparison averages each shot over.
-    compare_square_px = test_settings.COMPARE_VAGUE_SQUARE_PX
-    # The dir of the project root the browser's shots go to.
+    # The square side and channel change a shot matches its own gold twin by.
+    own_gold_compare_rule = (
+        test_settings.COMPARE_EXACT_SQUARE_PX,
+        test_settings.COMPARE_EXACT_CHANNEL_CHANGE,
+    )
+    # The browser's dir in the screenshots dir, the gold dir beside that.
     shot_dir_name = ""
     # Whether the browser writes the trace every timing reads.
     traces_pages = False
@@ -1500,17 +1463,14 @@ class BrowserSession(abc.ABC):
     def tab_open(self, width_px: int, height_px: int) -> PageTab: ...
 
 
-# Drives one Chrome over its DevTools pipe, each tab in a fresh profile.
-class ChromeSession(BrowserSession):
-    browser_name = "Chrome"
-    # Chrome's shots are the one gold, which its own match pixel by pixel.
-    compare_channel_change = test_settings.COMPARE_EXACT_CHANNEL_CHANGE
-    compare_square_px = test_settings.COMPARE_EXACT_SQUARE_PX
-    shot_dir_name = test_settings.SCREENSHOT_DIR_NAME
-    traces_pages = True
-
-    # Chrome keeps each tab's profile in memory, none under the build root.
-    def __init__(self, build_root: str) -> None:
+# Runs one browser speaking JSON messages over a pipe, each ended by a NUL.
+class BrowserPipe:
+    # Starts the browser, handing each message read to the session's reader.
+    def __init__(
+        self,
+        command_line: list[str],
+        message_take: Callable[[dict[str, Any]], None],
+    ) -> None:
         command_read_fd, command_write_fd = os.pipe()
         self.reply_read_fd, reply_write_fd = os.pipe()
 
@@ -1530,18 +1490,7 @@ class ChromeSession(BrowserSession):
             os.dup2(reply_spare_fd, test_settings.BROWSER_PIPE_REPLY_FD)
 
         self.browser_process = subprocess.Popen(
-            [
-                test_settings.SCREENSHOT_BROWSER_PATH,
-                "--headless",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--incognito",
-                "--hide-scrollbars",
-                # Draws a frame only after the page's own work for it.
-                "--run-all-compositor-stages-before-draw",
-                "--remote-debugging-pipe",
-                test_settings.BLANK_PAGE_URL,
-            ],
+            command_line,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -1556,55 +1505,47 @@ class ChromeSession(BrowserSession):
         os.close(reply_write_fd)
         self.command_file = os.fdopen(command_write_fd, "wb")
         self.command_count = 0
-        # The open tabs, by the session their commands and events go through.
-        self.page_tabs: dict[str, ChromeTab] = {}
+        self.message_take = message_take
         self.unread_bytes = b""
 
-    def __exit__(
-        self,
-        error_type: type[BaseException] | None,
-        error: BaseException | None,
-        error_traceback: TracebackType | None,
-    ) -> None:
-        if error_type is None:
-            self.command("Browser.close")
-            self.browser_process.wait()
-        else:
-            # Kills a browser still running with every process of its group.
-            if self.browser_process.poll() is None:
-                os.killpg(self.browser_process.pid, signal.SIGKILL)
-            self.browser_process.wait()
-        self.command_file.close()
-        os.close(self.reply_read_fd)
-
-    # Sends a command, to a tab's session if named, returning its result.
+    # Sends a command with its address fields, returning its result.
     def command(
         self,
         method: str,
-        parameters: dict[str, Any] | None = None,
-        session_id: str = "",
+        parameters: dict[str, Any] | None,
+        address_fields: dict[str, str],
     ) -> dict[str, Any]:
         self.command_count += 1
-        command_message: dict[str, Any] = {
-            "id": self.command_count,
-            "method": method,
-            "params": parameters or {},
-        }
-        if session_id:
-            command_message["sessionId"] = session_id
+        command_number = self.command_count
         self.command_file.write(
-            json.dumps(command_message).encode()
+            json.dumps(
+                {
+                    "id": command_number,
+                    "method": method,
+                    "params": parameters or {},
+                    **address_fields,
+                }
+            ).encode()
             + test_settings.BROWSER_PIPE_MESSAGE_END
         )
         self.command_file.flush()
         while True:
             reply_message = self.message_read()
-            if reply_message.get("id") != self.command_count:
+            if reply_message.get("id") != command_number:
                 continue
             if "error" in reply_message:
                 raise RuntimeError(f"{method}: {reply_message['error']}")
             return reply_message["result"]
 
+    # Waits for a browser told to close, else kills it with its process group.
+    def end(self, is_closed: bool) -> None:
+        if not is_closed and self.browser_process.poll() is None:
+            os.killpg(self.browser_process.pid, signal.SIGKILL)
+        self.browser_process.wait()
+        self.command_file.close()
+        os.close(self.reply_read_fd)
+
+    # Reads the next message, handing it to the session's reader.
     def message_read(self) -> dict[str, Any]:
         while test_settings.BROWSER_PIPE_MESSAGE_END not in self.unread_bytes:
             read_bytes = os.read(
@@ -1620,11 +1561,66 @@ class ChromeSession(BrowserSession):
             test_settings.BROWSER_PIPE_MESSAGE_END, 1
         )
         message = json.loads(message_bytes)
+        self.message_take(message)
+        return message
+
+
+# Drives one Chrome over its DevTools pipe, each tab in a fresh profile.
+class ChromeSession(BrowserSession):
+    browser_name = "Chrome"
+    shot_dir_name = test_settings.SCREENSHOT_CHROME_DIR_NAME
+    traces_pages = True
+
+    # Chrome keeps each tab's profile in memory, none under the build root.
+    def __init__(self, build_root: str) -> None:
+        # The open tabs, by the session their commands and events go through.
+        self.page_tabs: dict[str, ChromeTab] = {}
+        self.browser_pipe = BrowserPipe(
+            [
+                test_settings.SCREENSHOT_BROWSER_PATH,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--incognito",
+                "--hide-scrollbars",
+                # Draws a frame only after the page's own work for it.
+                "--run-all-compositor-stages-before-draw",
+                "--remote-debugging-pipe",
+                test_settings.BLANK_PAGE_URL,
+            ],
+            self.message_take,
+        )
+
+    def __exit__(
+        self,
+        error_type: type[BaseException] | None,
+        error: BaseException | None,
+        error_traceback: TracebackType | None,
+    ) -> None:
+        if error_type is None:
+            self.command("Browser.close")
+        self.browser_pipe.end(error_type is None)
+
+    # Sends a command, to a tab's session if named, returning its result.
+    def command(
+        self,
+        method: str,
+        parameters: dict[str, Any] | None = None,
+        session_id: str = "",
+    ) -> dict[str, Any]:
+        return self.browser_pipe.command(
+            method, parameters, {"sessionId": session_id} if session_id else {}
+        )
+
+    def message_read(self) -> dict[str, Any]:
+        return self.browser_pipe.message_read()
+
+    # Hands a tab's event to that tab.
+    def message_take(self, message: dict[str, Any]) -> None:
         page_tab = self.page_tabs.get(message.get("sessionId", ""))
         # A closed tab's late event and a browser event belong to no page.
         if "method" in message and page_tab:
             page_tab.event_take(message)
-        return message
 
     def tab_open(self, width_px: int, height_px: int) -> ChromeTab:
         browser_context_id = self.command("Target.createBrowserContext")[
@@ -2224,6 +2220,133 @@ class SeaMonkeySession(GeckoSession):
         return text
 
 
+# Drives one WebKit over its inspector pipe, each tab in a fresh context.
+class WebKitSession(BrowserSession):
+    browser_name = "WebKit"
+    # WebKit's index page shot varies per load at the frame edges, so vaguely.
+    own_gold_compare_rule = (
+        test_settings.COMPARE_VAGUE_SQUARE_PX,
+        test_settings.COMPARE_VAGUE_CHANNEL_CHANGE,
+    )
+    shot_dir_name = test_settings.SCREENSHOT_WEBKIT_DIR_NAME
+
+    # WebKit keeps each tab's context in memory, none under the build root.
+    def __init__(self, build_root: str) -> None:
+        # The first target of each page made, until its tab takes it.
+        self.created_targets: dict[str, dict[str, Any]] = {}
+        # The open tabs, by the page their commands and events name.
+        self.page_tabs: dict[str, WebKitTab] = {}
+        self.browser_pipe = BrowserPipe(
+            [
+                test_settings.SCREENSHOT_WEBKIT_PATH,
+                *test_settings.SCREENSHOT_WEBKIT_ARGUMENTS,
+            ],
+            self.message_take,
+        )
+        # A start failing before the with statement ends the browser itself.
+        try:
+            self.command("Playwright.enable")
+        except BaseException:
+            self.browser_pipe.end(False)
+            raise
+
+    def __exit__(
+        self,
+        error_type: type[BaseException] | None,
+        error: BaseException | None,
+        error_traceback: TracebackType | None,
+    ) -> None:
+        if error_type is None:
+            self.command("Playwright.close")
+        self.browser_pipe.end(error_type is None)
+
+    # Sends a command, to a page's session if named, returning its result.
+    def command(
+        self,
+        method: str,
+        parameters: dict[str, Any] | None = None,
+        page_proxy_id: str = "",
+    ) -> dict[str, Any]:
+        return self.browser_pipe.command(
+            method,
+            parameters,
+            {"pageProxyId": page_proxy_id} if page_proxy_id else {},
+        )
+
+    def message_read(self) -> dict[str, Any]:
+        return self.browser_pipe.message_read()
+
+    # Keeps a page's first target and hands a tab's messages to that tab.
+    def message_take(self, message: dict[str, Any]) -> None:
+        method = message.get("method", "")
+        event_parameters = message.get("params", {})
+        page_proxy_id = message.get(
+            "pageProxyId", event_parameters.get("pageProxyId", "")
+        )
+        page_tab = self.page_tabs.get(page_proxy_id)
+        if method == "Target.targetCreated":
+            target_info = event_parameters["targetInfo"]
+            # A navigation swapping processes makes a page's second target.
+            if page_tab or page_proxy_id in self.created_targets:
+                raise RuntimeError(f"{page_proxy_id}: a second target")
+            self.created_targets[page_proxy_id] = target_info
+        # A closed tab's late message and a browser event belong to no page.
+        if not page_tab:
+            return
+        if method == "Playwright.provisionalLoadFailed":
+            raise RuntimeError(f"a load failed: {event_parameters['error']}")
+        if method == "Target.dispatchMessageFromTarget":
+            page_tab.target_message_take(
+                json.loads(event_parameters["message"])
+            )
+
+    def tab_open(self, width_px: int, height_px: int) -> WebKitTab:
+        browser_context_id = self.command("Playwright.createContext")[
+            "browserContextId"
+        ]
+        page_proxy_id = self.command(
+            "Playwright.createPage", {"browserContextId": browser_context_id}
+        )["pageProxyId"]
+        while page_proxy_id not in self.created_targets:
+            self.message_read()
+        target_info = self.created_targets.pop(page_proxy_id)
+        page_tab = WebKitTab(
+            self,
+            page_proxy_id,
+            browser_context_id,
+            target_info["targetId"],
+            (width_px, height_px),
+        )
+        self.page_tabs[page_proxy_id] = page_tab
+        page_tab.command(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": width_px, "height": height_px, "fixedLayout": False},
+        )
+        # Gives the page the focus a shown window's page holds.
+        page_tab.command("Emulation.setActiveAndFocused", {"active": True})
+        for method in ("Page.enable", "Runtime.enable", "Console.enable"):
+            page_tab.target_command(method)
+        for binding_name in (
+            test_settings.PAGE_DRAWN_BINDING_NAME,
+            test_settings.WEBKIT_CONSOLE_BINDING_NAME,
+        ):
+            page_tab.target_command(
+                "Runtime.addBinding", {"name": binding_name}
+            )
+        page_tab.target_command(
+            "Page.setBootstrapScript",
+            {
+                "source": f"({test_settings.WEBKIT_CONSOLE_FORWARD_FUNCTION})"
+                f"({json.dumps(test_settings.WEBKIT_CONSOLE_BINDING_NAME)})"
+            },
+        )
+        if target_info.get("isPaused"):
+            page_tab.command(
+                "Target.resume", {"targetId": target_info["targetId"]}
+            )
+        return page_tab
+
+
 # Holds one tab's page: its frames, their script contexts and error reports.
 class PageTab(abc.ABC):
     def __init__(
@@ -2472,6 +2595,17 @@ class PageTab(abc.ABC):
                 )
         self.browser_session.settled_tab_wait([self])
 
+    # Returns whether any of an element's quads, in the tab's px, shows in it.
+    def quads_shown(self, element_quads: list[list[float]]) -> bool:
+        width_px, height_px = self.tab_size
+        return any(
+            max(quad[0::2]) > 0
+            and max(quad[1::2]) > 0
+            and min(quad[0::2]) < width_px
+            and min(quad[1::2]) < height_px
+            for quad in element_quads
+        )
+
     # Returns an expression's value in a context and its exception's text.
     @abc.abstractmethod
     def script_run(
@@ -2684,14 +2818,7 @@ class ChromeTab(PageTab):
             if frame_node.frame_id in self.detached_frames:
                 return False
             raise
-        width_px, height_px = self.tab_size
-        return any(
-            max(quad[0::2]) > 0
-            and max(quad[1::2]) > 0
-            and min(quad[0::2]) < width_px
-            and min(quad[1::2]) < height_px
-            for quad in frame_quads
-        )
+        return self.quads_shown(frame_quads)
 
     def frame_tree(self) -> FrameNode:
         return self.frame_node_of(
@@ -3262,6 +3389,350 @@ class SeaMonkeyTab(PageTab):
         return call_result.get("value"), ""
 
 
+# Drives one WebKit page through its page session and its one target.
+class WebKitTab(PageTab):
+    def __init__(
+        self,
+        webkit_session: WebKitSession,
+        page_proxy_id: str,
+        browser_context_id: str,
+        target_id: str,
+        tab_size: tuple[int, int],
+    ) -> None:
+        super().__init__(webkit_session, tab_size)
+        self.webkit_session = webkit_session
+        self.browser_context_id = browser_context_id
+        self.page_proxy_id = page_proxy_id
+        self.target_command_count = 0
+        self.target_id = target_id
+        # The reply of each target command, by its number, until it is read.
+        self.target_replies: dict[int, dict[str, Any]] = {}
+
+    def characters_send(self, typed_text: str) -> None:
+        for typed_character in typed_text:
+            self.command(
+                "Input.dispatchKeyEvent",
+                {
+                    "type": "keyDown",
+                    "key": typed_character,
+                    "text": typed_character,
+                },
+            )
+            self.command(
+                "Input.dispatchKeyEvent",
+                {"type": "keyUp", "key": typed_character},
+            )
+
+    def close(self) -> None:
+        del self.webkit_session.page_tabs[self.page_proxy_id]
+        self.webkit_session.command(
+            "Playwright.deleteContext",
+            {"browserContextId": self.browser_context_id},
+        )
+
+    # Sends a command to the page's session, returning its result.
+    def command(
+        self, method: str, parameters: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        return self.webkit_session.command(
+            method, parameters, self.page_proxy_id
+        )
+
+    # Ends the script context a frame's document held, if any.
+    def document_end(self, frame_id: str) -> None:
+        ended_context = self.frame_contexts.get(frame_id)
+        if ended_context is not None:
+            self.context_end(ended_context)
+
+    # Keeps an event of the target, its error reports and script contexts.
+    def event_take(self, message: dict[str, Any]) -> None:
+        self.has_news = True
+        method = message["method"]
+        event_parameters = message["params"]
+        if method == "Console.messageAdded":
+            console_message = event_parameters["message"]
+            # A console error report comes through its binding instead.
+            if (
+                console_message["source"] == "javascript"
+                and console_message["level"] == "error"
+            ):
+                self.thrown_texts.append(console_message["text"])
+        elif method == "Runtime.executionContextCreated":
+            context = event_parameters["context"]
+            if context["type"] == "normal":
+                self.document_end(context["frameId"])
+                self.frame_contexts[context["frameId"]] = context["id"]
+        elif method == "Runtime.bindingCalled":
+            binding_name = event_parameters["name"]
+            if binding_name == test_settings.WEBKIT_CONSOLE_BINDING_NAME:
+                self.error_report_keep(
+                    event_parameters["contextId"], event_parameters["argument"]
+                )
+            elif binding_name == test_settings.PAGE_DRAWN_BINDING_NAME:
+                self.pending_events.append(
+                    functools.partial(
+                        self.page_drawn_mark,
+                        event_parameters["contextId"],
+                        event_parameters["argument"],
+                    )
+                )
+            else:
+                raise RuntimeError(f"a call of no binding: {binding_name}")
+        # A frame's new document ends the context of the one it replaces.
+        elif method == "Page.frameNavigated":
+            self.document_end(event_parameters["frame"]["id"])
+        elif method == "Page.frameDetached":
+            self.detached_frames.add(event_parameters["frameId"])
+            self.document_end(event_parameters["frameId"])
+            self.pending_events.append(
+                functools.partial(self.load_end, event_parameters["frameId"])
+            )
+        # A frame's load starts at its navigation's check, a hash change none.
+        elif method == "Page.willCheckNavigationPolicy":
+            self.pending_events.append(
+                functools.partial(self.load_begin, event_parameters["frameId"])
+            )
+        elif method == "Page.loadEventFired" or (
+            method == "Page.didCheckNavigationPolicy"
+            and event_parameters["cancel"]
+        ):
+            self.pending_events.append(
+                functools.partial(self.load_end, event_parameters["frameId"])
+            )
+
+    def frame_shown(self, frame_node: FrameNode) -> bool:
+        parent_context = self.frame_contexts[frame_node.parent_id]
+        try:
+            # One static list, so a frame its page removes meanwhile stays in.
+            frame_list = self.target_command(
+                "Runtime.evaluate",
+                {
+                    "expression": (
+                        test_settings.WEBKIT_FRAME_ELEMENTS_EXPRESSION
+                    ),
+                    "contextId": parent_context,
+                    "objectGroup": test_settings.WEBKIT_OBJECT_GROUP_NAME,
+                },
+            )
+            if frame_list["wasThrown"]:
+                raise RuntimeError(
+                    f"{frame_node.parent_id}: frame list:"
+                    f" {frame_list['result'].get('description', '')}"
+                )
+            frame_count = self.list_property_read(
+                frame_list["result"]["objectId"], "length", True
+            )["value"]
+            for frame_index in range(frame_count):
+                frame_element = self.list_property_read(
+                    frame_list["result"]["objectId"], frame_index, False
+                )
+                element_frames = self.target_command(
+                    "DOM.describeNode", {"objectId": frame_element["objectId"]}
+                )
+                if element_frames.get("contentFrameId") != frame_node.frame_id:
+                    continue
+                laid_out_call = self.target_command(
+                    "Runtime.callFunctionOn",
+                    {
+                        "objectId": frame_element["objectId"],
+                        "functionDeclaration": (
+                            test_settings.FRAME_LAID_OUT_FUNCTION
+                        ),
+                        "returnByValue": True,
+                    },
+                )
+                if not laid_out_call["result"]["value"]:
+                    return False
+                return self.quads_shown(
+                    self.target_command(
+                        "DOM.getContentQuads",
+                        {"objectId": frame_element["objectId"]},
+                    )["quads"]
+                )
+        except RuntimeError:
+            # A frame its page removed meanwhile is out of view.
+            if frame_node.frame_id in self.detached_frames:
+                return False
+            raise
+        finally:
+            self.target_command(
+                "Runtime.releaseObjectGroup",
+                {"objectGroup": test_settings.WEBKIT_OBJECT_GROUP_NAME},
+            )
+        # A frame its page removed meanwhile is out of view.
+        if frame_node.frame_id in self.detached_frames:
+            return False
+        raise RuntimeError(f"{frame_node.frame_id}: no frame element shows it")
+
+    def frame_tree(self) -> FrameNode:
+        return self.frame_node_of(
+            self.target_command("Page.getResourceTree")["frameTree"]
+        )
+
+    # Returns the node of a frame tree the target reports.
+    def frame_node_of(self, frame_tree: dict[str, Any]) -> FrameNode:
+        return FrameNode(
+            frame_tree["frame"]["id"],
+            frame_tree["frame"].get("parentId", ""),
+            tuple(
+                self.frame_node_of(child_tree)
+                for child_tree in frame_tree.get("childFrames", [])
+            ),
+        )
+
+    def image_write(self, image_path: str) -> None:
+        # WebKit shoots the last frame painted, so the page paints once more.
+        self.paint_wait(test_settings.CLICK_MENU_FRAME_NAME)
+        width_px, height_px = self.tab_size
+        image_url = self.webkit_session.command(
+            "Playwright.takePageScreenshot",
+            {
+                "pageProxyId": self.page_proxy_id,
+                "x": 0,
+                "y": 0,
+                "width": width_px,
+                "height": height_px,
+                "omitDeviceScaleFactor": True,
+            },
+        )["dataURL"]
+        _, image_data = image_url.split(",", 1)
+        with open(image_path, "wb") as image_file:
+            image_file.write(base64.b64decode(image_data))
+
+    def key_send(self, key_name: str) -> None:
+        key_press = test_settings.CLICK_KEY_PRESSES[key_name]
+        # WebKit numbers the modifier keys otherwise than DevTools does.
+        key_fields = {
+            part_name: part_value
+            for part_name, part_value in key_press.items()
+            if part_name not in ("commands", "modifiers")
+        }
+        key_fields["modifiers"] = sum(
+            webkit_bit
+            for devtools_bit, webkit_bit in (
+                test_settings.CLICK_WEBKIT_MODIFIER_BITS.items()
+            )
+            if key_press.get("modifiers", 0) & devtools_bit
+        )
+        self.command(
+            "Input.dispatchKeyEvent", {"type": "keyDown", **key_fields}
+        )
+        self.command(
+            "Input.dispatchKeyEvent",
+            {
+                "type": "keyUp",
+                **{
+                    part_name: part_value
+                    for part_name, part_value in key_fields.items()
+                    if part_name != "text"
+                },
+            },
+        )
+
+    # Returns a property of a list object, its value or a remote object of it.
+    def list_property_read(
+        self, list_object_id: str, property_key: str | int, is_value: bool
+    ) -> dict[str, Any]:
+        property_call = self.target_command(
+            "Runtime.callFunctionOn",
+            {
+                "objectId": list_object_id,
+                "functionDeclaration": (
+                    test_settings.WEBKIT_PROPERTY_READ_FUNCTION
+                ),
+                "arguments": [{"value": property_key}],
+                "returnByValue": is_value,
+            },
+        )
+        if property_call["wasThrown"]:
+            raise RuntimeError(
+                f"{list_object_id}: property {property_key}:"
+                f" {property_call['result'].get('description', '')}"
+            )
+        return property_call["result"]
+
+    def navigation_begin(self, page_url: str) -> str:
+        self.webkit_session.command(
+            "Playwright.navigate",
+            {"url": page_url, "pageProxyId": self.page_proxy_id},
+        )
+        return self.frame_tree().frame_id
+
+    def script_run(
+        self,
+        context_id: ScriptContext,
+        expression: str,
+        is_awaited: bool = False,
+        is_activated: bool = False,
+    ) -> tuple[Any, str]:
+        # An awaited promise is kept in a group, read once it settles.
+        group_fields = (
+            {"objectGroup": test_settings.WEBKIT_OBJECT_GROUP_NAME}
+            if is_awaited
+            else {"returnByValue": True}
+        )
+        try:
+            evaluation = self.target_command(
+                "Runtime.evaluate",
+                {
+                    "expression": expression,
+                    "contextId": context_id,
+                    "emulateUserGesture": is_activated,
+                    **group_fields,
+                },
+            )
+            if is_awaited and not evaluation["wasThrown"]:
+                evaluation = self.target_command(
+                    "Runtime.awaitPromise",
+                    {
+                        "promiseObjectId": evaluation["result"]["objectId"],
+                        "returnByValue": True,
+                    },
+                )
+        finally:
+            if is_awaited:
+                self.target_command(
+                    "Runtime.releaseObjectGroup",
+                    {"objectGroup": test_settings.WEBKIT_OBJECT_GROUP_NAME},
+                )
+        if evaluation["wasThrown"]:
+            return None, evaluation["result"].get("description", "")
+        return evaluation["result"].get("value"), ""
+
+    # Sends a command to the page's target, returning its result.
+    def target_command(
+        self, method: str, parameters: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        self.target_command_count += 1
+        command_number = self.target_command_count
+        self.command(
+            "Target.sendMessageToTarget",
+            {
+                "targetId": self.target_id,
+                "message": json.dumps(
+                    {
+                        "id": command_number,
+                        "method": method,
+                        "params": parameters or {},
+                    }
+                ),
+            },
+        )
+        while command_number not in self.target_replies:
+            self.webkit_session.message_read()
+        reply_message = self.target_replies.pop(command_number)
+        if "error" in reply_message:
+            raise RuntimeError(f"{method}: {reply_message['error']}")
+        return reply_message["result"]
+
+    # Keeps a target command's reply, or takes the target's event.
+    def target_message_take(self, message: dict[str, Any]) -> None:
+        if "id" in message:
+            self.target_replies[message["id"]] = message
+        else:
+            self.event_take(message)
+
+
 # Sends and reads the text messages of one WebSocket, as its client.
 class WebSocketChannel:
     def __init__(self, socket_url: str) -> None:
@@ -3417,21 +3888,19 @@ class Screenshots:
         report: str,
         report_flag: int,
         out_dir: str,
-        compare_dir: str,
         scratch_dir: str,
         chosen_shot: str,
         session_type: type[BrowserSession],
     ) -> None:
-        # The browser session a shooting run opens, none in a compare only run.
+        # The browser session the run opens, set once the browser starts.
         self.browser_session: BrowserSession | None = None
         # The one shot a single shot run takes, empty for every shot.
         self.chosen_shot = chosen_shot
         self.report = report
         self.report_flag = report_flag
         self.out_dir = out_dir
-        self.compare_dir = compare_dir
         self.scratch_dir = scratch_dir
-        # The browser's kind, which names how its shots compare and its views.
+        # The browser's kind, which names the views it shoots.
         self.session_type = session_type
         self.report_views = self.report_views_select()
         self.click_timings: list[PageTiming] = []
@@ -3543,7 +4012,7 @@ class Screenshots:
     def copy_shoot(
         self,
         view_index: int,
-        prefix: str,
+        report_name: str,
         view: ScreenshotSet,
     ) -> int:
         if os.path.exists(self.scratch_dir):
@@ -3552,41 +4021,11 @@ class Screenshots:
         try:
             for relative_path in view.absent_files:
                 os.remove(os.path.join(self.scratch_dir, relative_path))
-            return self.view_shoot(self.scratch_dir, view_index, prefix, view)
+            return self.view_shoot(
+                self.scratch_dir, view_index, report_name, view
+            )
         finally:
             shutil.rmtree(self.scratch_dir)
-
-    # Masks each changed pixel of a square whose average color moved too far.
-    def changed_pixels(
-        self, new_shot: PIL.Image.Image, gold_shot: PIL.Image.Image
-    ) -> PIL.Image.Image:
-        square_px = self.session_type.compare_square_px
-        matching_change = self.session_type.compare_channel_change
-        square_change = self.channel_change(
-            new_shot.reduce(square_px), gold_shot.reduce(square_px)
-        )
-        square_mask = (
-            square_change.point(
-                [
-                    255 if channel_value > matching_change else 0
-                    for channel_value in range(256)
-                ]
-            )
-            .resize(
-                (
-                    square_change.width * square_px,
-                    square_change.height * square_px,
-                ),
-                PIL.Image.Resampling.BOX,
-            )
-            .crop((0, 0, new_shot.width, new_shot.height))
-        )
-        return PIL.ImageChops.multiply(
-            self.channel_change(new_shot, gold_shot).point(
-                lambda channel_value: 255 if channel_value else 0
-            ),
-            square_mask,
-        )
 
     # Returns each pixel's largest color channel change between two images.
     def channel_change(
@@ -3668,65 +4107,55 @@ class Screenshots:
     def file_url(self, path: str) -> str:
         return "file://" + urllib.parse.quote(path)
 
-    # Names each shot that differs from its gold twin or has none.
-    def gold_compare(
-        self, gold_dir: str, prefix: str, verbose_level: int
-    ) -> None:
-        is_same = True
-        for shot_name in self.shot_names(prefix):
-            if self.shot_is_taken(shot_name) and not self.gold_compare_one(
-                shot_name + test_settings.IMAGE_SUFFIX, gold_dir, verbose_level
-            ):
-                is_same = False
-        # A difference makes the compare directory, its one sign to the run.
-        if not is_same:
-            os.makedirs(self.compare_dir, exist_ok=True)
-
-    # Returns whether a shot matches its gold twin, writing its change if not.
-    def gold_compare_one(
-        self, file_name: str, gold_dir: str, verbose_level: int
-    ) -> bool:
-        new_path = os.path.join(self.out_dir, file_name)
-        if not os.path.isfile(new_path):
-            raise RuntimeError(f"{file_name}: absent from {self.out_dir}")
-        compare_path = os.path.join(
-            self.compare_dir, test_settings.COMPARE_IMAGE_PREFIX + file_name
-        )
-        # An earlier run's compare image goes, so none is left for a match.
-        if os.path.isfile(compare_path):
-            os.remove(compare_path)
-        gold_path = os.path.join(gold_dir, file_name)
-        if not os.path.isfile(gold_path):
-            print(f"{file_name}: absent from {gold_dir}")
-            return False
-        new_shot = PIL.Image.open(new_path).convert("RGB")
-        gold_shot = PIL.Image.open(gold_path).convert("RGB")
-        if new_shot.size != gold_shot.size:
-            print(
-                f"{file_name}: {new_shot.width}x{new_shot.height}, gold"
-                f" {gold_shot.width}x{gold_shot.height}"
+    # Returns the error line of the first shot unlike its gold twin, else none.
+    def gold_difference(
+        self,
+        report_name: str,
+        gold_dir: str,
+        compare_rule: tuple[int, int],
+        same_lines: list[str],
+    ) -> str | None:
+        square_px, matching_change = compare_rule
+        for shot_name in self.shot_names(report_name):
+            if not self.shot_is_taken(shot_name):
+                continue
+            file_name = shot_name + test_settings.IMAGE_SUFFIX
+            new_path = os.path.join(self.out_dir, file_name)
+            if not os.path.isfile(new_path):
+                raise RuntimeError(f"{file_name}: absent from {self.out_dir}")
+            gold_path = os.path.join(gold_dir, file_name)
+            if not os.path.isfile(gold_path):
+                return f"error: {new_path} has no gold twin {gold_path}"
+            new_shot = PIL.Image.open(new_path).convert("RGB")
+            gold_shot = PIL.Image.open(gold_path).convert("RGB")
+            if new_shot.size != gold_shot.size:
+                return (
+                    f"error: {new_path} is {new_shot.width}x{new_shot.height},"
+                    f" its gold twin {gold_path}"
+                    f" {gold_shot.width}x{gold_shot.height}"
+                )
+            square_change = self.channel_change(
+                new_shot.reduce(square_px), gold_shot.reduce(square_px)
             )
-            return False
-        changed_mask = self.changed_pixels(new_shot, gold_shot)
-        if changed_mask.getbbox() is None:
-            if verbose_level:
-                verbose_print(verbose_level, [f"{file_name}: same as gold"])
-            return True
-        compare_image = PIL.ImageEnhance.Brightness(new_shot).enhance(
-            test_settings.COMPARE_KEPT_BRIGHTNESS_SHARE
-        )
-        compare_image.paste(
-            test_settings.COMPARE_HIGHLIGHT_COLOR, mask=changed_mask
-        )
-        os.makedirs(self.compare_dir, exist_ok=True)
-        compare_image.save(compare_path)
-        print(f"{file_name}: differs from gold, compare image {compare_path}")
-        return False
+            if (
+                square_change.point(
+                    [
+                        255 if channel_value > matching_change else 0
+                        for channel_value in range(256)
+                    ]
+                ).getbbox()
+                is not None
+            ):
+                return (
+                    f"error: {new_path} differs from its gold twin {gold_path}"
+                )
+            same_lines.append(f"{file_name}: same as {gold_path}")
+        return None
 
     # Merges this report's pages and timings into the index, returning all.
     def index_write(
         self,
-        prefix: str,
+        report_name: str,
         index_path: str,
         template: str,
         timing_rows: list[TimingRow],
@@ -3734,7 +4163,6 @@ class Screenshots:
         assert template.count(test_settings.INDEX_MARKER) == 1, (
             test_settings.INDEX_MARKER
         )
-        report_name = prefix.rstrip("_")
         report_href = self.entry_href(self.report, index_path)
         index_reports: list[dict[str, str]] = []
         for listed_report in test_settings.INDEX_REPORT_NAMES:
@@ -3792,7 +4220,9 @@ class Screenshots:
                 continue
             variant = view.shot_variants(view_index)[0]
             pages[
-                self.shot_name(view_index, "", prefix, view, variant.mode_name)
+                self.shot_name(
+                    view_index, "", report_name, view, variant.mode_name
+                )
             ] = report_href + self.page_address(
                 view.view_hash,
                 view.menu_entry_number,
@@ -3832,32 +4262,28 @@ class Screenshots:
             )
         return report_timings
 
-    # Refuses a logo link other than each debug query value's golden one.
-    def logo_links_check(self) -> None:
+    # Refuses a logo link other than the golden one.
+    def logo_link_check(self) -> None:
         _, width_px, height_px = test_settings.SCREENSHOT_VIEWPORTS[0]
         entry_url = self.file_url(
             os.path.join(self.report, test_settings.ENTRY_PAGE)
         )
-        browser_session = self.session()
-        for query_text, link_text in test_settings.MENU_LOGO_LINKS.items():
-            with browser_session.tab(width_px, height_px) as page_tab:
-                page_tab.page_open(entry_url + query_text)
-                page_markup = page_tab.frame_evaluate(
-                    test_settings.CLICK_MENU_FRAME_NAME,
-                    "document.documentElement.outerHTML",
-                )
-                error_message = page_tab.error_message()
-            link_match = test_settings.MENU_LOGO_LINK_PATTERN.search(
-                page_markup
+        with self.session().tab(width_px, height_px) as page_tab:
+            page_tab.page_open(entry_url)
+            page_markup = page_tab.frame_evaluate(
+                test_settings.CLICK_MENU_FRAME_NAME,
+                "document.documentElement.outerHTML",
             )
-            found_text = link_match.group(1) if link_match else None
-            if found_text == link_text:
-                continue
-            raise RuntimeError(
-                f"{entry_url + query_text}: the logo link holds"
-                f" {found_text!r}, expected {link_text!r}, the error handler"
-                f" drawing {error_message!r}"
-            )
+            error_message = page_tab.error_message()
+        link_match = test_settings.MENU_LOGO_LINK_PATTERN.search(page_markup)
+        found_text = link_match.group(1) if link_match else None
+        if found_text == test_settings.MENU_LOGO_REPOSITORY_LINK:
+            return
+        raise RuntimeError(
+            f"{entry_url}: the logo link holds {found_text!r}, expected"
+            f" {test_settings.MENU_LOGO_REPOSITORY_LINK!r}, the error handler"
+            f" drawing {error_message!r}"
+        )
 
     # Returns the query and hash a page is shot at.
     def page_address(
@@ -3927,39 +4353,39 @@ class Screenshots:
             and self.view_is_supported(view.view_hash)
         ]
 
-    # Returns the browser session, which a compare only run lacks.
+    # Returns the browser session the run opened.
     def session(self) -> BrowserSession:
-        assert self.browser_session, "a compare only run opens no page"
+        assert self.browser_session, "the browser has not started"
         return self.browser_session
 
-    def shoot_all(self, prefix: str) -> int:
+    def shoot_all(self, report_name: str) -> int:
         written = 0
         for view_index, view in self.report_views:
             if view.shot_flags & test_settings.SHOOT_INDEX_PAGE:
                 continue
-            if not self.view_is_taken(view_index, prefix, view):
+            if not self.view_is_taken(view_index, report_name, view):
                 continue
             if view.absent_files:
-                written += self.copy_shoot(view_index, prefix, view)
+                written += self.copy_shoot(view_index, report_name, view)
             else:
                 written += self.view_shoot(
-                    self.report, view_index, prefix, view
+                    self.report, view_index, report_name, view
                 )
         return written
 
     # Shoots the index page at the given hash, else at its view's own.
     def index_shoot(
-        self, prefix: str, index_path: str, index_hash: str
+        self, report_name: str, index_path: str, index_hash: str
     ) -> int:
         written = 0
         for view_index, view in self.report_views:
             if view.shot_flags & test_settings.SHOOT_INDEX_PAGE and (
-                self.view_is_taken(view_index, prefix, view)
+                self.view_is_taken(view_index, report_name, view)
             ):
                 written += self.view_shoot(
                     index_path,
                     view_index,
-                    prefix,
+                    report_name,
                     view._replace(view_hash=index_hash or view.view_hash),
                 )
         return written
@@ -3969,7 +4395,7 @@ class Screenshots:
         self,
         view_index: int,
         size_name: str,
-        prefix: str,
+        report_name: str,
         view: ScreenshotSet,
         mode_name: str,
     ) -> str:
@@ -3980,19 +4406,19 @@ class Screenshots:
                 size_name,
                 view.view_name,
                 view.subview_name,
-                prefix.rstrip("_"),
+                report_name,
                 mode_name,
             )
             if name_part
         )
 
     # Names every shot of this report, the index page's too.
-    def shot_names(self, prefix: str) -> list[str]:
+    def shot_names(self, report_name: str) -> list[str]:
         return [
             shot
             for view_index, view in self.report_views
             if view.is_pictured(view_index)
-            for shot in self.view_shot_names(view_index, prefix, view)
+            for shot in self.view_shot_names(view_index, report_name, view)
         ]
 
     # Returns whether the run takes a shot, a single shot run its own alone.
@@ -4009,22 +4435,22 @@ class Screenshots:
 
     # Returns whether the run takes a shot of the view.
     def view_is_taken(
-        self, view_index: int, prefix: str, view: ScreenshotSet
+        self, view_index: int, report_name: str, view: ScreenshotSet
     ) -> bool:
         return any(
             self.shot_is_taken(shot)
-            for shot in self.view_shot_names(view_index, prefix, view)
+            for shot in self.view_shot_names(view_index, report_name, view)
         )
 
     # Names the shots of one view, one for each of its variants.
     def view_shot_names(
-        self, view_index: int, prefix: str, view: ScreenshotSet
+        self, view_index: int, report_name: str, view: ScreenshotSet
     ) -> list[str]:
         return [
             self.shot_name(
                 view_index,
                 variant.size_name,
-                prefix,
+                report_name,
                 view,
                 variant.mode_name,
             )
@@ -4476,7 +4902,7 @@ class Screenshots:
         self,
         page_dir: str,
         view_index: int,
-        prefix: str,
+        report_name: str,
         view: ScreenshotSet,
     ) -> int:
         browser_session = self.session()
@@ -4495,7 +4921,7 @@ class Screenshots:
             shot = self.shot_name(
                 view_index,
                 variant.size_name,
-                prefix,
+                report_name,
                 view,
                 variant.mode_name,
             )
@@ -4548,39 +4974,24 @@ class Screenshots:
 
 
 def main() -> int:
+    perf2html_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    session_types: tuple[type[BrowserSession], ...] = (
+        ChromeSession,
+        FirefoxSession,
+        SeaMonkeySession,
+        WebKitSession,
+    )
     parser = argparse.ArgumentParser()
-    parser.add_argument("report", help="a report directory to shoot")
-    parser.add_argument("prefix", help="what every file name starts with")
     parser.add_argument(
         "--build-root",
-        default="",
+        default=perf2html_dir,
         metavar="DIR",
         help="the directory build/ lies in",
     )
     parser.add_argument(
-        "--compare-gold",
+        "--compare-browser",
+        choices=[session_type.shot_dir_name for session_type in session_types],
         default="",
-        metavar="DIR",
-        help="compare each new shot with the same named shot in DIR, naming"
-        " every difference on stdout and writing a compare_ image of it; a"
-        " difference exits 0, the --compare-out directory made only for"
-        " one, and a shot this run did not write is an error",
-    )
-    parser.add_argument(
-        "--compare-only",
-        action="store_true",
-        help="shoot nothing and compare the shots already in the --out"
-        " directory; needs --compare-gold",
-    )
-    parser.add_argument(
-        "--compare-out",
-        default="",
-        metavar="DIR",
-        help="where the compare_ images go, made when a shot differs"
-        " (default the --out directory)",
-    )
-    parser.add_argument(
-        "--diff", action="store_true", help="the report is a diff report"
     )
     browser_group = parser.add_mutually_exclusive_group()
     browser_group.add_argument(
@@ -4591,12 +5002,6 @@ def main() -> int:
         dest="session_type",
     )
     parser.add_argument("--index-hash", default="", metavar="HASH")
-    parser.add_argument(
-        "--out",
-        default="",
-        help="where the PNGs go (default"
-        f" tests/perf2html/{test_settings.SCREENSHOT_DIR_NAME})",
-    )
     browser_group.add_argument(
         "--seamonkey",
         action="store_const",
@@ -4612,30 +5017,22 @@ def main() -> int:
         help="print where the shots go and how many; a quiet run prints"
         " nothing on success",
     )
+    browser_group.add_argument(
+        "--webkit",
+        action="store_const",
+        const=WebKitSession,
+        default=ChromeSession,
+        dest="session_type",
+    )
     namespace = parser.parse_args()
+    session_type: type[BrowserSession] = namespace.session_type
 
-    report = os.path.abspath(namespace.report)
-    if not os.path.isfile(os.path.join(report, test_settings.ENTRY_PAGE)):
+    if namespace.compare_browser == session_type.shot_dir_name:
         print(
-            f"error: {report} holds no {test_settings.ENTRY_PAGE}",
+            f"error: --compare-browser {namespace.compare_browser} names the"
+            " browser shooting",
             file=sys.stderr,
         )
-        return 2
-
-    gold_dir = os.path.abspath(namespace.compare_gold)
-    if namespace.compare_gold and not os.path.isdir(gold_dir):
-        print(
-            f"error: --compare-gold {gold_dir} is no directory",
-            file=sys.stderr,
-        )
-        return 2
-
-    if namespace.compare_out and not namespace.compare_gold:
-        print("error: --compare-out needs --compare-gold", file=sys.stderr)
-        return 2
-
-    if namespace.compare_only and not namespace.compare_gold:
-        print("error: --compare-only needs --compare-gold", file=sys.stderr)
         return 2
 
     if namespace.index_hash and not namespace.index_hash.startswith("#"):
@@ -4645,17 +5042,41 @@ def main() -> int:
         )
         return 2
 
-    if not namespace.build_root and not namespace.compare_only:
-        print("error: shooting needs --build-root", file=sys.stderr)
-        return 2
-
-    perf2html_dir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), ".."
+    screenshots_dir = os.path.join(
+        perf2html_dir, test_settings.SCREENSHOT_DIR_NAME
     )
-    session_type: type[BrowserSession] = namespace.session_type
-    out_dir = os.path.abspath(
-        namespace.out
-        or os.path.join(perf2html_dir, session_type.shot_dir_name)
+    out_dir = os.path.join(screenshots_dir, session_type.shot_dir_name)
+    own_gold_dir = os.path.join(
+        screenshots_dir,
+        test_settings.SCREENSHOT_GOLD_DIR_FORMAT.format(
+            session_type.shot_dir_name
+        ),
+    )
+    # Another browser's gold is compared on request, font smoothing passing.
+    if namespace.compare_browser:
+        gold_dir = os.path.join(
+            screenshots_dir,
+            test_settings.SCREENSHOT_GOLD_DIR_FORMAT.format(
+                namespace.compare_browser
+            ),
+        )
+        if not os.path.isdir(gold_dir):
+            print(
+                f"error: --compare-browser {namespace.compare_browser}:"
+                f" {gold_dir} is no directory",
+                file=sys.stderr,
+            )
+            return 2
+        compare_rule = (
+            test_settings.COMPARE_VAGUE_SQUARE_PX,
+            test_settings.COMPARE_VAGUE_CHANNEL_CHANGE,
+        )
+    else:
+        gold_dir = own_gold_dir if os.path.isdir(own_gold_dir) else ""
+        compare_rule = session_type.own_gold_compare_rule
+    # A whole run with no gold of its own browser to compare makes that gold.
+    is_gold_made = not (
+        namespace.shot or namespace.compare_browser or gold_dir
     )
     scratch_dir = os.path.abspath(
         os.path.join(
@@ -4663,33 +5084,41 @@ def main() -> int:
         )
     )
 
-    report_flag = (
-        test_settings.SHOOT_DIFF_REPORT
-        if namespace.diff
-        else test_settings.SHOOT_REGULAR_REPORT
-    )
-    compare_dir = os.path.abspath(namespace.compare_out or out_dir)
-    shooter = Screenshots(
-        report,
+    shooters: list[tuple[str, Screenshots]] = []
+    for (
+        report_dir_name,
+        report_name,
         report_flag,
-        out_dir,
-        compare_dir,
-        scratch_dir,
-        namespace.shot,
-        session_type,
-    )
-    if namespace.shot and namespace.shot not in shooter.shot_names(
-        namespace.prefix
+    ) in test_settings.SHOOT_REPORTS:
+        report = os.path.join(perf2html_dir, report_dir_name)
+        if not os.path.isfile(os.path.join(report, test_settings.ENTRY_PAGE)):
+            print(
+                f"error: {report} holds no {test_settings.ENTRY_PAGE}",
+                file=sys.stderr,
+            )
+            return 2
+        shooters.append(
+            (
+                report_name,
+                Screenshots(
+                    report,
+                    report_flag,
+                    out_dir,
+                    scratch_dir,
+                    namespace.shot,
+                    session_type,
+                ),
+            )
+        )
+    if namespace.shot and not any(
+        namespace.shot in shooter.shot_names(report_name)
+        for report_name, shooter in shooters
     ):
         print(
-            f"error: --shot {namespace.shot} names no shot of {report}",
+            f"error: --shot {namespace.shot} names no shot",
             file=sys.stderr,
         )
         return 2
-
-    if namespace.compare_only:
-        shooter.gold_compare(gold_dir, namespace.prefix, namespace.verbose)
-        return 0
 
     index_path = os.path.join(perf2html_dir, test_settings.INDEX_PAGE_NAME)
     # A browser writing no timing shoots the index page Chrome's run wrote.
@@ -4704,64 +5133,79 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    os.makedirs(out_dir, exist_ok=True)
-    if namespace.verbose:
-        verbose_print(
-            namespace.verbose, [f"{os.path.basename(report)} -> {out_dir}"]
+    with open(
+        os.path.join(
+            perf2html_dir, "scripts", test_settings.INDEX_TEMPLATE_NAME
         )
+    ) as template_file:
+        index_template = template_file.read()
+    # Every run writes its browser's shots afresh, the gold untouched.
+    if os.path.isdir(out_dir):
+        shutil.rmtree(out_dir)
+    os.makedirs(out_dir)
     browser_session = session_type(namespace.build_root)
-    # A single shot run takes its shot alone, checking and timing nothing.
-    if namespace.shot:
-        with browser_session:
-            shooter.browser_session = browser_session
-            written = shooter.shoot_all(namespace.prefix)
-            written += shooter.index_shoot(
-                namespace.prefix, index_path, namespace.index_hash
-            )
-        if namespace.verbose:
-            verbose_print(namespace.verbose, [f"{written} screenshot(s)"])
-        if namespace.compare_gold:
-            shooter.gold_compare(gold_dir, namespace.prefix, namespace.verbose)
-        return 0
-
     timing_rows: list[TimingRow] = []
     report_timings: list[dict[str, str]] = []
+    written = 0
     with browser_session:
-        shooter.browser_session = browser_session
-        shooter.test_views_check()
-        written = shooter.shoot_all(namespace.prefix)
-        shooter.clicks_time()
-        shooter.logo_links_check()
-        if browser_session.traces_pages:
-            timing_rows = shooter.timing_rows()
-            with open(
-                os.path.join(
-                    perf2html_dir, "scripts", test_settings.INDEX_TEMPLATE_NAME
+        for report_name, shooter in shooters:
+            shooter.browser_session = browser_session
+            if namespace.verbose:
+                verbose_print(
+                    namespace.verbose,
+                    [f"{os.path.basename(shooter.report)} -> {out_dir}"],
                 )
-            ) as template_file:
-                index_template = template_file.read()
-            report_timings = shooter.index_write(
-                namespace.prefix, index_path, index_template, timing_rows
+            # A single shot run takes its shot alone, checking and timing none.
+            if namespace.shot:
+                written += shooter.shoot_all(report_name)
+                written += shooter.index_shoot(
+                    report_name, index_path, namespace.index_hash
+                )
+                continue
+            shooter.test_views_check()
+            written += shooter.shoot_all(report_name)
+            shooter.clicks_time()
+            shooter.logo_link_check()
+            if browser_session.traces_pages:
+                report_timing_rows = shooter.timing_rows()
+                timing_rows += report_timing_rows
+                report_timings = shooter.index_write(
+                    report_name, index_path, index_template, report_timing_rows
+                )
+            written += shooter.index_shoot(
+                report_name, index_path, namespace.index_hash
             )
-        written += shooter.index_shoot(
-            namespace.prefix, index_path, namespace.index_hash
-        )
     if namespace.verbose:
         verbose_print(namespace.verbose, [f"{written} screenshot(s)"])
-    if namespace.compare_gold:
-        shooter.gold_compare(gold_dir, namespace.prefix, namespace.verbose)
-    if not browser_session.traces_pages:
-        return 0
-    if namespace.verbose:
-        verbose_print(
-            namespace.verbose,
-            [timing_row.verbose_line() for timing_row in timing_rows],
+    if gold_dir:
+        same_lines: list[str] = []
+        for report_name, shooter in shooters:
+            difference_line = shooter.gold_difference(
+                report_name, gold_dir, compare_rule, same_lines
+            )
+            if difference_line:
+                print(difference_line, file=sys.stderr)
+                return 1
+        if namespace.verbose:
+            verbose_print(namespace.verbose, same_lines)
+    if browser_session.traces_pages and not namespace.shot:
+        if namespace.verbose:
+            verbose_print(
+                namespace.verbose,
+                [timing_row.verbose_line() for timing_row in timing_rows],
+            )
+        timing_exit_code = shooters[-1][1].timing_file_write(
+            os.path.join(out_dir, test_settings.TIMING_FILE_NAME),
+            report_timings,
+            timing_rows,
         )
-    return shooter.timing_file_write(
-        os.path.join(out_dir, test_settings.TIMING_FILE_NAME),
-        report_timings,
-        timing_rows,
-    )
+        if timing_exit_code:
+            return timing_exit_code
+    if is_gold_made:
+        os.rename(out_dir, own_gold_dir)
+        if namespace.verbose:
+            verbose_print(namespace.verbose, [f"{out_dir} -> {own_gold_dir}"])
+    return 0
 
 
 # Prints success lines, below the raw level as one Markdown text block.

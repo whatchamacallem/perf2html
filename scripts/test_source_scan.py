@@ -346,8 +346,8 @@ class SourceScan:
                             path,
                             line_number,
                             f"uses {match.group()!r} without the line before"
-                            f" it holding the older form {floor_browser}"
-                            f" reads: {line.strip()}",
+                            f" it holding the older form or presence test"
+                            f" {floor_browser} needs: {line.strip()}",
                         )
                     )
 

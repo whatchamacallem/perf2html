@@ -8,10 +8,9 @@
 usage_show() {
   cat <<'EOF'
 test_all.sh [--help]
-    Runs test_expected_behavior.sh --keep-artifacts, measuring once, then
-    test_error_handling.sh, which regenerates from the recordings kept.
-    Shots differing from screenshots-gold/ are no failure: every test still
-    runs, then the exit is SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE.
+    Runs test_expected_behavior.sh --keep-artifacts, measuring once and
+    comparing every browser's shots with its gold, then
+    test_error_handling.sh, the fast check of the failure modes.
     --help is the only argument.
 EOF
 }

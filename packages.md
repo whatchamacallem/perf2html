@@ -32,6 +32,9 @@ npx --yes @puppeteer/browsers install firefox@stable_160.0.1 \
 mkdir -p ~/.local/share/seamonkey-for-testing/2.53.24
 curl -L https://archive.seamonkey-project.org/releases/2.53.24/linux-x86_64/en-US/seamonkey-2.53.24.en-US.linux-x86_64.tar.bz2 \
   | tar -xj -C ~/.local/share/seamonkey-for-testing/2.53.24
+sudo npx playwright install-deps 
+PLAYWRIGHT_BROWSERS_PATH=~/.local/share/webkit-for-testing \
+  npx --yes playwright@1.65.1 install webkit
 ```
 
 Chrome's libraries, after the browser install above:
@@ -63,4 +66,15 @@ sudo apt-get install -y libatk1.0-0t64 libc6 libcairo-gobject2 libcairo2 \
   libpangocairo-1.0-0 libpangoft2-1.0-0 libstdc++6 libx11-6 libx11-xcb1 \
   libxcb-shm0 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 \
   libxfixes3 libxi6 libxrender1 libxt6t64
+```
+
+WebKit's libraries, the packages Playwright 1.65.1's own host check names for
+the libraries its WebKit build lacks, no font package among them:
+
+```sh
+sudo apt-get install -y gstreamer1.0-libav libavif16 libenchant-2-2 \
+  libevent-2.1-7t64 libgles2 libgraphene-1.0-0 libgstreamer-gl1.0-0 \
+  libgstreamer-plugins-bad1.0-0 libgstreamer-plugins-base1.0-0 \
+  libgstreamer1.0-0 libgtk-4-1 libharfbuzz-icu0 libhyphen0 libmanette-0.2-0 \
+  libopus0 libsecret-1-0 libsoup-3.0-0 libwayland-server0
 ```

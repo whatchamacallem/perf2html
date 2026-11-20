@@ -26,6 +26,14 @@
       #strip- input,
       #strip- button {
         font: inherit;
+        color: inherit;
+        background: inherit;
+        border: 1px solid;
+      }
+      /* The width list drops the native box, which WebKit draws light. */
+      #strip- select {
+        -moz-appearance: none;
+        appearance: none;
       }
       #strip- form {
         display: inline;

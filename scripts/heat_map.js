@@ -110,6 +110,17 @@ window.try_catch_handler_(function () {
     "aria-label",
     window.ui_strings_.text("str_heat_map_tree_label"),
   );
+  let tree_scrollbar_width_px = 0;
+  // Widens the tree by its own scrollbar, which the tree's box then cuts off.
+  new ResizeObserver(
+    window.try_catch_handler_(() => {
+      const scrollbar_width_px =
+        tree_panel.offsetWidth - tree_panel.clientWidth;
+      if (scrollbar_width_px === tree_scrollbar_width_px) return;
+      tree_scrollbar_width_px = scrollbar_width_px;
+      tree_panel.style.marginRight = -scrollbar_width_px + "px";
+    }),
+  ).observe(tree_panel);
   main_panel.setAttribute(
     "aria-label",
     window.ui_strings_.text("str_heat_map_main_label"),
@@ -1475,11 +1486,20 @@ window.try_catch_handler_(function () {
     file_box_resize_observer.disconnect();
     file_box_resize_observer.observe(file_box_row());
   }
-  // Widens the source column by what a box outgrows the titles, every chunk.
+  // Keeps each box's chunk drawn and widens the source for the widest box.
   function box_rooms_fit() {
     const table_element = main_panel.querySelector(
       "table.heat-map-source-table-",
     );
+    const box_rows = table_element.querySelectorAll(
+      ":scope > tbody > tr.heat-map-source-line-detail-row-," +
+        " :scope > tbody > tr.heat-map-source-file-information-row-",
+    );
+    // A skipped chunk is its lines' height, so a box keeps its chunk drawn.
+    for (const table_body of table_element.tBodies)
+      table_body.classList.remove("holds-box-");
+    for (const box_row of box_rows)
+      box_row.parentElement.classList.add("holds-box-");
     // The sizer rows hold the room, so a change restyles them alone.
     const sizer_rows = table_element.querySelectorAll(
       ":scope > thead > tr.table-sizer-row-:not(.table-title-copy-)," +
@@ -1506,10 +1526,7 @@ window.try_catch_handler_(function () {
         TABLE_COLUMN_SOURCE_NAME,
     );
     let room_px = 0;
-    for (const box_row of table_element.querySelectorAll(
-      ":scope > tbody > tr.heat-map-source-line-detail-row-," +
-        " :scope > tbody > tr.heat-map-source-file-information-row-",
-    )) {
+    for (const box_row of box_rows) {
       const outgrown_px =
         design_rect(box_row).width - design_rect(title_row).width;
       if (outgrown_px > 0)

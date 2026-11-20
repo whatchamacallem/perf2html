@@ -37,6 +37,13 @@ html {
   -moz-user-select: none;
   user-select: none;
 }
+/* The text a copy selects while it runs, out of the page's flow. */
+.copied-text- {
+  position: fixed;
+  white-space: pre;
+  -moz-user-select: text;
+  user-select: text;
+}
 body {
   font-family: var(--page-font-family-);
   font-size: calc(var(--design-font-size-px-) * var(--design-font-fit-));
@@ -205,6 +212,14 @@ pre {
   grid-template-rows: minmax(0, 1fr);
   height: calc(var(--heat-map-main-height-) - 100%);
 }
+/* The tree's box, cutting off the scrollbar of a browser drawing one. */
+.heat-map-tree-clip-box- {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  overflow: clip;
+}
 #heat-map-tree- {
   overflow-x: hidden;
   overflow-y: scroll;
@@ -257,9 +272,10 @@ pre {
 #menu- .menu-status-bar- {
   overflow: hidden;
 }
-/* A button: its pulldown hung from the box. */
+/* A button on its line's top, its pulldown hung from the box. */
 .menu-button- {
   position: relative;
+  vertical-align: top;
   padding: 0 var(--menu-button-padding-inline-);
   white-space: pre;
 }
@@ -366,18 +382,19 @@ table.table-chunked- > thead {
   top: 0;
   z-index: var(--page-table-title-z-index-);
 }
-/* A chunk out of view is skipped, its rows' lines its height until drawn. */
+/* A chunk out of view is skipped, its lines as high as they draw. */
 table.table-chunked- > tbody {
   display: block;
   content-visibility: auto;
-  contain-intrinsic-block-size: auto
-    calc(var(--table-chunk-rows-) * var(--page-line-height-));
+  contain-intrinsic-block-size: calc(
+    var(--table-chunk-rows-) * var(--table-chunk-line-height-)
+  );
   /* A line's glyphs and frame lines cross its edge, as in a plain table. */
   overflow-clip-margin: var(--page-line-height-);
 }
-/* A chunk waiting for its rows is its rows' lines high, drawing none. */
+/* A chunk waiting for its rows is as high as its lines draw, drawing none. */
 table.table-chunked- > tbody.table-chunk-deferred- {
-  height: calc(var(--table-chunk-rows-) * var(--page-line-height-));
+  height: calc(var(--table-chunk-rows-) * var(--table-chunk-line-height-));
 }
 /* A hovered row's frame draws over the chunks and cells it crosses. */
 table.table-::before {
@@ -386,6 +403,10 @@ table.table-::before {
 /* A sizer row widens each column as wide as every chunk's, drawn nowhere. */
 tr.table-sizer-row- {
   visibility: collapse;
+}
+/* Its boxes hide, not collapse, as Firefox drops a collapsed flex item. */
+tr.table-sizer-row- * {
+  visibility: hidden;
 }
 .table- .numeric- {
   text-align: right;
@@ -437,9 +458,9 @@ table.table-.row-hovered-::before,
 .page- a,
 .heat-map-source- a,
 .menu-button- {
-  display: inline-block;
+  display: inline-flex;
+  align-items: flex-end;
   height: var(--page-line-height-);
-  align-content: unsafe end;
 }
 /* The raw data link takes a column cell's side room around its name. */
 #overview-raw-data- > a {

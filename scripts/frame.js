@@ -13,22 +13,12 @@ window.try_catch_handler_(function () {
   );
   const REGULAR_REPORT_VIEW_KEYS = settings_("REGULAR_REPORT_VIEW_KEYS");
   const SCREENSHOT_MENU_KEY_NUMBER = settings_("SCREENSHOT_MENU_KEY_NUMBER");
-  const SETTINGS_DEBUG_ENABLED = settings_("SETTINGS_DEBUG_ENABLED");
-  const SETTINGS_DEBUG_HASH_KEY_NAME = settings_(
-    "SETTINGS_DEBUG_HASH_KEY_NAME",
-  );
-  const SETTINGS_DEBUG_QUERY_KEY_NAME = settings_(
-    "SETTINGS_DEBUG_QUERY_KEY_NAME",
-  );
-  const SETTINGS_DEBUG_QUERY_VALUES = settings_("SETTINGS_DEBUG_QUERY_VALUES");
-  const SETTINGS_VIEW_ENTRY = settings_("SETTINGS_VIEW_ENTRY");
   const VIEW_UNSUPPORTED_USER_AGENT_TOKENS = settings_(
     "VIEW_UNSUPPORTED_USER_AGENT_TOKENS",
   );
 
   const home_panel = window.report_ui_.home_panel;
   const loaded_hash = location.hash;
-  const loaded_address = window.report_ui_.address.of_hash(loaded_hash);
   const loaded_menu_entry_number = new URLSearchParams(location.search).get(
     SCREENSHOT_MENU_KEY_NUMBER,
   );
@@ -100,14 +90,6 @@ window.try_catch_handler_(function () {
         "str_error_hash_view_browser_unsupported",
         parsed_address.view,
       );
-    if (
-      parsed_address.setting !== null &&
-      !window.settings_names_().includes(parsed_address.setting)
-    )
-      window.throw_exception_(
-        "str_error_hash_setting_unknown",
-        parsed_address.setting,
-      );
   }
   // Drops the dark mode toggle query, applied once at load, as a user moves.
   function toggle_query_drop() {
@@ -115,35 +97,6 @@ window.try_catch_handler_(function () {
     if (!shown_url.searchParams.has(DARK_MODE_TOGGLE_QUERY_KEY_NAME)) return;
     shown_url.searchParams.delete(DARK_MODE_TOGGLE_QUERY_KEY_NAME);
     history.replaceState(history.state, "", shown_url.href);
-  }
-  // Loads the top page again under the debug query, off dropping the values.
-  function settings_debug_load(debug_enabled) {
-    toggle_query_drop();
-    const loaded_url = new URL(location.href);
-    loaded_url.searchParams.set(
-      SETTINGS_DEBUG_QUERY_KEY_NAME,
-      debug_enabled
-        ? SETTINGS_DEBUG_QUERY_VALUES.enabled
-        : SETTINGS_DEBUG_QUERY_VALUES.disabled,
-    );
-    if (!debug_enabled)
-      loaded_url.hash =
-        window.report_ui_.address.settings_cleared_hash(current_address);
-    location.replace(loaded_url.href);
-  }
-  // Clears any settings debug query and values, loading the top page again.
-  function settings_debug_clear() {
-    toggle_query_drop();
-    const cleared_url = new URL(location.href);
-    if (
-      !cleared_url.searchParams.has(SETTINGS_DEBUG_QUERY_KEY_NAME) &&
-      current_address[SETTINGS_DEBUG_HASH_KEY_NAME] === null
-    )
-      return;
-    cleared_url.searchParams.delete(SETTINGS_DEBUG_QUERY_KEY_NAME);
-    cleared_url.hash =
-      window.report_ui_.address.settings_cleared_hash(current_address);
-    location.replace(cleared_url.href);
   }
   // Loads a new view page into the frame, clearing the focused path it held.
   function view_page_load(shown_address) {
@@ -189,14 +142,6 @@ window.try_catch_handler_(function () {
     const shown_address = window.report_ui_.address.of_hash(location.hash);
     address_check(shown_address);
     current_address = shown_address;
-    // Installs the settings again when the hash changes those it applies.
-    if (
-      shown_address[SETTINGS_DEBUG_HASH_KEY_NAME] !==
-      loaded_address[SETTINGS_DEBUG_HASH_KEY_NAME]
-    ) {
-      location.reload();
-      return;
-    }
     if (shown_address.view !== null) view_page_load(shown_address);
     window.report_menu_.address_show();
     if (shown_address.view === null) {
@@ -233,21 +178,6 @@ window.try_catch_handler_(function () {
     }
     view_show();
     if (current_address.view !== null) view_post("recenter");
-  }
-  // Requests the settings view, the setting's new value among those applied.
-  function settings_apply(setting_name, setting_value) {
-    window.settings_(setting_name);
-    const applied_values = window.settings_applied_values_();
-    applied_values[setting_name] = setting_value;
-    address_request(
-      window.report_ui_.address.hash({
-        test: current_address.test,
-        view: SETTINGS_VIEW_ENTRY[0],
-        setting: setting_name,
-        [SETTINGS_DEBUG_HASH_KEY_NAME]:
-          window.settings_applied_text_(applied_values),
-      }),
-    );
   }
   // Posts a message down carrying the dark mode, status and preferences.
   function view_post(message_name, message_fields = {}) {
@@ -325,10 +255,6 @@ window.try_catch_handler_(function () {
       window.report_ui_.page_scroll.offset_set(
         message_data.page_scroll_offset,
       );
-    else if (message_tag === "settings_apply")
-      settings_apply(message_data.setting_name, message_data.setting_value);
-    else if (message_tag === "settings_debug_toggle")
-      settings_debug_load(!SETTINGS_DEBUG_ENABLED);
     else if (message_tag === "view_mode_link_set")
       view_mode_link_set(message_data.view_mode_link);
     else if (
@@ -361,7 +287,6 @@ window.try_catch_handler_(function () {
     focused_path_now,
     function_location_now,
     menu_entry_number_now,
-    settings_debug_clear,
     test_names,
     view_browser_runs,
     view_has_page,

@@ -35,8 +35,8 @@
   function error_text_of_(thrown_value) {
     if (!(thrown_value instanceof Error)) return String(thrown_value);
     const error_line = String(thrown_value);
-    // Gecko writes an empty stack for a script it could not parse.
-    const stack_text = thrown_value.stack || error_line;
+    // Gecko gives no stack for an unparsed script, a newline ending any other.
+    const stack_text = (thrown_value.stack || error_line).replace(/\n$/, "");
     // Gecko writes a stack without the line naming the error, as V8 begins.
     const error_text = stack_text.startsWith(error_line)
       ? stack_text

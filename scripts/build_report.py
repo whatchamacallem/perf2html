@@ -17,7 +17,6 @@ _ASSET_DEBUG_SCRIPT_NAME: str = ""
 _ASSET_TEMPLATE_CALL_GRAPH_PAGE_NAME: str = ""
 _ASSET_TEMPLATE_DATABASE_PAGE_NAME: str = ""
 _ASSET_TEMPLATE_OVERVIEW_PAGE_NAME: str = ""
-_ASSET_TEMPLATE_SETTINGS_PAGE_NAME: str = ""
 _CALL_GRAPH_DOWNLOAD_FILE_NAME_SUFFIX: str = ""
 _CALL_GRAPH_PAGE_DIR_NAME: str = ""
 _DATABASE_DOWNLOAD_FILE_NAME_SUFFIX: str = ""
@@ -34,7 +33,6 @@ _RANKING_COUNTER_NAME: str = ""
 _README_HTML_NAME: str = ""
 _REPORT_SCRIPTS_DIR_NAME: str = ""
 _SETTINGS_HELD_SCRIPT_TEMPLATE_ID: str = ""
-_SETTINGS_VIEW_ENTRY: tuple[str, str] = ("", "")
 settings.load_into(__name__)
 
 _CALL_GRAPH_PAGE = theme.asset_text_read(_ASSET_TEMPLATE_CALL_GRAPH_PAGE_NAME)
@@ -46,8 +44,6 @@ _DEBUG_SCRIPT = theme.asset_text_read(_ASSET_DEBUG_SCRIPT_NAME)
 _FLAME_GRAPH_VIEW_KEY = _FLAME_GRAPH_VIEW_ENTRY[0]
 
 _HEAT_MAP_VIEW_KEY = _HEAT_MAP_VIEW_ENTRY[0]
-
-_SETTINGS_PAGE = theme.asset_text_read(_ASSET_TEMPLATE_SETTINGS_PAGE_NAME)
 
 _OVERVIEW_PAGE_SCRIPTS_DEPTH = 0
 
@@ -925,20 +921,6 @@ class BuildReport:
             os.path.join(report_dir, _REPORT_SCRIPTS_DIR_NAME)
         )
 
-    # Writes the settings view, the settings relayed to it.
-    def settings_page(self, report_dir: str) -> None:
-        self.page_write(
-            os.path.join(report_dir, _SETTINGS_VIEW_ENTRY[1]),
-            theme.template_fill(
-                _SETTINGS_PAGE,
-                {
-                    "__HELD_SCRIPT_TEMPLATE_ID__": theme.render_html_escape(
-                        _SETTINGS_HELD_SCRIPT_TEMPLATE_ID
-                    )
-                },
-            ),
-        )
-
     # Writes the rows a page script draws as the table the key names.
     def table_data_render(
         self,
@@ -1023,12 +1005,6 @@ def main() -> None:
         " first under its label, the checksum left out",
     )
 
-    settings_parser = subparsers.add_parser(
-        "settings",
-        help="the settings view, editing the settings while settings"
-        " debugging is enabled",
-    )
-
     overview_parser = subparsers.add_parser(
         "overview", help="the page over several tests"
     )
@@ -1045,7 +1021,6 @@ def main() -> None:
         database_parser,
         scripts_parser,
         debug_parser,
-        settings_parser,
         overview_parser,
     ):
         report_parser.add_argument(
@@ -1080,8 +1055,6 @@ def main() -> None:
         report.scripts_write(namespace.report)
     elif namespace.cmd == "debug":
         report.debug_script_write(namespace.report, namespace.manifest_line)
-    elif namespace.cmd == "settings":
-        report.settings_page(namespace.report)
     elif namespace.cmd == "call-graph":
         report.call_graph(
             BuildReport.CallGraphArgs(

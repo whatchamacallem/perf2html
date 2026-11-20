@@ -8,13 +8,9 @@
 usage_show() {
   cat <<'EOF'
 test_error_handling.sh [--help]
-    Runs test_expected_behavior.sh --regenerate --keep-artifacts --verbose
-    into test_verbose.md from the recordings a measuring run kept, checks
-    that a perf2html_batch.sh --regenerate run leaves them unchanged, runs
-    the failure-mode testcases on copies of its reports, then prettier
-    --check over that markdown. Shots differing from screenshots-gold/ are
-    no failure: every test still runs, then a note and an exit with
-    SCREENSHOT_GOLD_DIFFERENCE_EXIT_CODE from settings.sh.
+    Runs the failure-mode testcases on copies of the reports and of the
+    recordings a measuring run kept, each expecting its exit code, and
+    takes no screenshot.
     --help is the only argument.
 EOF
 }

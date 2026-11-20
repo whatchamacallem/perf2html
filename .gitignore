@@ -8,11 +8,5 @@ perf2html_modified_report/
 perf2html_modified_report.txz
 perf2html_temporary_artifacts/
 screenshots/
-screenshots-diff/
-screenshots-diff-firefox/
-screenshots-diff-seamonkey/
-screenshots-firefox/
-screenshots-gold/
-screenshots-seamonkey/
 tmp/
 test_index.html

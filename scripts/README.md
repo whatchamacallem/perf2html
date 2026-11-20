@@ -52,8 +52,6 @@ report generators. Start by running the tests and checking the results.
 
 - `dark-mode`: Query key of a view frame's address, `1` or `0`, that the top
   page writes so the view opens in the dark mode it shows.
-- `debug`: Query key, value `1`, that unfreezes the settings so the settings
-  view can apply a setting, and points the menu logo at the settings view.
 - `file`: Hash key, heat map view only, that names the source file to open.
 - `function`: Hash key, heat map view only, that names the function to open and
   excludes `file` and `line`.
@@ -65,14 +63,11 @@ report generators. Start by running the tests and checking the results.
 - `screenshot=1`: Shows the page address in a corner label, without the  
   two screenshot keys.
 - `screenshot-menu`: Query key, focuses that number menu button.
-- `setting`: Hash key, settings view only, that focuses a setting.
-- `setting-values`: Hash key that carries the base64 JSON object of the setting
-  values to apply, writing `debug` into the top page's address in place.
 - `test`: Hash key that names the test shown, absent when no test is selected.
 - `toggle-dark`: Query key, `0` or `1`, that resets the browser preferences as
   the top page loads, `1` then toggling the dark mode as the dark button does.
-- `view`: Hash key, one of `call-graph`, `database`, `heat-map`, `flame-graph`
-  or `settings`.
+- `view`: Hash key, one of `call-graph`, `database`, `heat-map` or
+  `flame-graph`.
 
 ## Browser Preferences
 
@@ -129,7 +124,6 @@ in the directory. A diff report lacks the `call-graph/`, `flame-graph/`,
 - `README.html`: The user contract as HTML, built by `cmark-gfm`.
 - `README.md`: The user contract as Markdown.
 - `scripts/source_database.js`: The report's files and functions, no counter.
-- `settings/index.html`: The settings view page.
 - `sources/<path>.js`: A source file's text, the path's non-alphanumerics `_`.
 - `timer-artifacts-<time_t>.txz`: The raw data archive, recorded at `<time_t>`.
 
@@ -393,17 +387,15 @@ A diff report's run keeps these.
 
 ## Settings Files
 
-| File                 | Purpose                                              |
-| -------------------- | ---------------------------------------------------- |
-| `settings.js`        | Written from Python.                                 |
-| `settings.py`        | Holds every PY and JS setting with the reader and    |
-|                      | writer that load and ship them.                      |
-| `settings.sh`        | Holds every shell setting, read by the shell scripts |
-|                      | and by `settings.py`.                                |
-| `settings_page.html` | Templates the settings view                          |
-| `settings_page.js`   | Draws every setting in an editable JSON box.         |
-| `ui_strings.js`      | Holds every user interface string, looked up by      |
-|                      | name.                                                |
+| File            | Purpose                                              |
+| --------------- | ---------------------------------------------------- |
+| `settings.js`   | Written from Python.                                 |
+| `settings.py`   | Holds every PY and JS setting with the reader and    |
+|                 | writer that load and ship them.                      |
+| `settings.sh`   | Holds every shell setting, read by the shell scripts |
+|                 | and by `settings.py`.                                |
+| `ui_strings.js` | Holds every user interface string, looked up by      |
+|                 | name.                                                |
 
 ## Test Harness
 
@@ -413,13 +405,14 @@ A diff report's run keeps these.
 |                             | artifacts, then `test_error_handling.sh`.    |
 | `test_error_handling.sh`    | Checks the exit code of each failure mode.   |
 | `test_expected_behavior.sh` | Formats, lints and scans the sources, runs   |
-|                             | the batch, checks the reports, then takes    |
-|                             | screenshots.                                 |
+|                             | the batch, checks the reports, then runs     |
+|                             | `test_screenshot.py` in each browser.        |
 | `test_report.py`            | Checks the pages, manifest, checksum, heat   |
 |                             | map, flame graph and timer artifacts.        |
 | `test_screenshot.py`        | Shoots, clicks and times the golden links    |
-|                             | for Chrome, Firefox or SeaMonkey, and        |
-|                             | compares the shots with Chrome's gold ones.  |
+|                             | for Chrome, Firefox, SeaMonkey or WebKit,    |
+|                             | then compares the shots with that browser's  |
+|                             | gold, or makes the gold.                     |
 | `test_settings.py`          | Holds the golden values the test scripts     |
 |                             | compare the reports and sources against.     |
 | `test_source_scan.py`       | Faults long comment blocks, comment          |

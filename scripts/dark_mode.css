@@ -248,8 +248,3 @@
   background: var(--dark-mode-screenshot-bg-);
   color: var(--dark-mode-screenshot-fg-);
 }
-
-:root:not([data-dark-mode-="disabled"]) .settings-value-box- {
-  background: var(--dark-mode-page-bg-);
-  color: var(--dark-mode-page-fg-);
-}

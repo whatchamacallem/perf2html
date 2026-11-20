@@ -7,10 +7,6 @@ window.try_catch_handler_(function () {
 
   const is_framed = window.is_framed_;
   const written_object = __DATA__;
-  let applied_values = {};
-  // Holds the settings a page opens under, before a framed page's relay.
-  let opening_object = written_object;
-  let preferences_are_ignored = false;
   let settings_object = null;
   let storage_is_checked = false;
 
@@ -66,163 +62,8 @@ window.try_catch_handler_(function () {
       document.documentElement.style.setProperty(name, value);
     palette_values_write(settings_object);
   }
-  // Returns whether settings debugging is on, the top page's query deciding.
-  function settings_debug_enabled(written_object) {
-    const query_values = written_object.SETTINGS_DEBUG_QUERY_VALUES;
-    const query_value = new URLSearchParams(location.search).get(
-      written_object.SETTINGS_DEBUG_QUERY_KEY_NAME,
-    );
-    if (query_value === null) return written_object.SETTINGS_DEBUG_ENABLED;
-    if (
-      query_value !== query_values.enabled &&
-      query_value !== query_values.disabled
-    )
-      window.throw_exception_(
-        "str_error_settings_debug_query_unusable",
-        written_object.SETTINGS_DEBUG_QUERY_KEY_NAME,
-        query_value,
-        query_values.disabled,
-        query_values.enabled,
-      );
-    return query_value === query_values.enabled;
-  }
-  // Turns the debug query on in place when the top hash applies settings.
-  function settings_debug_query_enable(written_object) {
-    if (
-      settings_applied_part(written_object) === undefined ||
-      settings_debug_enabled(written_object)
-    )
-      return;
-    const debug_url = new URL(location.href);
-    debug_url.searchParams.set(
-      written_object.SETTINGS_DEBUG_QUERY_KEY_NAME,
-      written_object.SETTINGS_DEBUG_QUERY_VALUES.enabled,
-    );
-    history.replaceState(history.state, "", debug_url.href);
-  }
-  // Returns the hash part applying settings, undefined for none.
-  function settings_applied_part(settings_values) {
-    const key_prefix =
-      setting_read(settings_values, "SETTINGS_DEBUG_HASH_KEY_NAME") + "=";
-    return location.hash
-      .slice(1)
-      .split("&")
-      .find((hash_part) => hash_part.startsWith(key_prefix));
-  }
-  // Returns the base64 digits, their padding and a digit's and a byte's bits.
-  function base64_notation(settings_values) {
-    const digits = setting_read(
-      settings_values,
-      "SETTINGS_DEBUG_HASH_BASE64_DIGITS",
-    );
-    return {
-      byte_bits: setting_read(
-        settings_values,
-        "SETTINGS_DEBUG_HASH_BYTE_BITS",
-      ),
-      digit_bits: Math.log2(digits.length),
-      digits,
-      padding: setting_read(
-        settings_values,
-        "SETTINGS_DEBUG_HASH_BASE64_PADDING",
-      ),
-    };
-  }
-  // Returns the bytes of base64 text, a part holding a stray digit refused.
-  function base64_bytes_decode(settings_values, applied_part, base64_text) {
-    const { byte_bits, digit_bits, digits, padding } =
-      base64_notation(settings_values);
-    let digit_count = base64_text.length;
-    while (digit_count && base64_text[digit_count - 1] === padding)
-      digit_count--;
-    const bytes = [];
-    let bit_buffer = 0;
-    let bit_count = 0;
-    for (const digit of base64_text.slice(0, digit_count)) {
-      const digit_value = digits.indexOf(digit);
-      if (digit_value < 0)
-        window.throw_exception_(
-          "str_error_settings_values_unusable",
-          applied_part,
-        );
-      bit_buffer = (bit_buffer << digit_bits) | digit_value;
-      bit_count += digit_bits;
-      if (bit_count >= byte_bits) {
-        bit_count -= byte_bits;
-        bytes.push(bit_buffer >> bit_count);
-        bit_buffer &= (1 << bit_count) - 1;
-      }
-    }
-    if (bit_count >= digit_bits)
-      window.throw_exception_(
-        "str_error_settings_values_unusable",
-        applied_part,
-      );
-    return new Uint8Array(bytes);
-  }
-  // Returns the base64 text of bytes, padded to a whole number of bytes.
-  function base64_text_encode(settings_values, bytes) {
-    const { byte_bits, digit_bits, digits, padding } =
-      base64_notation(settings_values);
-    let base64_text = "";
-    let bit_buffer = 0;
-    let bit_count = 0;
-    for (const byte of bytes) {
-      bit_buffer = (bit_buffer << byte_bits) | byte;
-      bit_count += byte_bits;
-      while (bit_count >= digit_bits) {
-        bit_count -= digit_bits;
-        base64_text += digits[bit_buffer >> bit_count];
-        bit_buffer &= (1 << bit_count) - 1;
-      }
-    }
-    if (bit_count)
-      base64_text += digits[bit_buffer << (digit_bits - bit_count)];
-    while ((base64_text.length * digit_bits) % byte_bits)
-      base64_text += padding;
-    return base64_text;
-  }
-  // Returns the settings the top hash applies, an empty object for none.
-  function settings_applied_values(written_object) {
-    const applied_part = settings_applied_part(written_object);
-    if (applied_part === undefined) return {};
-    const hash_values = JSON.parse(
-      new TextDecoder(undefined, { fatal: true }).decode(
-        base64_bytes_decode(
-          written_object,
-          applied_part,
-          decodeURIComponent(
-            applied_part.slice(applied_part.indexOf("=") + 1),
-          ),
-        ),
-      ),
-    );
-    if (
-      hash_values === null ||
-      typeof hash_values !== "object" ||
-      Array.isArray(hash_values)
-    )
-      window.throw_exception_(
-        "str_error_settings_values_unusable",
-        applied_part,
-      );
-    for (const setting_name of Object.keys(hash_values)) {
-      if (!Object.hasOwn(written_object, setting_name))
-        window.throw_exception_("str_error_setting_unknown", setting_name);
-    }
-    return hash_values;
-  }
-  // Installs the window settings object, under debug with the hash's applied.
+  // Installs the window settings object.
   function settings_install(written_object) {
-    if (!is_framed) {
-      settings_debug_query_enable(written_object);
-      const debug_enabled = settings_debug_enabled(written_object);
-      if (debug_enabled) {
-        applied_values = settings_applied_values(written_object);
-        Object.assign(written_object, applied_values);
-      }
-      written_object.SETTINGS_DEBUG_ENABLED = debug_enabled;
-    }
     settings_object = deep_freeze(written_object);
     root_values_write();
   }
@@ -232,21 +73,7 @@ window.try_catch_handler_(function () {
   }
   // Reads one setting the page opens under, a framed page's before its relay.
   function settings_opening_(setting_name) {
-    return setting_read(opening_object, setting_name);
-  }
-  function settings_names_() {
-    return Object.keys(settings_object);
-  }
-  // Returns the hash text applying the settings given.
-  function settings_applied_text_(hash_values) {
-    return base64_text_encode(
-      settings_object,
-      new TextEncoder().encode(JSON.stringify(hash_values)),
-    );
-  }
-  // Returns a copy of the settings the top page's hash applied.
-  function settings_applied_values_() {
-    return { ...applied_values };
+    return setting_read(written_object, setting_name);
   }
   // Loads the scripts a framed page holds, in order, under its settings.
   function held_scripts_load() {
@@ -269,12 +96,12 @@ window.try_catch_handler_(function () {
     if (
       payload &&
       payload.report_ui ===
-        setting_read(opening_object, "SETTINGS_REQUEST_MESSAGE_NAME")
+        setting_read(written_object, "SETTINGS_REQUEST_MESSAGE_NAME")
     )
       browser_event.source.postMessage(
         {
           report_ui: setting_read(
-            opening_object,
+            written_object,
             "SETTINGS_RELAY_MESSAGE_NAME",
           ),
           settings_object,
@@ -289,7 +116,7 @@ window.try_catch_handler_(function () {
       browser_event.source !== window.parent ||
       !payload ||
       payload.report_ui !==
-        setting_read(opening_object, "SETTINGS_RELAY_MESSAGE_NAME")
+        setting_read(written_object, "SETTINGS_RELAY_MESSAGE_NAME")
     )
       return;
     settings_install(payload.settings_object);
@@ -317,12 +144,6 @@ window.try_catch_handler_(function () {
     const owned_keys = setting_read(settings_values, "STORAGE_OWNED_KEYS");
     const storage_version = setting_read(settings_values, "STORAGE_VERSION");
     const version_key = setting_read(settings_values, "STORAGE_VERSION_KEY");
-    preferences_are_ignored =
-      settings_applied_part(settings_values) !== undefined;
-    if (preferences_are_ignored) {
-      storage_sweep(owned_keys);
-      return;
-    }
     if (localStorage.getItem(version_key) === storage_version) {
       return;
     }
@@ -338,10 +159,9 @@ window.try_catch_handler_(function () {
       stored_text,
     );
   }
-  // Reads a stored preference, null for none or under ignored preferences.
+  // Reads a stored preference, null for none.
   function stored_value_read(settings_values, storage_key) {
     storage_version_check(settings_values);
-    if (preferences_are_ignored) return null;
     const stored_text = localStorage.getItem(storage_key);
     try {
       return JSON.parse(stored_text);
@@ -368,7 +188,6 @@ window.try_catch_handler_(function () {
     },
     value_write(storage_key, stored_value) {
       storage_version_check(settings_object);
-      if (preferences_are_ignored) return;
       localStorage.setItem(storage_key, JSON.stringify(stored_value));
     },
   };
@@ -463,21 +282,13 @@ window.try_catch_handler_(function () {
   };
   window.report_view_storage_ = view_storage;
   window.settings_ = settings_;
-  window.settings_applied_text_ = settings_applied_text_;
-  window.settings_applied_values_ = settings_applied_values_;
-  window.settings_names_ = settings_names_;
   window.settings_opening_ = settings_opening_;
   window.addEventListener(
     "message",
     window.try_catch_handler_(settings_request_handler),
   );
   if (is_framed) {
-    // Fills under the written settings and those the address applies.
-    opening_object = {
-      ...written_object,
-      ...settings_applied_values(written_object),
-    };
-    page_early_fill(opening_object);
+    page_early_fill(written_object);
     window.addEventListener(
       "message",
       window.try_catch_handler_(settings_relay_handler),
@@ -485,7 +296,7 @@ window.try_catch_handler_(function () {
     window.parent.postMessage(
       {
         report_ui: setting_read(
-          opening_object,
+          written_object,
           "SETTINGS_REQUEST_MESSAGE_NAME",
         ),
       },

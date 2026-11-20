@@ -170,6 +170,8 @@ CLICK_SEAMONKEY_KEY_EVENTS: dict[str, tuple[dict[str, Any], ...]] = {
     ),
 }
 CLICK_VIEW_FRAME_NAME = "view"
+# Holds WebKit's bit of each DevTools modifier bit: Alt, Control, Meta, Shift.
+CLICK_WEBKIT_MODIFIER_BITS: dict[int, int] = {1: 4, 2: 2, 4: 8, 8: 1}
 # Bounds the presses of one walk, so a walk reaching nothing fails.
 CLICK_WALK_PRESS_LIMIT = 60
 # Returns whether the focus, or an open pulldown's light, is on a match.
@@ -183,13 +185,10 @@ CLICK_WALK_REACHED_FUNCTION = (
 COMMENT_BLOCK_MAX_LINES = 1
 COMMENT_FIRST_WORD_REPLACEMENTS = {"Answers": "Returns"}
 
-# Compares a Chrome shot with its gold twin pixel by pixel.
+# Compares a shot with its own browser's gold twin pixel by pixel.
 COMPARE_EXACT_CHANNEL_CHANGE = 0
 COMPARE_EXACT_SQUARE_PX = 1
-COMPARE_HIGHLIGHT_COLOR = (255, 0, 255)
-COMPARE_IMAGE_PREFIX = "compare_"
-COMPARE_KEPT_BRIGHTNESS_SHARE = 0.25
-# Compares another browser's shot with Chrome's gold, font smoothing passing.
+# Compares with another browser's gold, or WebKit's own, smoothing passing.
 COMPARE_VAGUE_CHANNEL_CHANGE = 48
 COMPARE_VAGUE_SQUARE_PX = 16
 
@@ -278,11 +277,6 @@ MENU_LOGO_REPOSITORY_LINK = (
     'href="https://github.com/whatchamacallem/perf2html" target="_blank"'
     ' tabindex="-1"'
 )
-MENU_LOGO_LINKS: dict[str, str] = {
-    "": MENU_LOGO_REPOSITORY_LINK,
-    "?debug=0": MENU_LOGO_REPOSITORY_LINK,
-    "?debug=1": 'href="#view=settings" tabindex="-1"',
-}
 
 # Pages checked for an error report load in this many tabs at once.
 PAGE_CHECK_TABS_AT_ONCE = 16
@@ -323,6 +317,8 @@ SCREENSHOT_BROWSER_PATH = os.path.expanduser(
     "~/.local/share/chrome-for-testing/chrome/linux-157.0.8103.78"
     "/chrome-linux64/chrome"
 )
+SCREENSHOT_CHROME_DIR_NAME = "chrome"
+# Holds each browser's shot dir and its gold, named from the project root.
 SCREENSHOT_DIR_NAME = "screenshots"
 # Starts the X server Firefox and SeaMonkey draw through, WebGL with it.
 SCREENSHOT_DISPLAY_SERVER_ARGUMENTS: tuple[str, ...] = (
@@ -333,7 +329,7 @@ SCREENSHOT_DISPLAY_SERVER_ARGUMENTS: tuple[str, ...] = (
     "tcp",
 )
 SCREENSHOT_DISPLAY_SERVER_NAME = "Xvfb"
-SCREENSHOT_FIREFOX_DIR_NAME = "screenshots-firefox"
+SCREENSHOT_FIREFOX_DIR_NAME = "firefox"
 # Holds the address Firefox writes to stderr once it listens.
 SCREENSHOT_FIREFOX_LISTENING_PATTERN = re.compile(
     r"WebDriver BiDi listening on (ws://\S+)"
@@ -345,11 +341,13 @@ SCREENSHOT_FIREFOX_PATH = os.path.expanduser(
 )
 SCREENSHOT_FIREFOX_PROFILE_DIR_PATH = "build/screenshots_firefox_profile"
 SCREENSHOT_FIREFOX_SESSION_PATH = "/session"
+# Names a browser's gold dir from its shot dir's name.
+SCREENSHOT_GOLD_DIR_FORMAT = "{}-gold"
 SCREENSHOT_LABEL_URL_PARAM = "screenshot"
 SCREENSHOT_LABEL_URL_VALUE = "1"
 SCREENSHOT_MENU_URL_PARAM = "screenshot-menu"
 SCREENSHOT_SCRATCH_DIR_PATH = "build/screenshots_scratch"
-SCREENSHOT_SEAMONKEY_DIR_NAME = "screenshots-seamonkey"
+SCREENSHOT_SEAMONKEY_DIR_NAME = "seamonkey"
 # Installs the browser window script that drives each SeaMonkey tab.
 SCREENSHOT_SEAMONKEY_DRIVER_FUNCTION = """\
 (event_marker, binding_name, chunk_length) => {
@@ -662,18 +660,32 @@ SCREENSHOT_TOGGLE_DARK_URL_PARAM = "toggle-dark"
 # The modes the views take in turn, the default dark mode first.
 SCREENSHOT_TOGGLE_DARK_VALUES: tuple[str, ...] = ("0", "1")
 SCREENSHOT_VIEWPORTS: tuple[tuple[str, int, int], ...] = (("720p", 1280, 720),)
+# Starts WebKit headless, speaking over the pipe descriptors 3 and 4.
+SCREENSHOT_WEBKIT_ARGUMENTS: tuple[str, ...] = (
+    "--inspector-pipe",
+    "--headless",
+    "--no-startup-window",
+)
+SCREENSHOT_WEBKIT_DIR_NAME = "webkit"
+# WebKit's launcher where packages.md installs it in the home dir.
+SCREENSHOT_WEBKIT_PATH = os.path.expanduser(
+    "~/.local/share/webkit-for-testing/webkit-2388/pw_run.sh"
+)
 
 SHOOT_DIFF_REPORT = 1 << 0
 # Shoots the index page of the finished run at the last resolution, once.
 SHOOT_INDEX_PAGE = 1 << 3
-# Marks a view whose address makes light the default, so a toggle shows dark.
-SHOOT_LIGHT_DEFAULT = 1 << 6
 # Shoots 720p alone, not 4k too.
 SHOOT_ONE_VARIANT = 1 << 1
 SHOOT_REGULAR_REPORT = 1 << 2
+# Lists the reports a run shoots in turn: dir, shot name part, report flag.
+SHOOT_REPORTS: tuple[tuple[str, str, int], ...] = (
+    ("perf2html_modified_report", "modified", SHOOT_REGULAR_REPORT),
+    ("perf2html_diff_report", "diff", SHOOT_DIFF_REPORT),
+)
 # Times a page drawn in two frames by its draws, its first frame bound alone.
 SHOOT_TWO_FRAMES = 1 << 5
-# Leaves untimed the flame graph, a large test's heat map, settings.
+# Leaves untimed the flame graph and a large test's heat map.
 SHOOT_UNTIMED = 1 << 4
 # Lists the address parts of each view a test opens, by the report offering it.
 SHOOT_TEST_VIEW_PARTS: dict[int, tuple[str, ...]] = {
@@ -804,7 +816,7 @@ SOURCE_SCAN_SUPPORT_FLOOR_MISSING_PATTERNS = (
     r":not\([^()]*,",
     r"\banchor\(|anchor-(?:name|scope)|position-(?:anchor|try)",
     r"container-type|@container|\b[0-9.]+cq(?:[bhiw]|max|min)\b",
-    r"\.style\.zoom\b|(?<![\w-])zoom\s*:",
+    r"(?<![\w-])zoom\s*:",
     r"(?<![\w-])inset\s*:",
     r"(?<![\w-])(?:border|inset|margin|padding)-(?:block|inline)\s*:"
     r"|\b(?:border|inset|margin|padding)(?:Block|Inline)\b",
@@ -814,8 +826,9 @@ SOURCE_SCAN_SUPPORT_FLOOR_MISSING_PATTERNS = (
     r"animation-(?:range|timeline)",
     r"content-visibility\s*:\s*hidden",
 )
-# Each feature pattern the support floor lacks, then its older form's pattern.
+# Each lacked feature's pattern, then its older form's or presence test's.
 SOURCE_SCAN_SUPPORT_FLOOR_PAIRED_PATTERNS = {
+    r"\.style\.zoom\b": r"\"zoom\" in \w+\.style\b",
     r"(?<![\w-])(?:min-)?width\s*:\s*max-content": r"-moz-max-content",
     r"(?<![\w-])width\s*:\s*fit-content": r"-moz-fit-content",
     r"(?<![\w-])width\s*:\s*min-content": r"-moz-min-content",
@@ -1507,3 +1520,20 @@ WEB_SOCKET_SHORT_LENGTH_MARK = 126
 WEB_SOCKET_SWITCH_STATUS = "101"
 WEB_SOCKET_TEXT_OPCODE = 0x1
 WEB_SOCKET_VERSION = "13"
+
+# The binding a page's console error text reaches, naming its context.
+WEBKIT_CONSOLE_BINDING_NAME = "screenshot_console_error"
+# Hands each console error's text to the binding, then writes it as before.
+WEBKIT_CONSOLE_FORWARD_FUNCTION = (
+    "(binding_name) => { const console_error = console.error;"
+    " console.error = (...console_parts) => {"
+    " window[binding_name](console_parts.map(String).join(' '));"
+    " console_error.apply(console, console_parts); }; }"
+)
+WEBKIT_FRAME_ELEMENTS_EXPRESSION = "document.querySelectorAll('iframe')"
+# Groups the objects a WebKit command keeps, released once read.
+WEBKIT_OBJECT_GROUP_NAME = "screenshot_driver"
+# Reads a property of the object it is called on, a list's item or length.
+WEBKIT_PROPERTY_READ_FUNCTION = (
+    "function (property_key) { return this[property_key]; }"
+)
