@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+     SPDX-License-Identifier: MIT
+     This file is licensed under the terms of the LICENSE-MIT.md file. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <script src="../scripts/error_overlay.js"></script>
+    <script src="../scripts/settings.js"></script>
+    <script src="../scripts/utility.js"></script>
+    <script src="../scripts/ui_strings.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>maprintf</title>
+    <link rel="stylesheet" href="../scripts/theme.css" />
+    <link rel="stylesheet" href="../scripts/light_mode.css" />
+    <link rel="stylesheet" href="../scripts/dark_mode.css" />
+  </head>
+  <body class="view-">
+    <main id="call-graph-page-">
+      <div class="page-"><div class="page-heading-" data-download-file-name-="maprintf_call_graph.svg"></div><table id="call-graph-table-" data-model-="{&quot;functions&quot;:[[&quot;_IO_default_xsputn&quot;,954,true],[&quot;_IO_do_write@@GLIBC_2.2.5&quot;,115,true],[&quot;_IO_doallocbuf&quot;,373,true],[&quot;_IO_file_doallocate&quot;,611,true],[&quot;_IO_file_overflow@@GLIBC_2.2.5&quot;,820,true],[&quot;_IO_file_stat&quot;,113,true],[&quot;_IO_file_xsputn@@GLIBC_2.2.5&quot;,1156,true],[&quot;_IO_setb&quot;,129,true],[&quot;__glibc_morecore&quot;,240,true],[&quot;__libc_malloc2&quot;,399,true],[&quot;__memcpy_avx_unaligned_erms&quot;,13650,true],[&quot;__mempcpy_avx_unaligned_erms&quot;,373,true],[&quot;__strcmp_avx2&quot;,540,true],[&quot;__strlen_avx2&quot;,4310,true],[&quot;_dl_fixup&quot;,1988,true],[&quot;_dl_lookup_symbol_x&quot;,1328,true],[&quot;_dl_runtime_resolve_xsave&quot;,2154,true],[&quot;_int_malloc&quot;,4854,true],[&quot;alloc_addrun&quot;,42495,true],[&quot;alloc_perturb&quot;,115,true],[&quot;brk&quot;,128,true],[&quot;check_match&quot;,579,true],[&quot;clock_gettime@@GLIBC_2.17&quot;,242,true],[&quot;curl_free&quot;,410,true],[&quot;curl_maprintf&quot;,3295,true],[&quot;curl_mprintf&quot;,716,true],[&quot;curl_mvaprintf&quot;,5350,true],[&quot;curl_mvfprintf&quot;,350,true],[&quot;curlx_dyn_addn&quot;,310,true],[&quot;curlx_dyn_init&quot;,710,true],[&quot;curlx_dyn_len&quot;,410,true],[&quot;curlx_dyn_ptr&quot;,410,true],[&quot;curlx_pnow&quot;,400,true],[&quot;curlx_str_number&quot;,416,true],[&quot;do_lookup_x&quot;,1621,true],[&quot;dyn_nappend&quot;,5850,true],[&quot;formatf&quot;,150884,true],[&quot;free&quot;,3988,true],[&quot;fstat&quot;,116,true],[&quot;fwrite&quot;,2129,true],[&quot;fwrite_wrapper&quot;,400,true],[&quot;libcurl.so.4.8.0/str_num_base&quot;,2756,true],[&quot;main&quot;,414,true],[&quot;malloc&quot;,3553,true],[&quot;memcpy@@GLIBC_2.14&quot;,32,true],[&quot;out_number.isra.0&quot;,17720,true],[&quot;perf/str_num_base&quot;,855,true],[&quot;realloc&quot;,820,true],[&quot;sbrk&quot;,600,true],[&quot;strcmp&quot;,354,true],[&quot;stream_pad&quot;,1975,true],[&quot;strlen&quot;,35,true],[&quot;tcache_free_init&quot;,1791,true],[&quot;test_maprintf&quot;,3114,true]],&quot;roots&quot;:[[42,1]],&quot;edges&quot;:[[2,3,1,373,1218],[3,5,1,74,229],[3,7,1,94,129],[3,43,1,91,249],[4,1,1,812,115],[4,2,1,781,1591],[5,38,1,1210,116],[6,0,1,1328,954],[6,4,1,1307,2526],[6,11,9,1299,373],[8,48,2,29,728],[9,17,3,3253,5937],[14,15,4,95,3882],[14,44,1,32,32],[14,51,1,32,35],[15,34,4,787,2554],[16,14,4,98,5937],[17,8,2,2477,968],[17,19,1,4336,115],[18,10,800,29,11330],[18,16,1,29,1532],[21,49,5,89,354],[23,37,100,341,6137],[24,16,1,1422,2203],[24,26,100,1422,258735],[25,16,1,1503,855],[25,27,1,1503,11534],[26,28,100,1288,18582],[26,29,100,1400,710],[26,30,100,1412,410],[26,31,100,1413,410],[26,36,100,1404,233273],[27,36,1,1482,11184],[28,35,100,167,18272],[32,22,2,80,242],[33,41,102,215,2756],[34,21,5,429,933],[35,10,100,29,2320],[35,47,100,105,10102],[36,13,300,1001,4310],[36,16,1,1001,3501],[36,18,700,679,48657],[36,33,102,154,3172],[36,40,5,679,6503],[36,45,104,1049,26010],[36,50,300,1009,1420],[37,52,1,3365,2182],[39,6,10,44,5009],[40,39,10,1471,7138],[42,12,5,48,540],[42,53,1,64,288496],[43,9,2,3306,5978],[45,18,100,679,6700],[45,40,4,679,874],[45,50,104,930,716],[47,43,100,3388,9282],[48,20,2,59,128],[50,40,1,679,161],[52,9,1,3218,358],[52,37,1,3314,33],[53,23,100,62,6547],[53,24,100,53,264233],[53,25,1,67,13105],[53,32,2,176,642],[53,46,1,215,855]],&quot;branches&quot;:[[null,42],[0,12],[0,53],[2,23],[3,37],[4,52],[5,9],[6,17],[2,24],[8,16],[9,14],[10,15],[11,34],[12,21],[8,26],[14,28],[15,35],[16,10],[16,47],[18,43],[19,9],[20,17],[21,8],[22,48],[23,20],[21,19],[14,29],[14,30],[14,31],[14,36],[29,13],[29,16],[31,14],[32,15],[33,34],[34,21],[35,49],[32,51],[29,18],[38,10],[38,16],[40,14],[41,15],[42,34],[43,21],[44,49],[41,44],[29,33],[47,41],[29,45],[49,18],[50,10],[49,50],[29,50],[2,25],[54,16],[55,14],[56,15],[57,34],[58,21],[54,27],[60,36],[61,33],[62,41],[61,40],[64,39],[65,6],[66,0],[66,4],[68,1],[68,2],[70,3],[71,5],[72,38],[71,7],[71,43],[75,9],[76,17],[66,11],[61,45],[79,40],[80,39],[81,6],[82,11],[79,50],[84,40],[85,39],[86,6],[87,11],[2,32],[89,22],[2,46]],&quot;test_total&quot;:289452}"></table></div>
+    </main>
+    <div
+      class="text-scrollbar- vertical-"
+      data-scrolls-="call-graph-page-"
+      aria-hidden="true"
+    ></div>
+    <div
+      class="text-scrollbar- horizontal-"
+      data-scrolls-="call-graph-page-"
+      data-chains-page-
+      aria-hidden="true"
+    ></div>
+    <template id="page-held-script-">
+      <script src="../scripts/debug.js"></script>
+      <script src="../scripts/theme.js"></script>
+      <script src="../scripts/preferences.js"></script>
+      <script src="../scripts/call_graph.js"></script>
+    </template>
+  </body>
+</html>

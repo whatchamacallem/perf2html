@@ -1,0 +1,60 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+     SPDX-License-Identifier: MIT
+     This file is licensed under the terms of the LICENSE-MIT.md file. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <script src="../scripts/error_overlay.js"></script>
+    <script src="../scripts/settings.js"></script>
+    <script src="../scripts/utility.js"></script>
+    <script src="../scripts/ui_strings.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title></title>
+    <link rel="stylesheet" href="../scripts/theme.css" />
+    <link rel="stylesheet" href="../scripts/heat_map.css" />
+    <link rel="stylesheet" href="../scripts/light_mode.css" />
+    <link rel="stylesheet" href="../scripts/dark_mode.css" />
+  </head>
+  <body id="heat-map-">
+    <div id="heat-map-ticker-tape-box-"></div>
+    <div id="heat-map-main-column-" class="minimap-empty-">
+      <section id="heat-map-main-" tabindex="0"></section>
+      <div id="heat-map-main-edge-" aria-hidden="true">
+        <div id="heat-map-minimap-">
+          <div id="heat-map-minimap-box-"></div>
+          <div id="heat-map-minimap-viewport-" hidden></div>
+        </div>
+        <div
+          class="text-scrollbar- vertical-"
+          data-scrolls-="heat-map-main-"
+        ></div>
+      </div>
+      <div
+        class="text-scrollbar- horizontal-"
+        data-scrolls-="heat-map-main-"
+        data-chains-page-
+        aria-hidden="true"
+      ></div>
+    </div>
+    <template id="heat-map-tree-track-template-">
+      <div class="heat-map-tree-track-">
+        <div class="heat-map-tree-clip-box-">
+          <div id="heat-map-tree-" role="tree"></div>
+        </div>
+        <div
+          class="text-scrollbar- vertical-"
+          data-scrolls-="heat-map-tree-"
+          aria-hidden="true"
+        ></div>
+      </div>
+    </template>
+    <script src="../scripts/source_database.js"></script>
+    <template id="page-held-script-">
+      <script src="../scripts/debug.js"></script>
+      <script src="../scripts/theme.js"></script>
+      <script src="../scripts/preferences.js"></script>
+      <script src="../scripts/heat_map.js"></script>
+    </template>
+  </body>
+</html>

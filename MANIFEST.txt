@@ -1,0 +1,10 @@
+curl/perf2html.sh v0
+revision=104c70a7e4
+cpu=AMD Ryzen AI 9 HX 370 w/ Radeon 890M
+memory=23.47 GiB (13% use)
+os=Ubuntu 26.04.1 LTS
+compiler=gcc 15.2.0
+build=-DCMAKE_C_FLAGS=-O2 -g
+executable=build-relwithdebinfo/gcc-15-2-0-22_DCMAKECFLAGSO2g/tests/perf/perf
+recorded=1795114809 2026-11-19 07:00:09 PM UTC
+checksum=43390582

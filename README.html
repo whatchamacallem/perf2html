@@ -1,0 +1,360 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+     SPDX-License-Identifier: MIT
+     This file is licensed under the terms of the LICENSE-MIT.md file. -->
+<html lang="en" style="--readme-page-bg-: #D8C9A3; --readme-page-fg-: #3A2A14; --readme-page-font-family-: Arial">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      /* The text wraps to the widest preformatted block, centred. */
+      body {
+        width: -moz-min-content;
+        width: min-content;
+        margin-inline-start: auto;
+        margin-inline-end: auto;
+        background: var(--readme-page-bg-);
+        color: var(--readme-page-fg-);
+        font-family: var(--readme-page-font-family-);
+      }
+    </style>
+  </head>
+  <body>
+    <h1 id="perf2html-readmemd">perf2html README.md</h1>
+<h2 id="introduction">Introduction</h2>
+<p><code>perf2html</code> is a collection of scripts that profile <code>perf</code> and generate html
+reports about the results.</p>
+<p>The latest version and an example report can be found here:</p>
+<ul>
+<li><a href="https://whatchamacallem.github.io/perf2html/">Example Report</a></li>
+</ul>
+<p>The repo with the latest version is here:</p>
+<ul>
+<li><a href="https://github.com/whatchamacallem/perf2html">Repository</a></li>
+</ul>
+<h2 id="table-of-contents">Table Of Contents</h2>
+<ul>
+<li><a href="#using-a-report">Using A Report</a></li>
+<li><a href="#the-menu-and-keyboard-input">The Menu And Keyboard Input</a></li>
+<li><a href="#running-the-generator-scripts">Running The Generator Scripts</a></li>
+<li><a href="#callgrind-counters">Callgrind Counters</a></li>
+<li><a href="#reading-a-diff-report">Reading A Diff Report</a></li>
+<li><a href="#flame-graph-speedscope">Flame Graph (speedscope)</a></li>
+</ul>
+<h2 id="using-a-report">Using A Report</h2>
+<p>The main menu can be operated with the keyboard using the numbers each button
+is labelled with. Keyboard-only and switch device navigation is part of the
+design. Screen readers should work but that has not been confirmed with this
+release.</p>
+<p>The HTML will open straight from disk, with no server. Start by opening the top
+level <code>index.html</code> in the report and then bookmarks will work.</p>
+<p>The pages run in current Chrome and Firefox. SeaMonkey 2.53.24 is the oldest
+browser they support. The flame graph, speedscope's own app, does not run in
+SeaMonkey.</p>
+<p>The html app is stateless following REST style. This means the navigation URLs
+are immutable (so bookmarks work) and the module URLs used by JavaScript on the
+back end are also immutable (so no server is needed and perfect caching is
+possible).</p>
+<p>A report can also be served from an Ubuntu container with:
+<code>python3 -m http.server 8000</code>.</p>
+<h2 id="the-menu-and-keyboard-input">The Menu And Keyboard Input</h2>
+<p>The menu stores settings in the browser that may be reset with the reset
+button. In case you want to start over.</p>
+<h3 id="first-menu-row">First Menu Row</h3>
+<p>The first row of buttons will have the same number on every page. The number
+can be used to select them, and some of them support searching within their
+pull-downs by typing or pasting text.</p>
+<ul>
+<li><code>perf2html</code>: Opens the project repository.</li>
+<li><code>overview</code>: Opens a catalogue of tests and the manifest.</li>
+<li><code>test</code>: Selects the test shown.</li>
+<li><code>file</code>: Opens a file. Typing file:line opens that line.</li>
+<li><code>function</code>: Opens the file containing a function. Searchable.</li>
+<li><code>database</code>: Opens a page with a database of functions.</li>
+<li><code>flame graph</code>: Open this test's live call trace.</li>
+<li><code>call graph</code>: Opens a page with a call graph and costs.</li>
+<li><code>reset</code>: Restores default preferences.</li>
+<li><code>help</code>: Opens the help page in a new tab.</li>
+<li><code>scale</code>: Scales the whole report, as do <code>+</code>, <code>-</code> and <code>=</code>.</li>
+<li><code>dark</code> / <code>light</code>: Toggles between the light and dark themes.</li>
+</ul>
+<h3 id="status-menu-row">Status Menu Row</h3>
+<p>These settings may be unique to a given page or shared.</p>
+<ul>
+<li><code>lines</code> / <code>functions</code>, on the heat map: Toggles between per line and per
+function counters.</li>
+<li><code>counters</code>, on the heat map and the database: Selects the columns shown.
+Dragging moves them.</li>
+<li><code>log scale</code> / <code>linear scale</code>, on the heat map, the database and the call
+graph: Toggles heat colors between a log and linear curve.</li>
+<li><code>hottest first</code> / <code>alphabetical</code>, on the heat map: Toggles the file tree's
+sort order.</li>
+<li><code>cumulative first</code> / <code>hottest first</code> / <code>alphabetical</code>, on the call graph:
+Orders callees by their inclusive cost, their own cost or name.</li>
+<li><code>filter</code>, on the database: Filter the rows with a pattern. Esc clears it.</li>
+</ul>
+<h3 id="keyboard">Keyboard</h3>
+<p>Tab moves forward through the first menu row, then the status menu row, then
+the page below them, and Shift+Tab moves backward. Tables, trees and the source
+code can be navigated with the arrow keys.</p>
+<ul>
+<li>The number keys select the numbered buttons of the first menu row.</li>
+<li>Enter or Space presses the focused button or link.</li>
+<li>A pulldown opens with Enter, Space or typing. The up and down arrow keys move
+through its entries, Enter picks one, Backspace erases the last search
+character and Escape closes it.</li>
+<li>Sliders move with the arrow keys, and Home and End go to their ends.</li>
+<li><code>+</code> or <code>=</code> and <code>-</code> change the scale.</li>
+<li>Tables can be navigated with the arrow keys. Up and down move between rows,
+left and right between the links of a row, and Home and End go to the first
+and last row. Enter or Space on a row follows its first link.</li>
+<li>Trees can be navigated with the arrow keys. Right opens a branch and left
+closes it.</li>
+<li>The hottest lines can be navigated with the arrow keys.</li>
+<li>On the heat map, Enter on a source line opens or closes its information box,
+and Escape closes it.</li>
+<li>The arrow keys scroll a page when nothing focused uses them.</li>
+</ul>
+<h2 id="running-the-generator-scripts">Running The Generator Scripts</h2>
+<p>See <code>packages.md</code> for the Ubuntu administrator commands needed to install the
+packages required to use the command line tools.</p>
+<p>These are the scripts for using <code>perf2html</code>. While the scripts directory does
+contain a few more interesting files, none of them should be needed to use the
+generators.</p>
+<p>The project root is <code>tests/perf2html/</code> in a curl checkout, or a perf2html
+checkout beside a directory named <code>curl</code>. The scripts find curl two directories
+above the project root when that directory is named <code>curl</code>, else beside the
+project root, and stop with an error when neither exists. The scripts in
+<code>scripts/</code> run from the project root.</p>
+<ul>
+<li><code>perf2html.sh</code>: Capture timing data and generate a report.</li>
+<li><code>perf2html_diff.sh</code>: Generate a report about the difference between two
+<code>perf2html.sh</code> reports.</li>
+<li><code>perf2html_batch.sh</code>: Generate 3 reports, a baseline version, a modified
+version, and a diff.</li>
+<li><code>clean.sh</code>: Delete every generated file under <code>tests/perf2html/</code> and the
+ccache entries the builds made.</li>
+</ul>
+<p>Each script's <code>--help</code> prints the following.</p>
+<pre><code class="language-txt">perf2html.sh [debug-flags] [--report=DIR] [cmake-flags...]
+    Builds RelWithDebInfo, profiles every TESTS_C test under callgrind plus a
+    native perf stat timing run and a traced run for the flame graph,
+    generates one report.
+    --report=NAME     Defaults to perf2html_baseline_report, or
+                      perf2html_modified_report when a cmake flag is given.
+    --target-dir=DIR  Default directory for reports (default $PWD).
+    --txz             Create .txz archives of all reports generated.
+                      .txz files may also be used as inputs.
+    cmake-flags       Everything else is passed directly to cmake.
+</code></pre>
+<pre><code class="language-txt">perf2html_diff.sh [debug-flags] [--target-dir=DIR] [baseline] [modified] [diff]
+    Measures nothing: Compares the counters in two profiling reports and
+    generates a diff. Report names default to
+    ./perf2html_{baseline,modified,diff}_report. Both baseline and modified
+    must be a perf2html.sh report, and both must show the same source code.
+    And a diff can't be re-diffed. Reads nothing but the two reports.
+    --target-dir=DIR  Default directory for reports (default $PWD).
+    --txz             Create .txz archives of all reports generated.
+                      .txz files may also be used as inputs.
+</code></pre>
+<pre><code class="language-txt">perf2html_batch.sh [debug-flags] [--target-dir=DIR] [cmake-flags...]
+    Profiles baseline, modified and then does a diff of them.
+    --target-dir=DIR  Holds the three default-named reports (default $PWD). The
+                      batch cannot rename them.
+    --txz             Create .txz archives of all reports generated.
+                      .txz files may also be used as inputs.
+    cmake-flags       Everything else is passed directly to cmake in the
+                      modified build (default is -D CMAKE_C_FLAGS=-Os).
+</code></pre>
+<p>These are shared developer flags for the iterative development of <code>perf2html</code>
+itself.</p>
+<pre><code class="language-txt">    --artifacts=TMP   The profiler artifacts directory. Defaults to
+                      perf2html_temporary_artifacts/ beside the report
+                      directory (inside the target dir for a batch).
+    --keep-artifacts  Flushes the report's stale artifacts subdirectory, then
+                      keeps this run's recordings, which is what a later
+                      --regenerate reuses.
+    --regenerate      Rebuilds all pages from the last run's profiler
+                      artifacts, re-measuring nothing and keeping them.
+    --verbose         Enables diagnostic information in Markdown. Repeating it
+                      (--verbose --verbose) increments the verbosity level.
+</code></pre>
+<h2 id="callgrind-counters">Callgrind Counters</h2>
+<p>These are the raw counters <code>callgrind</code> records and the derived ones this report
+adds up from them. They show up as column headers in the heat map, the raw ones
+on the database page too, and as choices in the menu's counters pulldown, under
+these same names.</p>
+<table>
+<thead>
+<tr>
+<th>Counter</th>
+<th>Meaning</th>
+<th>Derived from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ir</code></td>
+<td>instructions executed</td>
+<td></td>
+</tr>
+<tr>
+<td><code>Dr</code></td>
+<td>data reads</td>
+<td></td>
+</tr>
+<tr>
+<td><code>Dw</code></td>
+<td>data writes</td>
+<td></td>
+</tr>
+<tr>
+<td><code>I1mr</code></td>
+<td>L1 instruction cache misses</td>
+<td></td>
+</tr>
+<tr>
+<td><code>D1mr</code></td>
+<td>L1 data cache read misses</td>
+<td></td>
+</tr>
+<tr>
+<td><code>D1mw</code></td>
+<td>L1 data cache write misses</td>
+<td></td>
+</tr>
+<tr>
+<td><code>ILmr</code></td>
+<td>last level instruction cache misses</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DLmr</code></td>
+<td>last level data cache read misses</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DLmw</code></td>
+<td>last level data cache write misses</td>
+<td></td>
+</tr>
+<tr>
+<td><code>Bc</code></td>
+<td>conditional branches executed</td>
+<td></td>
+</tr>
+<tr>
+<td><code>Bcm</code></td>
+<td>conditional branches mispredicted</td>
+<td></td>
+</tr>
+<tr>
+<td><code>Bi</code></td>
+<td>indirect branches executed</td>
+<td></td>
+</tr>
+<tr>
+<td><code>Bim</code></td>
+<td>indirect branches mispredicted</td>
+<td></td>
+</tr>
+<tr>
+<td><code>D1m</code></td>
+<td>L1 data cache misses</td>
+<td><code>D1mr + D1mw</code></td>
+</tr>
+<tr>
+<td><code>DLm</code></td>
+<td>last level data cache misses</td>
+<td><code>DLmr + DLmw</code></td>
+</tr>
+<tr>
+<td><code>L1m</code></td>
+<td>L1 cache misses, all</td>
+<td><code>I1mr + D1mr + D1mw</code></td>
+</tr>
+<tr>
+<td><code>LLm</code></td>
+<td>last level cache misses, all</td>
+<td><code>ILmr + DLmr + DLmw</code></td>
+</tr>
+<tr>
+<td><code>Bm</code></td>
+<td>branches mispredicted, all</td>
+<td><code>Bcm + Bim</code></td>
+</tr>
+<tr>
+<td><code>CEst</code></td>
+<td>cycle estimate</td>
+<td><code>Ir + 10 L1m + 100 LLm</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>CEst</code> weights a miss by roughly what it costs and is used by default.</p>
+<p>See the <a href="https://valgrind.org/docs/manual/cl-manual.html">callgrind</a> docs.</p>
+<p>Callgrind is GPL Version 3, 29 June 2007.</p>
+<h2 id="reading-a-diff-report">Reading A Diff Report</h2>
+<h3 id="regular-report">Regular Report</h3>
+<p>A regular report contains a suite of tests that can be explored using a menu.
+There is heat map data, call graph data, and a flame graph.</p>
+<p>A regular report shows you each counter selected in the menu's counters
+pulldown, a total for each and a percentage of that total. Every percentage of
+a file, function or line is its cost as a share of the test's global cost.</p>
+<pre><code class="language-txt">| example     |       % |
+| ----------- | ------: |
+| 1 / 50000   |  ≈0.00% |
+| 1 / 5000    |   0.02% |
+| 500 / 5000  |  10.00% |
+| 5000 / 5000 | 100.00% |
+</code></pre>
+<h3 id="diff-report">Diff Report</h3>
+<p>A diff report uses percentages the same way a stock market ticker does. Every
+number in it is the modified profile minus the baseline one, per function, file
+and line, and every share divides that difference by the same thing's own
+baseline count. So a share says how much this line moved against what it used
+to cost, not what part of the report it is. Half as long is <code>▼-50.00%</code>, twice
+as long is <code>▲100.00%</code>, and smaller is better.</p>
+<pre><code class="language-txt">| delta              |           % |
+| ------------------ | ----------: |
+| 0 -&gt; 1000          |   ▲      ∞% |
+| 1000 -&gt; 1000       |             |
+| 1000 -&gt; 1000000    |   ▲ 999.00x |
+| 1000 -&gt; 1001000    |   ▲     ≈∞% |
+| 1000 -&gt; 101000     |   ▲ 100.00x |
+| 1000 -&gt; 2000       |   ▲ 100.00% |
+| 1000 -&gt; 2010       |   ▲   1.01x |
+| 1000 -&gt; 900        |   ▼ -10.00% |
+| 5000 -&gt; 0          |   ▼-100.00% |
+| 5000000 -&gt; 4999999 |   ▼  ≈0.00% |
+| 5000000 -&gt; 5000001 |   ▲  ≈0.00% |
+| 90 -&gt; 100          |   ▲  11.11% |
+</code></pre>
+<h2 id="flame-graph-speedscope">Flame Graph (speedscope)</h2>
+<p>The flame graph is a recording, not a model: every box is one call that
+happened, as wide as it took. The test runs in a build with
+<code>-finstrument-functions</code>, where a hook (<code>tests/perf2html/src/cyg_callback.c</code>)
+reads the CPU's time stamp counter at every function entry and exit from the
+entry of <code>main</code> on. &quot;Time Order&quot; is the order the calls were made in.</p>
+<p>A diff has no flame graph: a trace neither adds up nor subtracts.</p>
+<p>Scroll to pan and pinch or Cmd/Ctrl+scroll to zoom, on both the minimap and the
+main view. Click a frame for its stats.</p>
+<p>The keybindings are:</p>
+<ul>
+<li>+: zoom in</li>
+<li>-: zoom out</li>
+<li>0: zoom out to see the entire profile</li>
+<li>w/a/s/d or arrow keys: pan around the profile</li>
+<li>r: Collapse recursion in the flamegraphs</li>
+<li>Cmd+S/Ctrl+S to save the current profile</li>
+<li>Cmd+O/Ctrl+O to open a new profile</li>
+<li>n: Go to next profile/thread if one is available</li>
+<li>p: Go to previous profile/thread if one is available</li>
+<li>t: Open the profile/thread selector if available</li>
+<li>Cmd+F/Ctrl+F: to open search. While open, Enter and Shift+Enter cycle through
+results</li>
+</ul>
+<p><a href="https://github.com/jlfwong/speedscope">speedscope</a> is Copyright (c) 2018+
+Jamie Wong and contributors. <code>speedscope</code> is an upstream project and is not
+affiliated with the <code>perf2html</code> project.</p>
+
+  </body>
+</html>

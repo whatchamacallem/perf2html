@@ -1,0 +1,752 @@
+// SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+// SPDX-License-Identifier: MIT
+// This file is licensed under the terms of the LICENSE-MIT.md file.
+
+window.try_catch_handler_(function () {
+  "use strict";
+
+  const CALL_GRAPH_VIEW_KEY = settings_("CALL_GRAPH_VIEW_KEY");
+  const DATABASE_VIEW_KEY = settings_("DATABASE_VIEW_KEY");
+  const FLAME_GRAPH_CONTROL_KEY_NAMES = settings_(
+    "FLAME_GRAPH_CONTROL_KEY_NAMES",
+  );
+  const FLAME_GRAPH_PLAIN_KEY_NAMES = settings_("FLAME_GRAPH_PLAIN_KEY_NAMES");
+  const FLAME_GRAPH_VIEW_ENTRY = settings_("FLAME_GRAPH_VIEW_ENTRY");
+  const HEAT_MAP_VIEW_ENTRY = settings_("HEAT_MAP_VIEW_ENTRY");
+  const MENU_ENTRY_NEEDS = settings_("MENU_ENTRY_NEEDS");
+  const MENU_ENTRY_VIEW_KEYS = settings_("MENU_ENTRY_VIEW_KEYS");
+  const MENU_LOGO_REPOSITORY_URL = settings_("MENU_LOGO_REPOSITORY_URL");
+  const MENU_SCALE_KEY_STEPS = settings_("MENU_SCALE_KEY_STEPS");
+  const STYLE_MENU_LOGO_START_SHARE = settings_("STYLE_MENU_LOGO_START_SHARE");
+
+  const FLAME_GRAPH_VIEW_KEY = FLAME_GRAPH_VIEW_ENTRY[0];
+  const HEAT_MAP_VIEW_KEY = HEAT_MAP_VIEW_ENTRY[0];
+  const REPORT_NAME_TEXT = window.ui_strings_.text("str_report_name");
+  const SCALE_LAST_STOP = window.report_ui_.design_scale_last_stop;
+  const TITLE_PART_SEPARATOR = window.ui_strings_.text(
+    "str_title_part_separator",
+  );
+  const VIEW_STRING_IDS = {
+    [CALL_GRAPH_VIEW_KEY]: "str_view_call_graph",
+    [DATABASE_VIEW_KEY]: "str_view_database",
+    [FLAME_GRAPH_VIEW_KEY]: "str_view_flame_graph",
+    [HEAT_MAP_VIEW_KEY]: "str_view_heat_map",
+  };
+
+  const menu_strip = document.getElementById("menu-");
+  const help_href = menu_strip.getAttribute("data-help-href-");
+  const preference_strip = document.getElementById("menu-preference-");
+
+  if (!window.report_source_database_)
+    window.throw_exception_("str_error_internal");
+  const call_graph_sort_choices =
+    window.report_preferences_.call_graph_sort_choices;
+  const heat_scale_choices = window.report_preferences_.heat_scale_choices();
+  const heat_sort_choices = window.report_preferences_.heat_sort_choices;
+  let flash_entry_name = "";
+  // Whether the menu entry's focus waits for the page's focus.
+  let menu_entry_focus_waits = false;
+  let menu_strip_handle = null;
+  let preference_strip_handle = null;
+
+  // Returns the test the address shows, null for none.
+  function active_test_name() {
+    return window.report_frame_.address_now().test;
+  }
+  function flash_request(entry_name) {
+    return () => {
+      flash_entry_name = entry_name;
+    };
+  }
+  function pulldown_link(link_text, link_hash, entry_name) {
+    const entry_link = window.render_element_of_(
+      window.render_element_(
+        "a",
+        { href: link_hash },
+        window.render_html_escape_(link_text),
+      ),
+    );
+    entry_link.addEventListener(
+      "click",
+      window.try_catch_handler_((click_event) => {
+        if (window.report_ui_.address.link_hash(click_event))
+          flash_entry_name = entry_name;
+      }),
+    );
+    return entry_link;
+  }
+  // Counts the names of the shown test, with no link made.
+  function heat_map_entry_count(names_by_test) {
+    return names_by_test[active_test_name()].length;
+  }
+  // Links each name of the shown test to the heat map hash written for it.
+  function heat_map_entries(names_by_test, entry_name, name_hash) {
+    const entry_test_name = active_test_name();
+    return names_by_test[entry_test_name].map((name) =>
+      pulldown_link(name, name_hash(entry_test_name, name), entry_name),
+    );
+  }
+  // Returns whether a file link shows functions: as shown, a line's never.
+  function file_link_shows_functions(line_number) {
+    const address = window.report_frame_.address_now();
+    return (
+      !line_number && address.view === HEAT_MAP_VIEW_KEY && address.functions
+    );
+  }
+  function files_entries(line_number) {
+    return heat_map_entries(
+      window.report_source_database_.filesWithCounters,
+      "str_menu_file",
+      (test_name, file_name) =>
+        window.report_ui_.address.hash({
+          test: test_name,
+          view: HEAT_MAP_VIEW_KEY,
+          file: file_name,
+          line: line_number || null,
+          functions: file_link_shows_functions(line_number),
+        }),
+    );
+  }
+  function functions_entries() {
+    return heat_map_entries(
+      window.report_source_database_.functionsWithCounters,
+      "str_menu_function",
+      (test_name, function_name) =>
+        window.report_ui_.address.function_hash(test_name, function_name),
+    );
+  }
+  // Returns the address with another test, the database from the overview.
+  function test_entry_hash(test_name) {
+    const address = window.report_frame_.address_now();
+    return address.view === null
+      ? window.report_ui_.address.home_hash(test_name, DATABASE_VIEW_KEY)
+      : window.report_ui_.address.hash({ ...address, test: test_name });
+  }
+  // Lists each test, linked to the address with that test.
+  function tests_entries() {
+    return window.report_frame_.test_names.map((test_name) =>
+      pulldown_link(test_name, test_entry_hash(test_name), "str_menu_test"),
+    );
+  }
+  function pulldown_options(entries, entry_count, reads_line_number) {
+    return {
+      entries,
+      entry_count,
+      keeps_open: false,
+      on_close: () => {},
+      on_move: null,
+      on_select: null,
+      reads_line_number,
+    };
+  }
+
+  function logo_color_at(fraction) {
+    return `rgb(${window.report_ui_.ramp_channels_at(fraction).join(",")})`;
+  }
+  function logo_letters_markup(text, start_share) {
+    const letters = [...text];
+    return letters
+      .map((letter, index) =>
+        window.render_element_(
+          "span",
+          {
+            style: `color:${logo_color_at(
+              letters.length > 1
+                ? start_share +
+                    ((1 - start_share) * index) / (letters.length - 1)
+                : 1,
+            )}`,
+          },
+          window.render_html_escape_(letter),
+        ),
+      )
+      .join("");
+  }
+  function dark_mode_string_id() {
+    return window.report_ui_.dark_mode_enabled_now_()
+      ? "str_menu_dark_mode_enabled"
+      : "str_menu_light_mode";
+  }
+  function dark_mode_toggle() {
+    window.report_ui_.dark_mode_set_(
+      !window.report_ui_.dark_mode_enabled_now_(),
+    );
+    window.report_frame_.view_post("dark_mode_show");
+    menu_render();
+  }
+  // Resets every browser preference to its default, the dark mode as given.
+  function user_preferences_reset(dark_mode_enabled) {
+    window.report_ui_.view_storage.preferences_clear();
+    window.report_ui_.design_scale_stop_set(null);
+    window.report_ui_.dark_mode_set_(dark_mode_enabled);
+    window.report_preferences_.seed();
+    window.report_frame_.view_post("layout_reset");
+    menu_render();
+  }
+  // Resets the preferences but the dark mode shown, then the view's state.
+  function preferences_reset() {
+    user_preferences_reset(
+      Boolean(window.report_ui_.dark_mode_enabled_now_()),
+    );
+    window.report_frame_.view_post("view_reset");
+  }
+  // Resets the preferences on the toggle query, then shows the mode it opens.
+  function dark_mode_toggle_query_apply() {
+    const toggle_value = window.report_dark_mode_.toggle_query_value();
+    if (toggle_value === null) return;
+    user_preferences_reset(null);
+    if (toggle_value) dark_mode_toggle();
+  }
+
+  function choice_label(choices, choice_value) {
+    return choices.find((choice) => choice.value === choice_value).label;
+  }
+  // Shows or hides one line of a counters list.
+  function counter_line_toggle(list_key, line_name) {
+    window.report_preferences_.counter_line_toggle(list_key, line_name);
+    window.report_frame_.view_post("preferences_apply");
+  }
+  // Moves one line of a counters list next to its anchor, columns following.
+  function counter_line_move(list_key, line_name, anchor_name, lands_after) {
+    window.report_preferences_.counter_line_move(
+      list_key,
+      line_name,
+      anchor_name,
+      lands_after,
+    );
+    window.report_frame_.view_post("preferences_apply");
+  }
+  // Chooses a call graph cutoff, the view opening its nodes by it again.
+  function call_graph_cutoff_choose(cutoff_depth) {
+    window.report_preferences_.call_graph_cutoff_choose(cutoff_depth);
+    window.report_frame_.view_post("preferences_apply");
+  }
+  // Chooses a call graph sort, then labels its pulldown with it.
+  function call_graph_sort_choose(sort_mode) {
+    window.report_preferences_.call_graph_sort_choose(sort_mode);
+    window.report_frame_.view_post("preferences_apply");
+    preference_strip_handle.pulldown_label_set(
+      "call_graph_sort",
+      choice_label(call_graph_sort_choices, sort_mode),
+    );
+  }
+  // Returns the value of the one choice of a pair not chosen.
+  function other_choice_value(choices, chosen_value) {
+    const other_choices = choices.filter(
+      (offered_choice) => offered_choice.value !== chosen_value,
+    );
+    if (other_choices.length !== 1)
+      window.throw_exception_("str_error_internal");
+    return other_choices[0].value;
+  }
+  // Chooses the other heat scale, then draws the menu with its label.
+  function heat_scale_toggle() {
+    window.report_preferences_.heat_scale_choose(
+      other_choice_value(
+        heat_scale_choices,
+        window.report_preferences_.now().heat_scale_value,
+      ),
+    );
+    window.report_frame_.view_post("preferences_apply");
+    menu_render();
+  }
+  // Chooses the other heat sort, then draws the menu with its label.
+  function heat_sort_toggle() {
+    window.report_preferences_.heat_sort_choose(
+      other_choice_value(
+        heat_sort_choices,
+        window.report_preferences_.now().heat_sort_mode,
+      ),
+    );
+    window.report_frame_.view_post("preferences_apply");
+    menu_render();
+  }
+
+  function scale_stop_request(scale_stop) {
+    if (
+      scale_stop < 0 ||
+      scale_stop > SCALE_LAST_STOP ||
+      scale_stop === window.report_ui_.design_scale_stop_now()
+    )
+      return;
+    window.report_ui_.design_scale_stop_set(scale_stop);
+    window.report_frame_.view_post("layout_reset");
+    menu_strip_handle.slider_stop_set("str_menu_scale", scale_stop);
+  }
+  function scale_key_handler(key_name) {
+    if (!Object.prototype.hasOwnProperty.call(MENU_SCALE_KEY_STEPS, key_name))
+      return false;
+    scale_stop_request(
+      window.report_ui_.design_scale_stop_now() +
+        MENU_SCALE_KEY_STEPS[key_name],
+    );
+    return true;
+  }
+
+  // Returns whether an entry shows: on a view it names, if any, each need met.
+  function entry_available(entry_name, address, view_key) {
+    if (
+      Object.hasOwn(MENU_ENTRY_VIEW_KEYS, entry_name) &&
+      !MENU_ENTRY_VIEW_KEYS[entry_name].includes(address.view)
+    )
+      return false;
+    if (!Object.hasOwn(MENU_ENTRY_NEEDS, entry_name)) return true;
+    return MENU_ENTRY_NEEDS[entry_name].every((need_name) => {
+      if (need_name === "counter_list")
+        return Object.hasOwn(
+          window.report_preferences_.now().counter_lists,
+          address.view,
+        );
+      if (need_name === "test") return address.test !== null;
+      if (need_name === "view_page" && view_key !== null)
+        return window.report_frame_.view_has_page(view_key);
+      if (need_name === "view_browser" && view_key !== null)
+        return window.report_frame_.view_browser_runs(view_key);
+      window.throw_exception_("str_error_internal");
+    });
+  }
+  // Makes an entry named by its label's ui string, shown as its needs allow.
+  function entry(
+    string_id,
+    tool_tip_string_id,
+    kind_name,
+    address,
+    view_key,
+    entry_fields,
+  ) {
+    return window.report_ui_.strip.entry_make(
+      string_id,
+      kind_name,
+      window.ui_strings_.text(string_id),
+      {
+        is_available: entry_available(string_id, address, view_key),
+        is_numbered: true,
+        tool_tip_text: window.ui_strings_.text(tool_tip_string_id),
+        ...entry_fields,
+      },
+    );
+  }
+  function view_entry(
+    string_id,
+    tool_tip_string_id,
+    view_hash,
+    address,
+    view_key,
+  ) {
+    return entry(string_id, tool_tip_string_id, "link", address, view_key, {
+      href: view_hash,
+      on_activate: flash_request(string_id),
+    });
+  }
+  // Assembles every menu entry in strip order, the one place the menu changes.
+  function menu_entries(address) {
+    const view_hash = (view_key) =>
+      window.report_ui_.address.home_hash(address.test, view_key);
+    return [
+      entry(
+        "str_report_name",
+        "str_tool_tip_report_name",
+        "link",
+        address,
+        null,
+        {
+          is_numbered: false,
+          href: MENU_LOGO_REPOSITORY_URL,
+          label_markup: logo_letters_markup(
+            REPORT_NAME_TEXT,
+            STYLE_MENU_LOGO_START_SHARE,
+          ),
+          opens_new_tab: true,
+          withholds_tab_stop: true,
+        },
+      ),
+      view_entry(
+        "str_view_overview",
+        "str_tool_tip_overview",
+        window.report_ui_.address.hash({}),
+        address,
+        null,
+      ),
+      entry("str_menu_test", "str_tool_tip_test", "pulldown", address, null, {
+        pulldown_options: pulldown_options(
+          tests_entries,
+          () => window.report_frame_.test_names.length,
+          false,
+        ),
+      }),
+      entry("str_menu_file", "str_tool_tip_file", "pulldown", address, null, {
+        pulldown_options: pulldown_options(
+          files_entries,
+          () =>
+            heat_map_entry_count(
+              window.report_source_database_.filesWithCounters,
+            ),
+          true,
+        ),
+      }),
+      entry(
+        "str_menu_function",
+        "str_tool_tip_function",
+        "pulldown",
+        address,
+        null,
+        {
+          pulldown_options: pulldown_options(
+            functions_entries,
+            () =>
+              heat_map_entry_count(
+                window.report_source_database_.functionsWithCounters,
+              ),
+            false,
+          ),
+        },
+      ),
+      view_entry(
+        VIEW_STRING_IDS[DATABASE_VIEW_KEY],
+        "str_tool_tip_database",
+        view_hash(DATABASE_VIEW_KEY),
+        address,
+        DATABASE_VIEW_KEY,
+      ),
+      view_entry(
+        VIEW_STRING_IDS[FLAME_GRAPH_VIEW_KEY],
+        "str_tool_tip_flame_graph",
+        view_hash(FLAME_GRAPH_VIEW_KEY),
+        address,
+        FLAME_GRAPH_VIEW_KEY,
+      ),
+      view_entry(
+        VIEW_STRING_IDS[CALL_GRAPH_VIEW_KEY],
+        "str_tool_tip_call_graph",
+        view_hash(CALL_GRAPH_VIEW_KEY),
+        address,
+        CALL_GRAPH_VIEW_KEY,
+      ),
+      entry("str_menu_reset", "str_tool_tip_reset", "action", address, null, {
+        on_activate: preferences_reset,
+      }),
+      entry("str_menu_help", "str_tool_tip_help", "link", address, null, {
+        href: help_href,
+        opens_new_tab: true,
+      }),
+      entry("str_menu_scale", "str_tool_tip_scale", "action", address, null, {
+        is_numbered: false,
+        is_widget: true,
+        slider_stop: window.report_ui_.design_scale_stop_now(),
+        slider_last_stop: SCALE_LAST_STOP,
+        on_stop_choose: scale_stop_request,
+      }),
+    ];
+  }
+  // Builds a preference pulldown entry, its cell labelled with the choice.
+  function preference_pulldown_entry(
+    entry_name,
+    address,
+    label_text,
+    tool_tip_string_id,
+    choices,
+    on_select,
+    keeps_open,
+    on_move,
+  ) {
+    return window.report_ui_.strip.entry_make(
+      entry_name,
+      "pulldown",
+      label_text,
+      {
+        is_available: entry_available(entry_name, address, null),
+        tool_tip_text: window.ui_strings_.text(tool_tip_string_id),
+        pulldown_options: {
+          entries: () => window.report_ui_.strip.choice_entries(choices()),
+          entry_count: () => choices().length,
+          keeps_open,
+          on_close: () => {},
+          on_move,
+          on_select,
+          reads_line_number: false,
+        },
+      },
+    );
+  }
+  // Builds the counters pulldown entry, editing the list of the page shown.
+  function counters_entry(address) {
+    const list_key = address.view;
+    return preference_pulldown_entry(
+      "counters",
+      address,
+      window.ui_strings_.text("str_menu_counters"),
+      "str_tool_tip_counters",
+      () => window.report_preferences_.counter_choices(list_key),
+      (line_name) => counter_line_toggle(list_key, line_name),
+      true,
+      (line_name, anchor_name, lands_after) =>
+        counter_line_move(list_key, line_name, anchor_name, lands_after),
+    );
+  }
+  // Builds the view mode entry, its label the shown mode, its link the other.
+  function view_mode_entry(address) {
+    const sent_link = window.report_frame_.view_mode_link_now();
+    const is_sent =
+      sent_link !== null &&
+      sent_link.hash === window.report_ui_.address.hash(address);
+    // Before the heat map sends the link, a function without samples has none.
+    const has_link = is_sent
+      ? sent_link.link_hash !== ""
+      : address.function === null ||
+        window.report_source_database_.functionsWithCounters[
+          address.test
+        ].includes(address.function);
+    return window.report_ui_.strip.entry_make(
+      "heat_counter_source",
+      has_link ? "link" : "label",
+      window.ui_strings_.text(
+        address.functions
+          ? "str_menu_counter_source_functions"
+          : "str_menu_counter_source_lines",
+      ),
+      {
+        href: is_sent ? sent_link.link_hash : "",
+        tool_tip_text: window.ui_strings_.text("str_tool_tip_counter_source"),
+      },
+    );
+  }
+  // Assembles the preference row, the mode and counters made only if shown.
+  function preference_entries(address) {
+    const shown_preferences = window.report_preferences_.now();
+    return [
+      ...(entry_available("heat_counter_source", address, null)
+        ? [view_mode_entry(address)]
+        : []),
+      ...(entry_available("counters", address, null)
+        ? [counters_entry(address)]
+        : []),
+      window.report_ui_.strip.entry_make(
+        "heat_scale",
+        "action",
+        choice_label(heat_scale_choices, shown_preferences.heat_scale_value),
+        {
+          is_available: entry_available("heat_scale", address, null),
+          tool_tip_text: window.ui_strings_.text("str_tool_tip_heat_scale"),
+          on_activate: heat_scale_toggle,
+        },
+      ),
+      preference_pulldown_entry(
+        "call_graph_sort",
+        address,
+        choice_label(
+          call_graph_sort_choices,
+          shown_preferences.call_graph_sort_mode,
+        ),
+        "str_tool_tip_call_graph_sort",
+        () => call_graph_sort_choices,
+        call_graph_sort_choose,
+        false,
+        null,
+      ),
+      window.report_ui_.strip.entry_make(
+        "heat_sort",
+        "action",
+        choice_label(heat_sort_choices, shown_preferences.heat_sort_mode),
+        {
+          is_available: entry_available("heat_sort", address, null),
+          tool_tip_text: window.ui_strings_.text("str_tool_tip_heat_sort"),
+          on_activate: heat_sort_toggle,
+        },
+      ),
+      // One name in either mode keeps the focus on the cell a key toggles.
+      window.report_ui_.strip.entry_make(
+        "dark_mode",
+        "action",
+        window.ui_strings_.text(dark_mode_string_id()),
+        {
+          tool_tip_text: window.ui_strings_.text("str_tool_tip_dark_mode"),
+          on_activate: dark_mode_toggle,
+        },
+      ),
+    ];
+  }
+
+  // Writes a source location as its file's base name and its line.
+  function base_name_location_text(file_path, line_number) {
+    return window.report_ui_.location_text(
+      file_path.split("/").pop(),
+      line_number,
+    );
+  }
+  // Writes the heat map's address part, a location through the writer given.
+  function heat_map_part_text(address, location_write) {
+    if (address.function !== null) return address.function;
+    if (address.file === null) return "";
+    return location_write(address.file, address.line);
+  }
+  // Lists the heat map's status labels: a function after its file and line.
+  function heat_map_status_entries(address) {
+    const part_text = heat_map_part_text(address, base_name_location_text);
+    if (!part_text) return [];
+    const shown_location = window.report_frame_.function_location_now();
+    // The location shows once the heat map sends the address's own.
+    if (
+      address.function === null ||
+      shown_location === null ||
+      shown_location.test !== address.test ||
+      shown_location.function !== address.function
+    )
+      return [part_text];
+    return [
+      base_name_location_text(shown_location.file, shown_location.line),
+      part_text,
+    ];
+  }
+  // Lists the focused path labels while the call graph shows, root first.
+  function focused_path_status_entries(address) {
+    if (address.view !== CALL_GRAPH_VIEW_KEY) return [];
+    return window.report_frame_.focused_path_now();
+  }
+  // Lists the status labels: any test, view, heat map parts, focused path.
+  function status_entries(address) {
+    const view_label = window.ui_strings_.text(
+      address.view === null
+        ? "str_view_overview"
+        : VIEW_STRING_IDS[address.view],
+    );
+    if (address.test === null) return [view_label];
+    return [
+      address.test,
+      view_label,
+      ...heat_map_status_entries(address),
+      ...focused_path_status_entries(address),
+    ];
+  }
+  function title_text(address) {
+    if (address.view === null)
+      return window.ui_strings_.text("str_view_overview");
+    return [
+      address.test,
+      window.ui_strings_.text(VIEW_STRING_IDS[address.view]),
+      heat_map_part_text(address, base_name_location_text),
+    ]
+      .filter((part_text) => part_text)
+      .join(TITLE_PART_SEPARATOR);
+  }
+  function menu_render() {
+    const address = window.report_frame_.address_now();
+    const button_entries = menu_entries(address);
+    menu_strip_handle = window.report_ui_.strip.render(
+      menu_strip,
+      button_entries,
+      status_entries(address),
+    );
+    preference_strip_handle = window.report_ui_.strip.render(
+      preference_strip,
+      preference_entries(address),
+      [],
+    );
+    document.title = title_text(address);
+    // The view heads its copies and images with the status bar shown.
+    window.report_frame_.view_post("status_bar_show");
+    menu_entry_focus();
+  }
+  // Focuses the query's menu entry, once a focus reaches a page refusing it.
+  function menu_entry_focus() {
+    const menu_entry_number = window.report_frame_.menu_entry_number_now();
+    if (
+      menu_entry_number === null ||
+      menu_strip_handle.numbered_entry_focus(menu_entry_number) ||
+      menu_entry_focus_waits
+    )
+      return;
+    menu_entry_focus_waits = true;
+    window.addEventListener(
+      "focus",
+      window.try_catch_handler_(() => {
+        menu_entry_focus_waits = false;
+        menu_entry_focus();
+      }),
+      { once: true },
+    );
+  }
+  function address_show() {
+    menu_render();
+    if (!flash_entry_name) return;
+    menu_strip_handle.flash(flash_entry_name);
+    flash_entry_name = "";
+  }
+  // Hands a key speedscope takes to the flame graph view, its frame focused.
+  function flame_graph_key_handler(key_event) {
+    if (
+      window.report_frame_.address_now().view !== FLAME_GRAPH_VIEW_KEY ||
+      key_event.defaultPrevented ||
+      key_event.isComposing ||
+      key_event.altKey ||
+      menu_strip_handle.open_pulldown_state() !== null ||
+      preference_strip_handle.open_pulldown_state() !== null
+    )
+      return;
+    const taken_key_names =
+      key_event.ctrlKey || key_event.metaKey
+        ? FLAME_GRAPH_CONTROL_KEY_NAMES
+        : FLAME_GRAPH_PLAIN_KEY_NAMES;
+    if (!taken_key_names.includes(key_event.key)) return;
+    key_event.preventDefault();
+    window.report_ui_.view_frame.focus();
+    window.report_frame_.view_post("view_key_pressed", {
+      key_press: {
+        code: key_event.code,
+        ctrlKey: key_event.ctrlKey,
+        key: key_event.key,
+        metaKey: key_event.metaKey,
+        repeat: key_event.repeat,
+        shiftKey: key_event.shiftKey,
+      },
+    });
+  }
+  function menu_key_handler(key_name, is_repeat) {
+    return (
+      preference_strip_handle.key_handler(key_name, is_repeat) ||
+      menu_strip_handle.key_handler(key_name, is_repeat) ||
+      scale_key_handler(key_name)
+    );
+  }
+
+  function activate() {
+    window.report_preferences_.activate(window.report_frame_.counter_names);
+    // Runs ahead of every menu cell, so that no menu control takes the key.
+    document.addEventListener(
+      "keydown",
+      window.try_catch_handler_(flame_graph_key_handler),
+      true,
+    );
+    document.addEventListener(
+      "keydown",
+      window.try_catch_handler_((key_event) => {
+        window.report_ui_.widget_key.link_click_handler(key_event);
+        const key_name = window.report_ui_.view_key.of(key_event);
+        if (key_name && menu_key_handler(key_name, key_event.repeat))
+          key_event.preventDefault();
+      }),
+    );
+    document.addEventListener(
+      "click",
+      window.try_catch_handler_((click_event) => {
+        const link_hash = window.report_ui_.address.link_hash(click_event);
+        if (!link_hash) return;
+        click_event.preventDefault();
+        window.report_frame_.address_request(link_hash);
+      }),
+    );
+    window.report_ui_.resize_settle_register(menu_render);
+  }
+
+  window.report_menu_ = {
+    address_show,
+    call_graph_cutoff_choose,
+    counter_line_move,
+    heat_sort_toggle,
+    menu_key_handler,
+    menu_render,
+  };
+
+  activate();
+  window.report_frame_.activate();
+  dark_mode_toggle_query_apply();
+})();

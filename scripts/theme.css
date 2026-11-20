@@ -1,0 +1,518 @@
+/* SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+ * SPDX-License-Identifier: MIT
+ * This file is licensed under the terms of the LICENSE-MIT.md file. */
+
+*,
+::before,
+::after {
+  box-sizing: border-box;
+  font: inherit;
+  text-decoration: none;
+  outline: none;
+  border: 0;
+}
+[hidden] {
+  display: none !important;
+}
+* {
+  scrollbar-width: none;
+}
+::-webkit-scrollbar {
+  display: none;
+}
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+/* A scaled box draws from its top left, where its place starts. */
+html,
+#overview-home-,
+#overview-view-frame- {
+  transform-origin: 0 0;
+}
+/* No text is selected, so that a drag is free for other uses. */
+html {
+  -moz-user-select: none;
+  user-select: none;
+}
+/* The text a copy selects while it runs, out of the page's flow. */
+.copied-text- {
+  position: fixed;
+  white-space: pre;
+  -moz-user-select: text;
+  user-select: text;
+}
+body {
+  font-family: var(--page-font-family-);
+  font-size: calc(var(--design-font-size-px-) * var(--design-font-fit-));
+  line-height: var(--page-body-line-height-);
+  height: var(--design-viewport-height-);
+}
+pre {
+  margin: 0;
+  white-space: pre;
+}
+
+/* The top page: the page column, scrolled sideways, over its bar. */
+#overview- {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+#overview-page-scroll-box- {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* The menu's two lines, the preference strip beside the status line. */
+#overview-page- {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+}
+/* The home panel, a view across the page's columns. */
+#overview-home- {
+  grid-column: 1 / -1;
+}
+/* The home page column, as wide as its widest line, centred in its box. */
+#overview-home-text- > .page- {
+  width: -moz-max-content;
+  width: max-content;
+  margin-inline-start: auto;
+  margin-inline-end: auto;
+}
+#overview-view-frame- {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 100%;
+}
+
+/* A view: the scrolled page beside its bar, over the sideways bar's row. */
+.view- {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) [sideways-bar-] auto;
+}
+.view- > main {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+/* The sideways bar keeps its row while the bar beside the page hides. */
+.view- > .text-scrollbar-.horizontal- {
+  grid-row: sideways-bar-;
+}
+
+/* The page is as wide as the graph, so the heading sticks on both axes. */
+#call-graph-page- > .page- {
+  min-width: -moz-max-content;
+  min-width: max-content;
+}
+/* The heading and the table's clear top border, now its own, stay in view. */
+#call-graph-page- .page-heading- {
+  position: sticky;
+  top: 0;
+  left: var(--page-inset-inline-);
+  z-index: var(--call-graph-heading-z-index-);
+  width: calc(var(--call-graph-page-width-) - 2 * var(--page-inset-inline-));
+  border-bottom: var(--call-graph-border-width-) solid transparent;
+}
+/* The call graph table, as wide as its longest row, in its clear border. */
+#call-graph-table- {
+  position: relative;
+  isolation: isolate;
+  width: -moz-max-content;
+  width: max-content;
+  border: var(--call-graph-border-width-) solid transparent;
+  border-top: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  white-space: pre;
+}
+#call-graph-table- td {
+  padding: 0;
+}
+/* The head row's columns color the whole table, so the head stays unpinned. */
+#call-graph-table- > thead {
+  position: static;
+}
+/* A share or multiple sits right, so each lines up with those above it. */
+#call-graph-table- .call-graph-share-,
+#call-graph-table- .call-graph-multiple- {
+  text-align: right;
+}
+/* A symbol button has no room of its own, its template's spaces inside it. */
+#call-graph-table- .menu-button- {
+  padding: 0;
+}
+/* A cell taking a symbol's click shows the pointer, as the symbol does. */
+#call-graph-table- td.clickable- {
+  cursor: pointer;
+}
+/* A hovered row's frame draws over the symbol buttons it crosses. */
+#call-graph-table-::before {
+  z-index: var(--call-graph-hover-row-z-index-);
+}
+
+/* The database page grows with its table, so the bars redraw as it widens. */
+#database-page- > .page- {
+  min-width: -moz-max-content;
+  min-width: max-content;
+}
+
+/* Hottest lines over the main column, both rows as wide as the page. */
+#heat-map- {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+/* The main column: the main box under its edge, over its sideways bar. */
+#heat-map-main-column- {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+}
+/* The main box sizes the tree that hangs in it. */
+#heat-map-main- {
+  grid-area: 1 / 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+/* The minimap against the main box's bar, both over the box's right edge. */
+#heat-map-main-edge- {
+  grid-area: 1 / 1;
+  justify-self: end;
+  z-index: var(--heat-map-main-edge-z-index-);
+  display: flex;
+}
+/* A source under a shown minimap ends past it, so a scroll shows its end. */
+#heat-map-main-column-:not(.minimap-empty-) .heat-map-source- {
+  width: -moz-fit-content;
+  width: fit-content;
+  padding-inline-end: calc(
+    var(--heat-map-minimap-width-) +
+      var(--page-text-scrollbar-vertical-width-) *
+      var(--page-text-scrollbar-vertical-font-multiple-)
+  );
+}
+/* The tree's title is as wide as the tree, which hangs below it in view. */
+.heat-map-source-table- > thead > tr > th:first-child,
+.heat-map-source-table- > tbody > tr > th:first-child {
+  min-width: var(--heat-map-tree-width-);
+}
+/* The tree beside its bar, down to the main box bottom while titles stick. */
+.heat-map-tree-track- {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
+  height: calc(var(--heat-map-main-height-) - 100%);
+}
+/* The tree's box, cutting off the scrollbar of a browser drawing one. */
+.heat-map-tree-clip-box- {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  overflow: clip;
+}
+#heat-map-tree- {
+  overflow-x: hidden;
+  overflow-y: scroll;
+}
+
+/* No top inset, as the status bar's half line gap is the room over a page. */
+.page- {
+  padding: 0 var(--page-inset-inline-) var(--page-inset-block-);
+}
+.page-emphasis-,
+.strip-label- {
+  display: inline-block;
+  padding: 0 var(--page-emphasis-padding-inline-);
+  white-space: pre;
+}
+
+/* A character in one page character's room, whatever font draws it. */
+.character-cell- {
+  display: inline-block;
+  width: 1ch;
+}
+
+/* A strip: a line of buttons, a status line under the menu's. */
+.strip-line- {
+  white-space: pre;
+}
+#menu- {
+  display: contents;
+}
+/* The menu line: the logo at the left, the other buttons at the right. */
+#menu- > .strip-line- {
+  grid-column: 1 / -1;
+  margin-top: var(--menu-strip-blank-line-height-);
+  padding-right: var(--menu-strip-padding-right-);
+  text-align: right;
+}
+/* Its buttons keep their own text, pulldowns among them, left aligned. */
+#menu- > .strip-line- > .menu-button- {
+  text-align: left;
+}
+#menu- .menu-status-bar-,
+#menu-preference- {
+  margin-block-start: var(--menu-strip-blank-line-height-);
+  margin-block-end: var(--menu-strip-blank-line-height-);
+}
+#menu-preference- {
+  padding-right: var(--menu-strip-padding-right-);
+}
+/* The status line, cut at its column, so a long one never widens the page. */
+#menu- .menu-status-bar- {
+  overflow: hidden;
+}
+/* A button on its line's top, its pulldown hung from the box. */
+.menu-button- {
+  position: relative;
+  vertical-align: top;
+  padding: 0 var(--menu-button-padding-inline-);
+  white-space: pre;
+}
+[data-entry-name-="str_report_name"] {
+  float: left;
+  padding-inline-end: 0;
+}
+.menu-button-[tabindex],
+.menu-button-widget- {
+  cursor: pointer;
+}
+/* A widget's glyphs, taller than a line, clipped to its button. */
+.menu-button-widget- {
+  display: inline-block;
+  vertical-align: top;
+  height: inherit;
+  overflow: hidden;
+  overflow: clip;
+  touch-action: none;
+}
+.menu-status-bar- {
+  margin-left: var(--menu-status-bar-padding-left-);
+  margin-right: var(--menu-status-bar-padding-right-);
+  white-space: pre;
+}
+/* The search, label and placeholder share one place the last two size. */
+.menu-text-box- {
+  display: inline-grid;
+}
+.menu-text-box- > * {
+  grid-area: 1 / 1;
+}
+/* A search past its box shows its end, its start cut. */
+.menu-search-box- {
+  display: flex;
+  justify-content: flex-end;
+  width: 0;
+  min-width: 100%;
+  overflow: hidden;
+  overflow: clip;
+}
+/* A search that fits starts at the box start. */
+.menu-search-box-::after {
+  content: "";
+  flex-grow: 1;
+}
+/* A shown search hides the label under it, the placeholder only sizing. */
+.menu-search-box-:not([hidden]) ~ *,
+.menu-placeholder-box- {
+  visibility: hidden;
+}
+.menu-pulldown-entry-box- {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--menu-pulldown-entry-list-z-index-);
+  display: flex;
+  min-width: 100%;
+  max-height: calc(
+    var(--menu-pulldown-entry-list-max-height-share-) *
+      var(--design-viewport-height-)
+  );
+}
+.menu-pulldown-entry-list- {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+}
+/* An entry clips its text box that overhangs its line, so a fit list fits. */
+.menu-pulldown-entry-list- > * {
+  flex: none;
+  overflow-y: hidden;
+  overflow-y: clip;
+  padding: 0 var(--menu-pulldown-entry-padding-inline-);
+}
+
+/* A table: each column as wide as its text or a drag, titles in view. */
+table.table- {
+  position: relative;
+  border-collapse: collapse;
+}
+.table- th,
+.table- td {
+  padding: 0 var(--page-table-cell-padding-inline-);
+  white-space: pre;
+  text-align: left;
+  vertical-align: top;
+}
+.table- th {
+  position: sticky;
+  top: 0;
+  z-index: var(--page-table-title-z-index-);
+}
+/* A chunked table's titles and each chunk lay out as tables of their own. */
+table.table-chunked- {
+  display: block;
+  width: -moz-max-content;
+  width: max-content;
+}
+table.table-chunked- > thead {
+  display: table;
+  position: sticky;
+  top: 0;
+  z-index: var(--page-table-title-z-index-);
+}
+/* A chunk out of view is skipped, its lines as high as they draw. */
+table.table-chunked- > tbody {
+  display: block;
+  content-visibility: auto;
+  contain-intrinsic-block-size: calc(
+    var(--table-chunk-rows-) * var(--table-chunk-line-height-)
+  );
+  /* A line's glyphs and frame lines cross its edge, as in a plain table. */
+  overflow-clip-margin: var(--page-line-height-);
+}
+/* A chunk waiting for its rows is as high as its lines draw, drawing none. */
+table.table-chunked- > tbody.table-chunk-deferred- {
+  height: calc(var(--table-chunk-rows-) * var(--table-chunk-line-height-));
+}
+/* A hovered row's frame draws over the chunks and cells it crosses. */
+table.table-::before {
+  z-index: var(--page-table-hover-row-z-index-);
+}
+/* A sizer row widens each column as wide as every chunk's, drawn nowhere. */
+tr.table-sizer-row- {
+  visibility: collapse;
+}
+/* Its boxes hide, not collapse, as Firefox drops a collapsed flex item. */
+tr.table-sizer-row- * {
+  visibility: hidden;
+}
+.table- .numeric- {
+  text-align: right;
+}
+tr.row-link- {
+  cursor: pointer;
+}
+/* A cell whose right edge the pointer may drag shows the cursor. */
+.table- th.column-edge-grab-,
+.table- td.column-edge-grab-,
+.table- th.column-edge-grab- *,
+.table- td.column-edge-grab- * {
+  cursor: col-resize;
+}
+/* A tool tip, wrapped, its place under its cell set as it shows. */
+.menu-button-.tool-tip- {
+  position: fixed;
+  z-index: var(--page-tool-tip-z-index-);
+  width: -moz-max-content;
+  width: max-content;
+  max-width: var(--page-tool-tip-max-width-);
+  height: auto;
+  white-space: normal;
+  pointer-events: none;
+}
+/* An open pulldown hides the tool tip, its list shown in its place. */
+body.holds-open-pulldown- > .tool-tip- {
+  display: none;
+}
+/* The frame's box is always made, as making it on hover rebuilds the table. */
+table.table-::before,
+#call-graph-table-::before {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+/* A hovered row's frame, its sides on the row's sides, its bottom below. */
+table.table-.row-hovered-::before,
+#call-graph-table-.row-hovered-::before {
+  top: var(--table-hover-row-top-);
+  left: var(--table-hover-row-left-);
+  right: var(--table-hover-row-right-);
+  bottom: calc(var(--table-hover-row-bottom-) - var(--page-line-width-));
+  border-style: solid;
+  border-width: var(--page-line-width-);
+}
+
+/* A link or button is one line high, its text set on the box bottom. */
+.page- a,
+.heat-map-source- a,
+.menu-button- {
+  display: inline-flex;
+  align-items: flex-end;
+  height: var(--page-line-height-);
+}
+/* The raw data link takes a column cell's side room around its name. */
+#overview-raw-data- > a {
+  padding: 0 var(--page-table-cell-padding-inline-);
+}
+
+/* A text scrollbar: one cell per character, its characters design scaled. */
+.text-scrollbar- {
+  display: flex;
+  contain: size;
+  overflow: hidden;
+  overflow: clip;
+  white-space: pre;
+  touch-action: none;
+}
+.text-scrollbar-.horizontal- {
+  font-size: calc(
+    var(--design-font-size-px-) * var(--design-font-fit-) *
+      var(--page-text-scrollbar-horizontal-font-multiple-)
+  );
+  height: var(--page-text-scrollbar-horizontal-height-);
+}
+.text-scrollbar-.vertical- {
+  flex-direction: column;
+  font-size: calc(
+    var(--design-font-size-px-) * var(--design-font-fit-) *
+      var(--page-text-scrollbar-vertical-font-multiple-)
+  );
+  width: var(--page-text-scrollbar-vertical-width-);
+}
+/* The forward chevron sits at the bar's end, past the room of a part cell. */
+.text-scrollbar-.horizontal- > :last-child:not(:first-child) {
+  margin-left: auto;
+}
+.text-scrollbar-.vertical- > :last-child:not(:first-child) {
+  margin-top: auto;
+}
+/* A bar whose target shows all it holds takes no room. */
+.text-scrollbar-.target-fits- {
+  display: none;
+}
+/* The top page's bar takes no room while a view's bar holds its scroll. */
+.text-scrollbar-.lent-to-view- {
+  display: none;
+}
+
+.screenshot- {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  z-index: var(--screenshot-z-index-);
+  max-width: 100%;
+  overflow: hidden;
+  white-space: pre;
+}
